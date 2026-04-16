@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --rs-blue-logo: #1E3A6B;
+  --rs-blue-fusion: #496275;
+  --rs-cream: #FBF5E4;
+  --rs-cream-full: #F6EBC8;
+  --rs-ink: #1a1a1a;
+}
+
+html,
+body {
+  background: var(--rs-blue-fusion);
+  color: var(--rs-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+.rs-surface {
+  background: var(--rs-cream);
+}
+
+.rs-bg-fusion {
+  background: var(--rs-blue-fusion);
+  color: var(--rs-cream);
+}
+
+.rs-card {
+  background: #ffffff;
+  border-radius: 14px;
+  border: 0.5px solid rgba(30, 58, 107, 0.1);
+}
+
+.rs-btn {
+  background: var(--rs-blue-logo);
+  color: var(--rs-cream);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 11px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: opacity 0.15s;
+}
+
+.rs-btn:hover {
+  opacity: 0.9;
+}
+
+.rs-btn:active {
+  transform: scale(0.98);
+}
+
+.rs-btn-cream {
+  background: var(--rs-cream);
+  color: var(--rs-blue-logo);
+}
+
+.rs-btn-ghost {
+  background: transparent;
+  color: var(--rs-blue-logo);
+  border: 0.5px solid rgba(30, 58, 107, 0.25);
+}
