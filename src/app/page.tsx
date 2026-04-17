@@ -1,7 +1,18 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
+import { createClient } from '@/lib/supabase-server'
 
-export default function Home() {
+export default async function Home() {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (user) {
+    redirect('/app')
+  }
+
   return (
     <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
       <div className="flex flex-col items-center gap-5 mb-10">
