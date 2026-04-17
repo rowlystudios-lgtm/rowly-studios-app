@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import Link from 'next/link'
-import { DEPARTMENT_LABELS } from '@/lib/types'
+import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 function formatRate(cents: number | null) {
   if (!cents) return '—'
@@ -50,7 +50,7 @@ export default async function ProfilePage() {
           </h1>
           <p className="text-[12px] text-rs-blue-fusion font-medium mt-1">
             {talent?.primary_role || 'Add your role'}
-            {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department]}`}
+          {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department as Department]}`}
           </p>
           <p className="text-[11px] text-rs-blue-fusion/60 mt-1">{profile?.email}</p>
           {profile?.verified && (
