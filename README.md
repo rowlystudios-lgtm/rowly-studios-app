@@ -1,4 +1,4 @@
-# Rowly Studios App
+# Rowly Studios App 
 
 Talent and client activity center. Next.js 14 + Supabase + Vercel PWA.
 
