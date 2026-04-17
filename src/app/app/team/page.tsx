@@ -66,7 +66,7 @@ export default async function TeamPage() {
                   </div>
                   <p className="text-[11px] text-rs-blue-fusion/70 font-medium truncate mt-0.5">
                     {talent?.primary_role || 'Role not set'}
-                    {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department]}`}
+                    {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department as Department]}`}
                   </p>
                 </div>
               </div>
