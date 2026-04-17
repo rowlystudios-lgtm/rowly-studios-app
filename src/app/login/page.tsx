@@ -1,21 +1,36 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
 import { createClient } from '@/lib/supabase-browser'
 
 export default function LoginPage() {
+  const router = useRouter()
+  const supabase = createClient()
   const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error' | 'checking'>('checking')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // If already signed in, skip straight to the app
+  useEffect(() => {
+    async function check() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        router.replace('/app')
+      } else {
+        setStatus('idle')
+      }
+    }
+    check()
+  }, [router, supabase])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setStatus('sending')
     setErrorMsg('')
 
-    const supabase = createClient()
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -25,10 +40,22 @@ export default function LoginPage() {
 
     if (error) {
       setStatus('error')
-      setErrorMsg(error.message)
+      if (error.message.toLowerCase().includes('rate limit') || error.message.includes('429')) {
+        setErrorMsg('You\'ve requested a link recently — please wait 60 seconds and try again, or check your inbox for the previous link.')
+      } else {
+        setErrorMsg(error.message)
+      }
     } else {
       setStatus('sent')
     }
+  }
+
+  if (status === 'checking') {
+    return (
+      <main className="min-h-[100dvh] flex items-center justify-center rs-bg-fusion">
+        <RSLogo size={48} />
+      </main>
+    )
   }
 
   return (
@@ -47,11 +74,18 @@ export default function LoginPage() {
               Check your inbox
             </p>
             <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-              We sent a magic link to <strong>{email}</strong>. Tap it on your phone
-              to sign in.
+              We sent a magic link to <strong>{email}</strong>. Tap it on this device
+              to sign in — it&apos;ll open the app directly.
+            </p>
+            <p className="text-[11px] text-rs-blue-fusion/60 leading-relaxed pt-2">
+              Tip: open the link on whichever device you want to use the app on.
+              It only works once and expires after 1 hour.
             </p>
             <button
-              onClick={() => setStatus('idle')}
+              onClick={() => {
+                setStatus('idle')
+                setEmail('')
+              }}
               className="text-[11px] uppercase tracking-wider text-rs-blue-fusion/70 underline mt-4"
             >
               Use a different email
@@ -70,6 +104,7 @@ export default function LoginPage() {
               placeholder="you@email.com"
               className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
               disabled={status === 'sending'}
+              autoComplete="email"
             />
             <button
               type="submit"
@@ -79,7 +114,7 @@ export default function LoginPage() {
               {status === 'sending' ? 'Sending…' : 'Send magic link'}
             </button>
             {status === 'error' && (
-              <p className="text-[11px] text-red-700 pt-1">{errorMsg}</p>
+              <p className="text-[11px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
             )}
             <p className="text-[11px] text-rs-blue-fusion/70 text-center pt-3 leading-relaxed">
               No passwords. We&apos;ll email you a secure link to sign in.
