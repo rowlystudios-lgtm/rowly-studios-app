@@ -42,8 +42,12 @@ export default async function TeamPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {list.map((m) => {
-            const talent = (m.talent_profiles as { department: Department | null; primary_role: string | null } | null) ?? null
+         {list.map((m) => {
+            const profilesArray = (m.talent_profiles as unknown) as Array<{
+              department: Department | null
+              primary_role: string | null
+            }> | null
+            const talent = profilesArray?.[0] ?? null
             const isMe = m.id === user?.id
             return (
               <div
