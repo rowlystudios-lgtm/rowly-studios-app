@@ -47,6 +47,8 @@ body {
   padding: 10px 14px;
   border-radius: 10px;
   transition: opacity 0.15s;
+  display: inline-block;
+  text-align: center;
 }
 
 .rs-btn:hover {
@@ -66,4 +68,26 @@ body {
   background: transparent;
   color: var(--rs-blue-logo);
   border: 0.5px solid rgba(30, 58, 107, 0.25);
+}
+
+.rs-input {
+  width: 100%;
+  background: #ffffff;
+  border: 0.5px solid rgba(30, 58, 107, 0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--rs-ink);
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.rs-input:focus {
+  outline: none;
+  border-color: var(--rs-blue-logo);
+  border-width: 1px;
+}
+
+.rs-input::placeholder {
+  color: rgba(73, 98, 117, 0.4);
 }

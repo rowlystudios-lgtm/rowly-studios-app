@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase-server'
-import { redirect } from 'next/navigation'
-import { RSLogo } from '@/components/RSLogo'
+import Link from 'next/link'
 
 export default async function AppHome() {
   const supabase = createClient()
@@ -8,52 +7,73 @@ export default async function AppHome() {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect('/login')
-  }
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user!.id)
+    .maybeSingle()
+
+  const { data: talentProfile } = await supabase
+    .from('talent_profiles')
+    .select('*')
+    .eq('id', user!.id)
+    .maybeSingle()
+
+  const firstName = profile?.full_name?.split(' ')[0] ?? 'there'
+
+  const profileComplete = Boolean(
+    talentProfile?.department && talentProfile?.primary_role && talentProfile?.day_rate_cents
+  )
 
   return (
-    <main className="min-h-[100dvh] rs-bg-fusion">
-      <header className="flex items-center justify-between px-5 py-4">
-        <div className="flex items-center gap-2">
-          <RSLogo size={28} />
-          <span className="text-[11px] font-semibold tracking-[1.5px] text-rs-cream uppercase">
-            Rowly Studios
-          </span>
-        </div>
-        <form action="/auth/signout" method="post">
-          <button
-            type="submit"
-            className="text-[10px] uppercase tracking-wider text-rs-cream/60"
+    <main className="px-5 py-6 max-w-md mx-auto">
+      <h1 className="text-[22px] font-semibold text-rs-blue-logo">Morning, {firstName}</h1>
+      <p className="text-[11px] uppercase tracking-widest text-rs-blue-fusion/60 font-semibold mt-1 mb-6">
+        0 upcoming jobs
+      </p>
+
+      {!profileComplete && (
+        <div className="bg-[#F6EBC8] border border-[#8a6f1a]/20 rounded-rs p-4 mb-5">
+          <p className="text-[10px] uppercase tracking-wider text-[#8a6f1a] font-semibold">
+            Complete your profile
+          </p>
+          <p className="text-[13px] text-rs-blue-fusion mt-1 leading-relaxed">
+            Add your role, rate, and showreel so clients can see you and request bookings.
+          </p>
+          <Link
+            href="/app/profile/edit"
+            className="rs-btn mt-3 inline-block"
           >
-            Sign out
-          </button>
-        </form>
-      </header>
-
-      <div className="rs-surface min-h-[calc(100dvh-64px)] rounded-t-rs-lg px-5 py-8">
-        <div className="max-w-md mx-auto">
-          <p className="text-[11px] uppercase tracking-wider text-rs-blue-fusion font-semibold">
-            Signed in as
-          </p>
-          <p className="text-[15px] font-semibold text-rs-blue-logo mt-1">
-            {user.email}
-          </p>
-
-          <div className="mt-8 rs-card p-5 space-y-2">
-            <p className="text-sm font-semibold text-rs-blue-logo">
-              Welcome to the beta
-            </p>
-            <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-              Your account is active. More features are rolling out over the coming
-              weeks — calendar, jobs, and team roster land next.
-            </p>
-          </div>
-
-          <p className="text-[10px] tracking-widest uppercase text-rs-blue-fusion/40 text-center mt-12">
-            v0.1 · Week 1 · Day 1
-          </p>
+            Set up profile
+          </Link>
         </div>
+      )}
+
+      <div className="bg-white rounded-rs p-5 border border-rs-blue-fusion/10">
+        <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
+          Your jobs dashboard is ready. Once clients request you, or admin confirms a booking,
+          those jobs will appear here.
+        </p>
+      </div>
+
+      <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/50 font-semibold mt-6 mb-2">
+        Next steps
+      </p>
+      <div className="space-y-2">
+        <Link
+          href="/app/profile"
+          className="block bg-white rounded-rs p-3 border border-rs-blue-fusion/10 hover:border-rs-blue-fusion/30"
+        >
+          <p className="text-[13px] font-semibold text-rs-blue-logo">View your profile</p>
+          <p className="text-[11px] text-rs-blue-fusion/60 mt-0.5">See what clients see</p>
+        </Link>
+        <Link
+          href="/app/calendar"
+          className="block bg-white rounded-rs p-3 border border-rs-blue-fusion/10 hover:border-rs-blue-fusion/30"
+        >
+          <p className="text-[13px] font-semibold text-rs-blue-logo">Mark availability</p>
+          <p className="text-[11px] text-rs-blue-fusion/60 mt-0.5">Tell clients which days you're free</p>
+        </Link>
       </div>
     </main>
   )
