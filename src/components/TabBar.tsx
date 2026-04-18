@@ -28,14 +28,12 @@ const TABS: Record<UserRole, { href: string; label: string; icon: React.ReactNod
       ),
     },
     {
-      href: '/app/team',
-      label: 'Team',
+      href: '/app/history',
+      label: 'History',
       icon: (
-        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
-          <circle cx="8" cy="8" r="3" />
-          <path d="M2 19a6 6 0 0112 0" />
-          <circle cx="16" cy="9" r="2.5" />
-          <path d="M14 19a5 5 0 016-5" />
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+          <circle cx="11" cy="11" r="8" />
+          <polyline points="11 6 11 11 14 13" />
         </svg>
       ),
     },
@@ -53,13 +51,13 @@ const TABS: Record<UserRole, { href: string; label: string; icon: React.ReactNod
   client: [
     { href: '/app', label: 'Dashboard', icon: null },
     { href: '/app/calendar', label: 'Calendar', icon: null },
-    { href: '/app/team', label: 'Team', icon: null },
+    { href: '/app/history', label: 'History', icon: null },
     { href: '/app/profile', label: 'Profile', icon: null },
   ],
   admin: [
     { href: '/app', label: 'Overview', icon: null },
     { href: '/app/calendar', label: 'Calendar', icon: null },
-    { href: '/app/team', label: 'Team', icon: null },
+    { href: '/app/history', label: 'History', icon: null },
     { href: '/app/profile', label: 'Profile', icon: null },
   ],
 }
