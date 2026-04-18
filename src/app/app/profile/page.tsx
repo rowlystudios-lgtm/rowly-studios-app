@@ -12,14 +12,13 @@ const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170, 189, 224, 0.2)'
 const TEXT_PRIMARY = '#FFFFFF'
 const TEXT_MUTED = '#AABDE0'
-const SHOWREEL_BG = '#2E5099'
 const AVAILABLE_GREEN = '#4ade80'
 const BUTTON_PRIMARY = '#1A3C6B'
 const LINK = '#AABDE0'
 
-function formatRate(cents: number | null | undefined): string {
+function formatMoney(cents: number | null | undefined): string {
   if (!cents) return '—'
-  return `$${(cents / 100).toLocaleString()} / day`
+  return `$${(cents / 100).toLocaleString()}`
 }
 
 function fullName(
@@ -30,6 +29,11 @@ function fullName(
     .filter(Boolean)
     .join(' ')
   return joined || profile.full_name || 'Your name'
+}
+
+function getVimeoId(url: string): string | null {
+  const match = url.match(/vimeo\.com\/(?:video\/|channels\/\w+\/)?(\d+)/)
+  return match ? match[1] : null
 }
 
 function Spinner({ size = 14, color = TEXT_PRIMARY }: { size?: number; color?: string }) {
@@ -61,10 +65,9 @@ export default function ProfilePage() {
   const talent = profile?.talent_profiles?.[0] ?? null
 
   const displayName = fullName(profile)
-  const department = talent?.department
+  const departmentLabel = talent?.department
     ? DEPARTMENT_LABELS[talent.department as Department]
     : null
-  const subHeader = [department, profile?.city].filter(Boolean).join(' · ')
 
   return (
     <main
@@ -80,20 +83,21 @@ export default function ProfilePage() {
           <Link
             href="/app/profile/edit"
             className="text-[11px] uppercase tracking-wider underline"
-            style={{ color: TEXT_MUTED }}
+            style={{ color: LINK }}
           >
             Edit profile
           </Link>
         </div>
 
-        <div className="flex flex-col items-center text-center mb-8">
+        {/* Header */}
+        <div className="flex flex-col items-center text-center mb-6">
           <Avatar url={profile?.avatar_url ?? null} name={displayName} size={96} />
           <h1 className="text-[24px] font-bold mt-4 leading-tight" style={{ color: TEXT_PRIMARY }}>
             {displayName}
           </h1>
-          {subHeader && (
+          {profile?.city && (
             <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
-              {subHeader}
+              {profile.city}
             </p>
           )}
           {profile?.phone && (
@@ -111,99 +115,85 @@ export default function ProfilePage() {
           )}
         </div>
 
+        {/* Department */}
+        <Card>
+          <FieldLabel>Department</FieldLabel>
+          <p className="text-[16px] font-semibold mt-1" style={{ color: TEXT_PRIMARY }}>
+            {departmentLabel ?? <Muted>Not set</Muted>}
+          </p>
+        </Card>
+
+        {/* Rates */}
         <Card>
           <div className="grid grid-cols-2" style={{ gap: 0 }}>
             <div className="pr-4">
-              <p
-                className="text-[10px] uppercase tracking-wider font-semibold mb-1"
-                style={{ color: TEXT_MUTED }}
-              >
-                Day Rate
-              </p>
-              <p className="text-[18px] font-bold" style={{ color: TEXT_PRIMARY }}>
-                {formatRate(talent?.day_rate_cents)}
+              <FieldLabel>Day Rate</FieldLabel>
+              <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
+                {formatMoney(talent?.day_rate_cents)}
               </p>
             </div>
-            <div
-              className="pl-4"
-              style={{ borderLeft: `1px solid ${CARD_BORDER}` }}
-            >
-              <p
-                className="text-[10px] uppercase tracking-wider font-semibold mb-1"
-                style={{ color: TEXT_MUTED }}
-              >
-                Floor
-              </p>
-              <p className="text-[18px] font-bold" style={{ color: TEXT_PRIMARY }}>
-                {formatRate(talent?.rate_floor_cents)}
+            <div className="pl-4" style={{ borderLeft: `1px solid ${CARD_BORDER}` }}>
+              <FieldLabel>Rate Floor</FieldLabel>
+              <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
+                {formatMoney(talent?.rate_floor_cents)}
               </p>
             </div>
           </div>
         </Card>
 
-        <SectionHeader>Availability</SectionHeader>
-        <AvailabilitySection
+        {/* Equipment */}
+        <Card>
+          <FieldLabel>Equipment</FieldLabel>
+          {talent?.equipment ? (
+            <p
+              className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
+              style={{ color: TEXT_PRIMARY }}
+            >
+              {talent.equipment}
+            </p>
+          ) : (
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+              No equipment listed
+            </p>
+          )}
+        </Card>
+
+        {/* Availability */}
+        <AvailabilityCard
           userId={user?.id ?? null}
           available={profile?.available ?? true}
           supabase={supabase}
           onChange={(val) => updateProfile({ available: val })}
         />
 
-        <SectionHeader>Showreel</SectionHeader>
-        {talent?.showreel_url ? (
-          <a
-            href={talent.showreel_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-[14px] p-4 mb-6 transition-opacity hover:opacity-90"
-            style={{ background: SHOWREEL_BG, color: '#ffffff', border: `1px solid ${CARD_BORDER}` }}
-          >
-            <span
-              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(255,255,255,0.15)' }}
-            >
-              <PlayIcon className="w-3.5 h-3.5" />
-            </span>
-            <span className="flex-1 text-[13px] font-semibold uppercase tracking-wider">
-              View showreel
-            </span>
-            <span className="text-[16px]" aria-hidden>
-              →
-            </span>
-          </a>
-        ) : (
-          <Card className="mb-6">
-            <p className="text-[13px]" style={{ color: TEXT_MUTED }}>
-              No showreel added yet
-            </p>
-            <Link
-              href="/app/profile/edit"
-              className="inline-block mt-1 text-[11px] uppercase tracking-wider underline"
-              style={{ color: LINK }}
-            >
-              Add in Edit Profile →
-            </Link>
-          </Card>
-        )}
-
-        <SectionHeader>About</SectionHeader>
-        <Card className="mb-6">
+        {/* About */}
+        <Card>
+          <FieldLabel>About</FieldLabel>
           {talent?.bio ? (
             <p
-              className="text-[14px] leading-relaxed whitespace-pre-wrap"
+              className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
               style={{ color: TEXT_PRIMARY }}
             >
               {talent.bio}
             </p>
           ) : (
-            <p className="text-[13px]" style={{ color: TEXT_MUTED }}>
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
               No bio added yet
             </p>
           )}
         </Card>
 
+        {/* Showreel */}
+        <ShowreelBlock url={talent?.showreel_url ?? null} />
+
+        {/* Account & Security */}
         <div style={{ borderTop: `1px solid ${CARD_BORDER}` }} className="mt-10 pt-6">
-          <SectionHeader>Account &amp; Security</SectionHeader>
+          <p
+            className="text-[10px] uppercase tracking-wider font-semibold mb-2"
+            style={{ color: TEXT_MUTED }}
+          >
+            Account &amp; Security
+          </p>
           <ChangePasswordSection
             email={profile?.email ?? user?.email ?? null}
             supabase={supabase}
@@ -214,10 +204,27 @@ export default function ProfilePage() {
   )
 }
 
-function SectionHeader({ children }: { children: React.ReactNode }) {
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        borderRadius: 12,
+        padding: '16px 20px',
+        marginBottom: 12,
+        color: TEXT_PRIMARY,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <p
-      className="text-[10px] uppercase tracking-wider font-semibold mt-6 mb-2"
+      className="text-[10px] uppercase tracking-wider font-semibold"
       style={{ color: TEXT_MUTED }}
     >
       {children}
@@ -225,20 +232,97 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function Muted({ children }: { children: React.ReactNode }) {
+  return <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>{children}</span>
+}
+
+function ShowreelBlock({ url }: { url: string | null }) {
+  if (!url) {
+    return (
+      <Card>
+        <FieldLabel>Showreel</FieldLabel>
+        <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+          No showreel added —{' '}
+          <Link href="/app/profile/edit" className="underline" style={{ color: LINK }}>
+            add in Edit Profile
+          </Link>
+        </p>
+      </Card>
+    )
+  }
+
+  const vimeoId = getVimeoId(url)
+
+  if (vimeoId) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div className="mb-2">
+          <FieldLabel>Showreel</FieldLabel>
+        </div>
+        <div
+          style={{
+            position: 'relative',
+            width: '100%',
+            paddingBottom: '125%',
+            borderRadius: 12,
+            overflow: 'hidden',
+            background: '#000',
+            border: `1px solid ${CARD_BORDER}`,
+          }}
+        >
+          <iframe
+            src={`https://player.vimeo.com/video/${vimeoId}?autoplay=0&title=0&byline=0&portrait=0&dnt=1`}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+            allow="autoplay; fullscreen; picture-in-picture"
+            allowFullScreen
+            loading="lazy"
+            title="Showreel"
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Non-Vimeo (e.g. YouTube) — link card
   return (
-    <div
-      className={`rounded-[14px] p-4 ${className}`}
-      style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-3 rounded-[12px] p-4 transition-opacity hover:opacity-90"
+      style={{
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        color: TEXT_PRIMARY,
+        marginBottom: 12,
+      }}
     >
-      {children}
-    </div>
+      <span
+        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ background: 'rgba(255,255,255,0.15)' }}
+      >
+        <PlayIcon className="w-3.5 h-3.5" />
+      </span>
+      <span className="flex-1 text-[13px] font-semibold uppercase tracking-wider">
+        View showreel
+      </span>
+      <span className="text-[16px]" aria-hidden>
+        →
+      </span>
+    </a>
   )
 }
 
 type AvailStatus = 'idle' | 'saving' | 'error'
 
-function AvailabilitySection({
+function AvailabilityCard({
   userId,
   available,
   supabase,
@@ -272,8 +356,9 @@ function AvailabilitySection({
   }
 
   return (
-    <Card className="mb-6">
-      <div className="flex items-center gap-3">
+    <Card>
+      <FieldLabel>Availability</FieldLabel>
+      <div className="flex items-center gap-3 mt-2">
         <span
           aria-hidden
           style={{
@@ -285,16 +370,9 @@ function AvailabilitySection({
             flexShrink: 0,
           }}
         />
-        <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-semibold" style={{ color: TEXT_PRIMARY }}>
-            {available ? 'Available' : 'Unavailable'}
-          </p>
-          <p className="text-[11px] mt-0.5" style={{ color: TEXT_MUTED }}>
-            {available
-              ? 'Clients can request you for new jobs.'
-              : 'You won’t appear to clients browsing talent.'}
-          </p>
-        </div>
+        <p className="text-[14px] font-semibold flex-1" style={{ color: TEXT_PRIMARY }}>
+          {available ? 'Available' : 'Unavailable'}
+        </p>
         <button
           type="button"
           onClick={toggle}
@@ -331,7 +409,9 @@ function AvailabilitySection({
         </button>
       </div>
       {status === 'error' && errorMsg && (
-        <p className="text-[11px] mt-3 text-red-400">{errorMsg}</p>
+        <p className="text-[11px] mt-3" style={{ color: '#fca5a5' }}>
+          {errorMsg}
+        </p>
       )}
     </Card>
   )
@@ -498,7 +578,7 @@ function ChangePasswordSection({
             />
           </div>
 
-          {errorMsg && <p className="text-[12px] text-red-400 leading-relaxed">{errorMsg}</p>}
+          {errorMsg && <p className="text-[12px] leading-relaxed" style={{ color: '#fca5a5' }}>{errorMsg}</p>}
 
           <div className="flex items-center gap-3 pt-1">
             <button
