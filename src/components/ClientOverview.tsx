@@ -22,11 +22,19 @@ type JobSummary = {
   num_talent: number | null
 }
 
+type ClientRow = {
+  company_name: string | null
+  bio: string | null
+}
+
 export function ClientOverview() {
   const { user, profile, supabase } = useAuth()
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [clientProfile, setClientProfile] = useState<ClientRow | null>(null)
+  const [clientLoading, setClientLoading] = useState(true)
+  const [setupDismissed, setSetupDismissed] = useState(false)
 
   const firstName =
     profile?.first_name ?? profile?.full_name?.split(' ')[0] ?? 'there'
@@ -38,20 +46,28 @@ export function ClientOverview() {
     let cancelled = false
 
     async function load() {
-      const { data, error } = await supabase
-        .from('jobs')
-        .select('id, title, start_date, end_date, location, status, num_talent')
-        .eq('client_id', uid)
-        .order('start_date', { ascending: false })
-        .limit(10)
+      const [jobsRes, clientRes] = await Promise.all([
+        supabase
+          .from('jobs')
+          .select('id, title, start_date, end_date, location, status, num_talent')
+          .eq('client_id', uid)
+          .order('start_date', { ascending: false })
+          .limit(10),
+        supabase
+          .from('client_profiles')
+          .select('company_name, bio')
+          .eq('id', uid)
+          .maybeSingle(),
+      ])
 
       if (cancelled) return
-      if (error) {
-        setError(error.message)
-        setLoading(false)
-        return
+      if (jobsRes.error) {
+        setError(jobsRes.error.message)
+      } else {
+        setJobs((jobsRes.data ?? []) as JobSummary[])
       }
-      setJobs((data ?? []) as JobSummary[])
+      setClientProfile((clientRes.data as ClientRow | null) ?? { company_name: null, bio: null })
+      setClientLoading(false)
       setLoading(false)
     }
 
@@ -60,6 +76,11 @@ export function ClientOverview() {
       cancelled = true
     }
   }, [user?.id, supabase])
+
+  const missing: string[] = []
+  if (!clientProfile?.company_name) missing.push('Company name')
+  if (!clientProfile?.bio) missing.push('About / bio')
+  const showSetup = !clientLoading && !setupDismissed && missing.length > 0
 
   return (
     <>
@@ -79,6 +100,120 @@ export function ClientOverview() {
           <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 2 }}>{today}</p>
         </div>
       </header>
+
+      {showSetup && (
+        <div
+          style={{
+            position: 'relative',
+            background: CARD_BG,
+            border: `1px solid rgba(170,189,224,0.2)`,
+            borderRadius: 14,
+            padding: '14px 16px',
+            marginBottom: 16,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setSetupDismissed(true)}
+            aria-label="Dismiss"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              width: 24,
+              height: 24,
+              borderRadius: 999,
+              background: 'transparent',
+              border: 'none',
+              color: TEXT_MUTED,
+              fontSize: 16,
+              lineHeight: 1,
+              cursor: 'pointer',
+            }}
+          >
+            ×
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span
+              aria-hidden
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 999,
+                background: 'rgba(170,189,224,0.15)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                color: '#fff',
+              }}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <rect x="3" y="6" width="18" height="14" rx="2" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            </span>
+            <p style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY }}>
+              Complete your profile
+            </p>
+          </div>
+          <p style={{ fontSize: 12, color: TEXT_MUTED, lineHeight: 1.5, marginBottom: 8 }}>
+            Add your company info so talent know who you are when you post a job.
+          </p>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {missing.map((m) => (
+              <li
+                key={m}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 12,
+                  color: TEXT_MUTED,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: '#AABDE0',
+                    flexShrink: 0,
+                  }}
+                />
+                {m}
+              </li>
+            ))}
+          </ul>
+          <Link
+            href="/app/account"
+            style={{
+              display: 'inline-block',
+              padding: '9px 14px',
+              borderRadius: 10,
+              background: '#fff',
+              color: '#1A3C6B',
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              textDecoration: 'none',
+            }}
+          >
+            Set up profile →
+          </Link>
+        </div>
+      )}
 
       <h2
         style={{
