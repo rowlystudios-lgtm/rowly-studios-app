@@ -22,6 +22,29 @@ type ClientRow = {
   website: string | null
   billing_email: string | null
   bio: string | null
+  entity_type: string | null
+}
+
+const ENTITY_LABELS: Record<string, string> = {
+  llc: 'LLC',
+  s_corp: 'S-Corp',
+  c_corp: 'C-Corp',
+  sole_proprietor: 'Sole Proprietor',
+  partnership: 'Partnership',
+  llp: 'LLP',
+  non_profit: 'Non-Profit',
+  other: 'Other',
+}
+
+function normaliseUrl(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
+function displayHost(url: string): string {
+  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '')
 }
 
 type ProfileRow = {
@@ -46,6 +69,7 @@ function emptyClient(): ClientRow {
     website: null,
     billing_email: null,
     bio: null,
+    entity_type: null,
   }
 }
 
@@ -70,7 +94,7 @@ export default function AccountPage() {
         .maybeSingle(),
       supabase
         .from('client_profiles')
-        .select('company_name, industry, website, billing_email, bio')
+        .select('company_name, industry, website, billing_email, bio, entity_type')
         .eq('id', userId)
         .maybeSingle(),
     ])
@@ -162,7 +186,8 @@ function ViewAccount({
     profile.full_name ||
     'Your name'
 
-  const subline = [profile.city, client.industry].filter(Boolean).join(' · ')
+  const entityLabel = client.entity_type ? ENTITY_LABELS[client.entity_type] ?? null : null
+  const subline = [entityLabel, profile.city, client.industry].filter(Boolean).join(' · ')
 
   const billingMatchesAccount =
     client.billing_email && profile.email
@@ -257,12 +282,12 @@ function ViewAccount({
           {client.website && (
             <ContactRow icon={<GlobeIcon />}>
               <a
-                href={/^https?:\/\//i.test(client.website) ? client.website : `https://${client.website}`}
+                href={normaliseUrl(client.website)}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: TEXT_PRIMARY, textDecoration: 'underline' }}
               >
-                {client.website}
+                {displayHost(client.website)}
               </a>
             </ContactRow>
           )}
@@ -392,6 +417,7 @@ type FormState = {
   phone: string
   city: string
   company_name: string
+  entity_type: string
   industry: string
   website: string
   billing_email: string
@@ -420,6 +446,7 @@ function EditAccount({
         ? initial.profile.city
         : 'Los Angeles',
     company_name: initial.client.company_name ?? '',
+    entity_type: initial.client.entity_type ?? '',
     industry: initial.client.industry ?? '',
     website: initial.client.website ?? '',
     billing_email: initial.client.billing_email ?? '',
@@ -531,12 +558,14 @@ function EditAccount({
       return
     }
 
+    const normalisedWebsite = normaliseUrl(form.website)
     const clientUpsert = await supabase.from('client_profiles').upsert(
       {
         id: userId,
         company_name: form.company_name.trim() || null,
+        entity_type: form.entity_type || null,
         industry: form.industry.trim() || null,
-        website: form.website.trim() || null,
+        website: normalisedWebsite || null,
         billing_email: form.billing_email.trim() || null,
         bio: form.bio.trim() || null,
       },
@@ -712,6 +741,23 @@ function EditAccount({
               autoComplete="organization"
             />
           </Field>
+          <Field label="Entity type">
+            <select
+              value={form.entity_type}
+              onChange={(e) => update('entity_type', e.target.value)}
+              className="rs-input"
+            >
+              <option value="">Select entity type…</option>
+              <option value="llc">LLC</option>
+              <option value="s_corp">S-Corp</option>
+              <option value="c_corp">C-Corp</option>
+              <option value="sole_proprietor">Sole Proprietor</option>
+              <option value="partnership">Partnership</option>
+              <option value="llp">LLP</option>
+              <option value="non_profit">Non-Profit</option>
+              <option value="other">Other</option>
+            </select>
+          </Field>
           <Field label="Industry">
             <input
               type="text"
@@ -723,11 +769,14 @@ function EditAccount({
           </Field>
           <Field label="Website">
             <input
-              type="url"
+              type="text"
               value={form.website}
               onChange={(e) => update('website', e.target.value)}
-              placeholder="https://"
+              placeholder="yourcompany.com"
               className="rs-input"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
             />
           </Field>
           <Field label="Billing email">
