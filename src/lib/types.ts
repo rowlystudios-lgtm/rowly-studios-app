@@ -8,6 +8,8 @@ export type Profile = {
   id: string
   email: string
   full_name: string | null
+  first_name: string | null
+  last_name: string | null
   role: UserRole
   phone: string | null
   city: string | null
@@ -26,6 +28,7 @@ export type TalentProfile = {
   bio: string | null
   day_rate_cents: number | null
   half_day_rate_cents: number | null
+  rate_floor_cents: number | null
   showreel_url: string | null
   equipment: string | null
   union_eligible: boolean | null
@@ -33,6 +36,19 @@ export type TalentProfile = {
   created_at: string
   updated_at: string
 }
+
+export const CITY_OPTIONS = [
+  'Los Angeles',
+  'New York',
+  'Atlanta',
+  'Austin',
+  'Nashville',
+  'Boston',
+  'San Francisco',
+  'Seattle',
+] as const
+
+export type City = (typeof CITY_OPTIONS)[number]
 
 export type Availability = {
   id: string

@@ -4,30 +4,34 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { CITY_OPTIONS, DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 type FormState = {
-  full_name: string
+  first_name: string
+  last_name: string
   phone: string
   city: string
   department: Department | ''
   primary_role: string
   bio: string
   day_rate: string
-  half_day_rate: string
+  rate_floor_cents: number
   showreel_url: string
   equipment: string
 }
 
+const DEFAULT_FLOOR = 450
+
 const INITIAL: FormState = {
-  full_name: '',
+  first_name: '',
+  last_name: '',
   phone: '',
   city: 'Los Angeles',
   department: '',
   primary_role: '',
   bio: '',
   day_rate: '',
-  half_day_rate: '',
+  rate_floor_cents: DEFAULT_FLOOR * 100,
   showreel_url: '',
   equipment: '',
 }
@@ -36,10 +40,13 @@ export default function EditProfilePage() {
   const router = useRouter()
   const { user, supabase, refresh } = useAuth()
   const userId = user?.id ?? null
+
   const [form, setForm] = useState<FormState>(INITIAL)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [editingReel, setEditingReel] = useState(false)
 
   useEffect(() => {
     if (!userId) return
@@ -51,20 +58,32 @@ export default function EditProfilePage() {
       ])
       if (cancelled) return
 
+      const firstName =
+        profile?.first_name ??
+        (profile?.full_name ? profile.full_name.split(' ')[0] : '') ??
+        ''
+      const lastName =
+        profile?.last_name ??
+        (profile?.full_name ? profile.full_name.split(' ').slice(1).join(' ') : '') ??
+        ''
+
       setForm({
-        full_name: profile?.full_name ?? '',
+        first_name: firstName,
+        last_name: lastName,
         phone: profile?.phone ?? '',
-        city: profile?.city ?? 'Los Angeles',
+        city:
+          profile?.city && (CITY_OPTIONS as readonly string[]).includes(profile.city)
+            ? profile.city
+            : 'Los Angeles',
         department: (talent?.department as Department) ?? '',
         primary_role: talent?.primary_role ?? '',
         bio: talent?.bio ?? '',
         day_rate: talent?.day_rate_cents ? String(talent.day_rate_cents / 100) : '',
-        half_day_rate: talent?.half_day_rate_cents
-          ? String(talent.half_day_rate_cents / 100)
-          : '',
+        rate_floor_cents: talent?.rate_floor_cents ?? DEFAULT_FLOOR * 100,
         showreel_url: talent?.showreel_url ?? '',
         equipment: talent?.equipment ?? '',
       })
+      setEditingReel(!talent?.showreel_url)
       setLoading(false)
     }
     load()
@@ -80,6 +99,7 @@ export default function EditProfilePage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setSaved(false)
     setError('')
 
     if (!userId) {
@@ -88,10 +108,16 @@ export default function EditProfilePage() {
       return
     }
 
+    const first = form.first_name.trim()
+    const last = form.last_name.trim()
+    const fullName = [first, last].filter(Boolean).join(' ') || null
+
     const profileUpdate = await supabase
       .from('profiles')
       .update({
-        full_name: form.full_name || null,
+        first_name: first || null,
+        last_name: last || null,
+        full_name: fullName,
         phone: form.phone || null,
         city: form.city || null,
       })
@@ -110,9 +136,7 @@ export default function EditProfilePage() {
         primary_role: form.primary_role || null,
         bio: form.bio || null,
         day_rate_cents: form.day_rate ? Math.round(parseFloat(form.day_rate) * 100) : null,
-        half_day_rate_cents: form.half_day_rate
-          ? Math.round(parseFloat(form.half_day_rate) * 100)
-          : null,
+        rate_floor_cents: form.rate_floor_cents,
         showreel_url: form.showreel_url || null,
         equipment: form.equipment || null,
       },
@@ -126,7 +150,9 @@ export default function EditProfilePage() {
     }
 
     await refresh()
-    router.push('/app/profile')
+    setSaving(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
   }
 
   if (loading) {
@@ -136,6 +162,11 @@ export default function EditProfilePage() {
       </main>
     )
   }
+
+  const rateFloorDollars = Math.round(form.rate_floor_cents / 100)
+  const sliderMin = 450
+  const sliderMax = 1000
+  const sliderPct = ((rateFloorDollars - sliderMin) / (sliderMax - sliderMin)) * 100
 
   return (
     <main className="px-5 py-6 max-w-md mx-auto">
@@ -152,16 +183,30 @@ export default function EditProfilePage() {
 
       <form onSubmit={handleSave} className="space-y-5">
         <Section title="About you">
-          <Field label="Full name">
-            <input
-              type="text"
-              value={form.full_name}
-              onChange={(e) => update('full_name', e.target.value)}
-              placeholder="Amelia Cross"
-              className="rs-input"
-              required
-            />
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="First name">
+              <input
+                type="text"
+                value={form.first_name}
+                onChange={(e) => update('first_name', e.target.value)}
+                placeholder="Amelia"
+                className="rs-input"
+                required
+                autoComplete="given-name"
+              />
+            </Field>
+            <Field label="Last name">
+              <input
+                type="text"
+                value={form.last_name}
+                onChange={(e) => update('last_name', e.target.value)}
+                placeholder="Cross"
+                className="rs-input"
+                required
+                autoComplete="family-name"
+              />
+            </Field>
+          </div>
           <Field label="Phone">
             <input
               type="tel"
@@ -169,15 +214,22 @@ export default function EditProfilePage() {
               onChange={(e) => update('phone', e.target.value)}
               placeholder="(310) 555-0100"
               className="rs-input"
+              autoComplete="tel"
             />
           </Field>
           <Field label="City">
-            <input
-              type="text"
+            <select
               value={form.city}
               onChange={(e) => update('city', e.target.value)}
               className="rs-input"
-            />
+              required
+            >
+              {CITY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </Field>
         </Section>
 
@@ -220,8 +272,18 @@ export default function EditProfilePage() {
 
         <Section title="Rates (USD)">
           <Field label="Day rate">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-rs-blue-fusion/50 text-[14px]">
+            <div style={{ position: 'relative' }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#888',
+                  pointerEvents: 'none',
+                  fontSize: 14,
+                }}
+              >
                 $
               </span>
               <input
@@ -230,40 +292,100 @@ export default function EditProfilePage() {
                 step="25"
                 value={form.day_rate}
                 onChange={(e) => update('day_rate', e.target.value)}
-                placeholder="850"
-                className="rs-input pl-7"
+                placeholder="0"
+                className="rs-input"
+                style={{ paddingLeft: 24 }}
               />
             </div>
           </Field>
-          <Field label="Half day rate">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-rs-blue-fusion/50 text-[14px]">
-                $
+
+          <div>
+            <div className="flex items-baseline justify-between">
+              <label className="block text-[11px] font-semibold text-rs-blue-fusion">
+                Rate floor
+              </label>
+              <span
+                className="text-[13px] font-bold"
+                style={{ color: '#1A3C6B' }}
+                aria-live="polite"
+              >
+                ${rateFloorDollars} / day
               </span>
-              <input
-                type="number"
-                min="0"
-                step="25"
-                value={form.half_day_rate}
-                onChange={(e) => update('half_day_rate', e.target.value)}
-                placeholder="550"
-                className="rs-input pl-7"
-              />
             </div>
-          </Field>
+            <p className="text-[11px] text-rs-blue-fusion/60 mt-1 mb-3 leading-relaxed">
+              Jobs posted below this rate won&apos;t show your profile to the client.
+            </p>
+            <input
+              type="range"
+              min={sliderMin}
+              max={sliderMax}
+              step={50}
+              value={rateFloorDollars}
+              onChange={(e) =>
+                update('rate_floor_cents', Math.round(parseInt(e.target.value, 10) * 100))
+              }
+              aria-label="Rate floor"
+              className="w-full rs-range"
+              style={
+                {
+                  ['--rs-range-pct' as string]: `${sliderPct}%`,
+                } as React.CSSProperties
+              }
+            />
+            <div className="flex justify-between text-[10px] text-rs-blue-fusion/50 font-semibold mt-1 uppercase tracking-wider">
+              <span>${sliderMin}</span>
+              <span>${sliderMax}</span>
+            </div>
+          </div>
         </Section>
 
-        <Section title="Showreel & gear">
-          <Field label="Showreel URL">
-            <input
-              type="url"
-              value={form.showreel_url}
-              onChange={(e) => update('showreel_url', e.target.value)}
-              placeholder="https://vimeo.com/yourreel"
-              className="rs-input"
-            />
-          </Field>
-          <Field label="Equipment you bring">
+        <Section title="Showreel">
+          <p className="text-[12px] text-rs-blue-fusion/70 leading-relaxed -mt-1">
+            Paste your Vimeo or YouTube link — update this whenever your reel changes.
+          </p>
+
+          {form.showreel_url && !editingReel ? (
+            <div className="flex items-center gap-3 bg-white rounded-[10px] border border-rs-blue-fusion/15 px-3 py-2.5">
+              <LinkIcon className="w-4 h-4 text-rs-blue-fusion/60 flex-shrink-0" />
+              <span className="flex-1 text-[13px] text-rs-blue-fusion truncate">
+                {displayHost(form.showreel_url)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setEditingReel(true)}
+                className="text-[11px] uppercase tracking-wider font-semibold underline flex-shrink-0"
+                style={{ color: '#2E5099' }}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <LinkIcon
+                className="w-4 h-4 text-rs-blue-fusion/50"
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                type="url"
+                value={form.showreel_url}
+                onChange={(e) => update('showreel_url', e.target.value)}
+                placeholder="https://vimeo.com/your-reel"
+                className="rs-input"
+                style={{ paddingLeft: 34 }}
+                autoComplete="url"
+              />
+            </div>
+          )}
+        </Section>
+
+        <Section title="Equipment">
+          <Field label="What you bring">
             <textarea
               value={form.equipment}
               onChange={(e) => update('equipment', e.target.value)}
@@ -274,23 +396,74 @@ export default function EditProfilePage() {
           </Field>
         </Section>
 
-        {error && (
-          <p className="text-[12px] text-red-700 bg-red-50 rounded-rs p-3">{error}</p>
-        )}
+        {error && <p className="text-[12px] text-red-700 bg-red-50 rounded-rs p-3">{error}</p>}
 
         <div className="flex gap-2 pt-2">
-          <Link
-            href="/app/profile"
-            className="flex-1 text-center rs-btn-ghost rs-btn"
-          >
+          <Link href="/app/profile" className="flex-1 text-center rs-btn-ghost rs-btn">
             Cancel
           </Link>
-          <button type="submit" disabled={saving} className="flex-1 rs-btn disabled:opacity-50">
-            {saving ? 'Saving…' : 'Save profile'}
-          </button>
+          {saved ? (
+            <div
+              className="flex-1 rs-btn flex items-center justify-center gap-2"
+              style={{ backgroundColor: '#1a7a3e' }}
+              aria-live="polite"
+            >
+              <CheckIcon className="w-4 h-4" />
+              Saved
+            </div>
+          ) : (
+            <button type="submit" disabled={saving} className="flex-1 rs-btn disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save profile'}
+            </button>
+          )}
         </div>
       </form>
     </main>
+  )
+}
+
+function displayHost(url: string): string {
+  try {
+    const u = new URL(url)
+    return (u.host + u.pathname).replace(/\/$/, '')
+  } catch {
+    return url
+  }
+}
+
+function LinkIcon({ className = '', style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+      aria-hidden
+    >
+      <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <polyline points="4 12 10 18 20 6" />
+    </svg>
   )
 }
 
