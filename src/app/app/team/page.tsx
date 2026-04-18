@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
+import { Avatar } from '@/components/Avatar'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 type TeamMember = {
@@ -10,20 +11,11 @@ type TeamMember = {
   email: string | null
   role: string
   verified: boolean
+  avatar_url: string | null
   talent_profiles: Array<{
     department: Department | null
     primary_role: string | null
   }> | null
-}
-
-function initials(name: string | null) {
-  if (!name) return '?'
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
 }
 
 export default function TeamPage() {
@@ -36,7 +28,7 @@ export default function TeamPage() {
     async function load() {
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, email, role, verified, talent_profiles(department, primary_role)')
+        .select('id, full_name, email, role, verified, avatar_url, talent_profiles(department, primary_role)')
         .eq('verified', true)
         .eq('role', 'talent')
         .order('full_name', { ascending: true, nullsFirst: false })
@@ -74,9 +66,12 @@ export default function TeamPage() {
                 key={m.id}
                 className="bg-white rounded-rs p-3 border border-rs-blue-fusion/10 flex items-center gap-3"
               >
-                <div className="w-11 h-11 rounded-full bg-[#E8EAED] flex items-center justify-center text-[13px] font-bold text-rs-blue-logo shrink-0">
-                  {initials(m.full_name)}
-                </div>
+                <Avatar
+                  url={m.avatar_url}
+                  name={m.full_name ?? m.email ?? null}
+                  size={44}
+                  className="shrink-0"
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-[13px] font-bold text-rs-blue-logo truncate">

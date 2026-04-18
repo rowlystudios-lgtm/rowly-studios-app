@@ -16,6 +16,7 @@ type AuthCtx = {
   loading: boolean
   supabase: SupabaseClient
   refresh: () => Promise<void>
+  updateProfile: (patch: Partial<FullProfile>) => void
 }
 
 const supabase = createClient()
@@ -27,6 +28,7 @@ const AuthContext = createContext<AuthCtx>({
   loading: true,
   supabase,
   refresh: async () => {},
+  updateProfile: () => {},
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -43,6 +45,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .maybeSingle()
     setProfile((data as FullProfile | null) ?? null)
     setLoading(false)
+  }
+
+  function updateProfile(patch: Partial<FullProfile>) {
+    setProfile((p) => (p ? { ...p, ...patch } : (patch as FullProfile)))
   }
 
   async function refresh() {
@@ -85,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, supabase, refresh }}>
+    <AuthContext.Provider value={{ user, session, profile, loading, supabase, refresh, updateProfile }}>
       {children}
     </AuthContext.Provider>
   )
