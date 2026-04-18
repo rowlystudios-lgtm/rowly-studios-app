@@ -1,24 +1,22 @@
 {
   "name": "Rowly Studios",
-  "short_name": "Rowly",
-  "description": "Talent and client activity center for Rowly Studios",
+  "short_name": "RS App",
+  "description": "Rowly Studios talent and client portal",
   "start_url": "/",
   "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
   "orientation": "portrait",
-  "background_color": "#496275",
-  "theme_color": "#496275",
   "icons": [
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
   ]
 }

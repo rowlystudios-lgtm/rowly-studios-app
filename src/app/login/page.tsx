@@ -1,19 +1,36 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
 import { createClient } from '@/lib/supabase-browser'
 
-export default function LoginPage() {
-  const router = useRouter()
-  const supabase = createClient()
-  const [email, setEmail] = useState('')
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error' | 'checking'>('checking')
-  const [errorMsg, setErrorMsg] = useState('')
+type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
 
-  // If already signed in, skip straight to the app
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-[100dvh] flex items-center justify-center rs-bg-fusion">
+        <RSLogo size={48} />
+      </main>
+    }>
+      <LoginInner />
+    </Suspense>
+  )
+}
+
+function LoginInner() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const supabase = createClient()
+
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [status, setStatus] = useState<Status>('checking')
+  const [errorMsg, setErrorMsg] = useState('')
+  const [showReset, setShowReset] = useState(false)
+
   useEffect(() => {
     async function check() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -26,27 +43,57 @@ export default function LoginPage() {
     check()
   }, [router, supabase])
 
-  async function handleSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    const err = searchParams.get('error')
+    if (err === 'auth_failed') {
+      setErrorMsg('That sign-in link was invalid or expired. Please sign in again.')
+      setStatus('error')
+    }
+  }, [searchParams])
+
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault()
-    setStatus('sending')
+    setStatus('submitting')
     setErrorMsg('')
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setStatus('error')
+      const msg = error.message.toLowerCase()
+      if (msg.includes('invalid') && msg.includes('credential')) {
+        setErrorMsg('Incorrect email or password. Please try again.')
+      } else if (msg.includes('email not confirmed')) {
+        setErrorMsg('Please confirm your email first — check your inbox for the confirmation link.')
+      } else {
+        setErrorMsg(error.message)
+      }
+      return
+    }
+
+    router.replace('/app')
+    router.refresh()
+  }
+
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email) {
+      setErrorMsg('Enter your email above first, then click "Forgot password?"')
+      setStatus('error')
+      return
+    }
+    setStatus('reset-sending')
+    setErrorMsg('')
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset-password`,
     })
 
     if (error) {
       setStatus('error')
-      if (error.message.toLowerCase().includes('rate limit') || error.message.includes('429')) {
-        setErrorMsg('You\'ve requested a link recently — please wait 60 seconds and try again, or check your inbox for the previous link.')
-      } else {
-        setErrorMsg(error.message)
-      }
+      setErrorMsg(error.message)
     } else {
-      setStatus('sent')
+      setStatus('reset-sent')
     }
   }
 
@@ -68,34 +115,30 @@ export default function LoginPage() {
       </Link>
 
       <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
-        {status === 'sent' ? (
+        {status === 'reset-sent' ? (
           <div className="text-center space-y-3">
             <p className="text-sm font-semibold text-rs-blue-logo uppercase tracking-wide">
               Check your inbox
             </p>
             <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-              We sent a magic link to <strong>{email}</strong>. Tap it on this device
-              to sign in — it&apos;ll open the app directly.
-            </p>
-            <p className="text-[11px] text-rs-blue-fusion/60 leading-relaxed pt-2">
-              Tip: open the link on whichever device you want to use the app on.
-              It only works once and expires after 1 hour.
+              We sent a password-reset link to <strong>{email}</strong>. Open it to set a new password.
             </p>
             <button
               onClick={() => {
                 setStatus('idle')
-                setEmail('')
+                setShowReset(false)
               }}
               className="text-[11px] uppercase tracking-wider text-rs-blue-fusion/70 underline mt-4"
             >
-              Use a different email
+              Back to sign in
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={showReset ? handleReset : handleSignIn} className="space-y-3">
             <label className="block text-[11px] uppercase tracking-wider font-semibold text-rs-blue-fusion">
-              Sign in with email
+              {showReset ? 'Reset your password' : 'Sign in'}
             </label>
+
             <input
               type="email"
               required
@@ -103,22 +146,58 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@email.com"
               className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
-              disabled={status === 'sending'}
+              disabled={status === 'submitting' || status === 'reset-sending'}
               autoComplete="email"
             />
+
+            {!showReset && (
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
+                disabled={status === 'submitting'}
+                autoComplete="current-password"
+              />
+            )}
+
             <button
               type="submit"
-              disabled={status === 'sending' || !email}
+              disabled={status === 'submitting' || status === 'reset-sending' || !email || (!showReset && !password)}
               className="rs-btn w-full disabled:opacity-50"
             >
-              {status === 'sending' ? 'Sending…' : 'Send magic link'}
+              {showReset
+                ? (status === 'reset-sending' ? 'Sending…' : 'Send reset link')
+                : (status === 'submitting' ? 'Signing in…' : 'Sign in')}
             </button>
-            {status === 'error' && (
+
+            {status === 'error' && errorMsg && (
               <p className="text-[11px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
             )}
-            <p className="text-[11px] text-rs-blue-fusion/70 text-center pt-3 leading-relaxed">
-              No passwords. We&apos;ll email you a secure link to sign in.
-            </p>
+
+            <div className="flex items-center justify-between pt-3 text-[11px]">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReset((v) => !v)
+                  setErrorMsg('')
+                  setStatus('idle')
+                }}
+                className="uppercase tracking-wider text-rs-blue-fusion/70 underline"
+              >
+                {showReset ? 'Back to sign in' : 'Forgot password?'}
+              </button>
+              {!showReset && (
+                <Link
+                  href="/signup"
+                  className="uppercase tracking-wider text-rs-blue-fusion/70 underline"
+                >
+                  Create account
+                </Link>
+              )}
+            </div>
           </form>
         )}
       </div>
