@@ -77,6 +77,7 @@ function LoginInner() {
   const [status, setStatus] = useState<Status>('checking')
   const [errorMsg, setErrorMsg] = useState('')
   const [showReset, setShowReset] = useState(false)
+  const [selectedRole, setSelectedRole] = useState<'talent' | 'client'>('talent')
 
   const [showAdminForm, setShowAdminForm] = useState(false)
   const [adminStep, setAdminStep] = useState<AdminStep>('password')
@@ -153,11 +154,51 @@ function LoginInner() {
     setStatus('submitting')
     setErrorMsg('')
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data: authData, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
     if (error) {
       setStatus('error')
       setErrorMsg(friendlyError(error.message))
+      return
+    }
+
+    const userId = authData.user?.id
+    if (!userId) {
+      await supabase.auth.signOut()
+      setStatus('error')
+      setErrorMsg('Could not read your account. Please try again.')
+      return
+    }
+
+    const { data: profileRow } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle()
+
+    const actualRole = profileRow?.role
+
+    if (actualRole === 'admin') {
+      await supabase.auth.signOut()
+      setStatus('error')
+      setErrorMsg('Admin accounts must use the Admin Access button below.')
+      return
+    }
+
+    if (actualRole === 'talent' && selectedRole === 'client') {
+      await supabase.auth.signOut()
+      setStatus('error')
+      setErrorMsg("This is a talent account. Please select 'Talent' to sign in.")
+      return
+    }
+
+    if (actualRole === 'client' && selectedRole === 'talent') {
+      await supabase.auth.signOut()
+      setStatus('error')
+      setErrorMsg("This is a client account. Please select 'Client' to sign in.")
       return
     }
 
@@ -353,6 +394,176 @@ function LoginInner() {
           </span>
         </Link>
 
+        {status !== 'reset-sent' && !showReset && (
+          <div className="w-full max-w-sm">
+            <p
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                color: '#AABDE0',
+                textAlign: 'center',
+                marginBottom: 14,
+              }}
+            >
+              I am signing in as
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 10,
+                marginBottom: 20,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedRole('talent')}
+                aria-pressed={selectedRole === 'talent'}
+                style={{
+                  borderRadius: 14,
+                  padding: '18px 14px',
+                  textAlign: 'center',
+                  border:
+                    selectedRole === 'talent'
+                      ? '1.5px solid #ffffff'
+                      : '1.5px solid rgba(170,189,224,0.2)',
+                  background:
+                    selectedRole === 'talent'
+                      ? '#ffffff'
+                      : 'rgba(255,255,255,0.06)',
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    margin: '0 auto 8px',
+                    background:
+                      selectedRole === 'talent' ? '#1A3C6B' : 'rgba(170,189,224,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={selectedRole === 'talent' ? '#fff' : '#AABDE0'}
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  >
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                  </svg>
+                </div>
+                <p
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color:
+                      selectedRole === 'talent'
+                        ? '#1A3C6B'
+                        : 'rgba(170,189,224,0.8)',
+                  }}
+                >
+                  Talent
+                </p>
+                <p
+                  style={{
+                    fontSize: 10,
+                    marginTop: 2,
+                    color:
+                      selectedRole === 'talent'
+                        ? 'rgba(26,60,107,0.6)'
+                        : 'rgba(170,189,224,0.5)',
+                  }}
+                >
+                  Creatives &amp; crew
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedRole('client')}
+                aria-pressed={selectedRole === 'client'}
+                style={{
+                  borderRadius: 14,
+                  padding: '18px 14px',
+                  textAlign: 'center',
+                  border:
+                    selectedRole === 'client'
+                      ? '1.5px solid #ffffff'
+                      : '1.5px solid rgba(170,189,224,0.2)',
+                  background:
+                    selectedRole === 'client'
+                      ? '#ffffff'
+                      : 'rgba(255,255,255,0.06)',
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    margin: '0 auto 8px',
+                    background:
+                      selectedRole === 'client' ? '#1A3C6B' : 'rgba(170,189,224,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={selectedRole === 'client' ? '#fff' : '#AABDE0'}
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  >
+                    <rect x="2" y="7" width="20" height="14" rx="2" />
+                    <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                  </svg>
+                </div>
+                <p
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color:
+                      selectedRole === 'client'
+                        ? '#1A3C6B'
+                        : 'rgba(170,189,224,0.8)',
+                  }}
+                >
+                  Client
+                </p>
+                <p
+                  style={{
+                    fontSize: 10,
+                    marginTop: 2,
+                    color:
+                      selectedRole === 'client'
+                        ? 'rgba(26,60,107,0.6)'
+                        : 'rgba(170,189,224,0.5)',
+                  }}
+                >
+                  Brands &amp; agencies
+                </p>
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
           {status === 'reset-sent' ? (
             <div className="text-center space-y-3">
@@ -418,7 +629,7 @@ function LoginInner() {
             <>
               <form onSubmit={handleSignIn} className="space-y-3">
                 <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
-                  Sign in
+                  {selectedRole === 'talent' ? 'Talent sign in' : 'Client sign in'}
                 </label>
 
                 <input
@@ -460,7 +671,11 @@ function LoginInner() {
                   style={{ backgroundColor: '#1A3C6B' }}
                 >
                   {status === 'submitting' && <Spinner />}
-                  {status === 'submitting' ? 'Signing in…' : 'Sign in'}
+                  {status === 'submitting'
+                    ? 'Signing in…'
+                    : selectedRole === 'talent'
+                    ? 'Sign in as talent'
+                    : 'Sign in as client'}
                 </button>
 
                 {status === 'error' && errorMsg && (
