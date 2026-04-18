@@ -6,12 +6,16 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
+import { PinInput } from '@/components/PinInput'
 import { createClient } from '@/lib/supabase-browser'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
+type AdminStep = 'password' | 'pin'
 type AdminStatus = 'idle' | 'submitting' | 'error'
 
 const RESET_REDIRECT = 'https://rowly-studios-app.vercel.app/reset-password'
+const PIN_LENGTH = 6
+const MAX_PIN_ATTEMPTS = 3
 
 export default function LoginPage() {
   return (
@@ -73,10 +77,17 @@ function LoginInner() {
   const [showReset, setShowReset] = useState(false)
 
   const [showAdminForm, setShowAdminForm] = useState(false)
+  const [adminStep, setAdminStep] = useState<AdminStep>('password')
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
   const [adminStatus, setAdminStatus] = useState<AdminStatus>('idle')
   const [adminErrorMsg, setAdminErrorMsg] = useState('')
+
+  const [pin, setPin] = useState('')
+  const [pinAttempts, setPinAttempts] = useState(0)
+  const [pinStatus, setPinStatus] = useState<AdminStatus>('idle')
+  const [pinErrorMsg, setPinErrorMsg] = useState('')
+
   const adminEmailRef = useRef<HTMLInputElement>(null)
   const adminFormRef = useRef<HTMLDivElement>(null)
 
@@ -117,24 +128,117 @@ function LoginInner() {
     router.refresh()
   }
 
-  async function handleAdminSignIn(e: React.FormEvent) {
+  async function handleAdminPasswordStep(e: React.FormEvent) {
     e.preventDefault()
     setAdminStatus('submitting')
     setAdminErrorMsg('')
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email: adminEmail,
       password: adminPassword,
     })
 
-    if (error) {
+    if (authError) {
       setAdminStatus('error')
-      setAdminErrorMsg(friendlyError(error.message))
+      setAdminErrorMsg(friendlyError(authError.message))
       return
     }
 
-    router.replace('/app')
-    router.refresh()
+    const userId = authData.user?.id
+    if (!userId) {
+      await supabase.auth.signOut()
+      setAdminStatus('error')
+      setAdminErrorMsg('Could not verify the account. Please try again.')
+      return
+    }
+
+    const { data: profileRow, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (profileError || !profileRow) {
+      await supabase.auth.signOut()
+      setAdminStatus('error')
+      setAdminErrorMsg(profileError?.message ?? 'Could not read your profile.')
+      return
+    }
+
+    if (profileRow.role !== 'admin') {
+      await supabase.auth.signOut()
+      setAdminStatus('error')
+      setAdminErrorMsg("This account doesn't have admin access.")
+      return
+    }
+
+    setAdminStatus('idle')
+    setAdminErrorMsg('')
+    setAdminPassword('')
+    setPin('')
+    setPinAttempts(0)
+    setPinErrorMsg('')
+    setPinStatus('idle')
+    setAdminStep('pin')
+  }
+
+  async function verifyPin(fullPin: string) {
+    if (fullPin.length !== PIN_LENGTH) return
+    if (pinStatus === 'submitting') return
+
+    setPinStatus('submitting')
+    setPinErrorMsg('')
+
+    const { data: valid, error } = await supabase.rpc('verify_admin_pin', { pin: fullPin })
+
+    if (error) {
+      setPinStatus('error')
+      setPinErrorMsg(error.message)
+      return
+    }
+
+    if (valid === true) {
+      setPinStatus('idle')
+      router.push('/app')
+      router.refresh()
+      return
+    }
+
+    const attempts = pinAttempts + 1
+    setPinAttempts(attempts)
+    setPin('')
+
+    if (attempts >= MAX_PIN_ATTEMPTS) {
+      await supabase.auth.signOut()
+      setAdminStep('password')
+      setAdminEmail('')
+      setAdminPassword('')
+      setAdminStatus('error')
+      setAdminErrorMsg('Too many failed attempts. Please sign in again.')
+      setPinStatus('idle')
+      setPinErrorMsg('')
+      setPinAttempts(0)
+      return
+    }
+
+    setPinStatus('error')
+    setPinErrorMsg(
+      `Incorrect PIN. Try again. (${MAX_PIN_ATTEMPTS - attempts} attempt${
+        MAX_PIN_ATTEMPTS - attempts === 1 ? '' : 's'
+      } left)`
+    )
+  }
+
+  async function handlePinBack() {
+    await supabase.auth.signOut()
+    setAdminStep('password')
+    setAdminPassword('')
+    setPin('')
+    setPinAttempts(0)
+    setPinStatus('idle')
+    setPinErrorMsg('')
+    setAdminStatus('idle')
+    setAdminErrorMsg('')
   }
 
   async function handleReset(e: React.FormEvent) {
@@ -171,7 +275,17 @@ function LoginInner() {
   function toggleAdminForm() {
     setShowAdminForm((prev) => {
       const next = !prev
-      if (next) {
+      if (!next) {
+        // Collapsing — reset the admin flow entirely.
+        setAdminStep('password')
+        setAdminPassword('')
+        setPin('')
+        setPinAttempts(0)
+        setPinStatus('idle')
+        setPinErrorMsg('')
+        setAdminStatus('idle')
+        setAdminErrorMsg('')
+      } else {
         setTimeout(() => {
           adminFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
           adminEmailRef.current?.focus()
@@ -358,94 +472,186 @@ function LoginInner() {
               </button>
 
               {showAdminForm && (
-                <form
-                  ref={adminFormRef as unknown as React.RefObject<HTMLFormElement>}
-                  onSubmit={handleAdminSignIn}
+                <div
+                  ref={adminFormRef}
                   style={{
                     background: '#1A3C6B',
-                    borderRadius: 12,
-                    padding: 16,
-                    marginTop: 14,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
+                    borderRadius: 16,
+                    padding: 20,
+                    marginTop: 12,
+                    transition: 'all 160ms ease',
                   }}
                 >
-                  <p
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#AABDE0',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                    }}
-                  >
-                    Admin sign in
-                  </p>
-                  <input
-                    ref={adminEmailRef}
-                    type="email"
-                    required
-                    value={adminEmail}
-                    onChange={(e) => setAdminEmail(e.target.value)}
-                    placeholder="admin@email.com"
-                    className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
-                    style={{ borderColor: 'rgba(255,255,255,0.3)' }}
-                    disabled={adminStatus === 'submitting'}
-                    autoComplete="email"
-                  />
-                  <PasswordInput
-                    required
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    placeholder="Password"
-                    disabled={adminStatus === 'submitting'}
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="submit"
-                    disabled={
-                      adminStatus === 'submitting' || !adminEmail || !adminPassword
-                    }
-                    style={{
-                      width: '100%',
-                      padding: '12px 0',
-                      borderRadius: 10,
-                      background: '#fff',
-                      color: '#1A3C6B',
-                      border: 'none',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      opacity:
-                        adminStatus === 'submitting' || !adminEmail || !adminPassword
-                          ? 0.55
-                          : 1,
-                      cursor:
-                        adminStatus === 'submitting' ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {adminStatus === 'submitting' && <Spinner color="#1A3C6B" />}
-                    {adminStatus === 'submitting' ? 'Signing in…' : 'Sign in as admin'}
-                  </button>
-                  {adminStatus === 'error' && adminErrorMsg && (
-                    <p
-                      style={{
-                        fontSize: 12,
-                        color: '#fca5a5',
-                        lineHeight: 1.4,
-                        marginTop: 2,
-                      }}
+                  {adminStep === 'password' ? (
+                    <form
+                      onSubmit={handleAdminPasswordStep}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
                     >
-                      {adminErrorMsg}
-                    </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#AABDE0',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.08em',
+                        }}
+                      >
+                        Admin sign in
+                      </p>
+                      <input
+                        ref={adminEmailRef}
+                        type="email"
+                        required
+                        value={adminEmail}
+                        onChange={(e) => setAdminEmail(e.target.value)}
+                        placeholder="admin@email.com"
+                        className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                        style={{ borderColor: 'rgba(255,255,255,0.3)' }}
+                        disabled={adminStatus === 'submitting'}
+                        autoComplete="email"
+                      />
+                      <PasswordInput
+                        required
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        placeholder="Password"
+                        disabled={adminStatus === 'submitting'}
+                        autoComplete="current-password"
+                      />
+                      <button
+                        type="submit"
+                        disabled={
+                          adminStatus === 'submitting' || !adminEmail || !adminPassword
+                        }
+                        style={{
+                          width: '100%',
+                          padding: '12px 0',
+                          borderRadius: 10,
+                          background: '#fff',
+                          color: '#1A3C6B',
+                          border: 'none',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          opacity:
+                            adminStatus === 'submitting' || !adminEmail || !adminPassword
+                              ? 0.55
+                              : 1,
+                          cursor: adminStatus === 'submitting' ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {adminStatus === 'submitting' && <Spinner color="#1A3C6B" />}
+                        {adminStatus === 'submitting' ? 'Signing in…' : 'Sign in as admin'}
+                      </button>
+                      {adminStatus === 'error' && adminErrorMsg && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: '#fca5a5',
+                            lineHeight: 1.4,
+                            marginTop: 2,
+                          }}
+                        >
+                          {adminErrorMsg}
+                        </p>
+                      )}
+                    </form>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <p
+                          style={{
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: '#fff',
+                            marginBottom: 4,
+                          }}
+                        >
+                          Admin PIN
+                        </p>
+                        <p style={{ fontSize: 12, color: '#AABDE0' }}>
+                          Enter your 6-digit access code
+                        </p>
+                      </div>
+
+                      <PinInput
+                        value={pin}
+                        onChange={setPin}
+                        onComplete={verifyPin}
+                        disabled={pinStatus === 'submitting'}
+                        variant="dark"
+                        autoFocus
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => verifyPin(pin)}
+                        disabled={pinStatus === 'submitting' || pin.length !== PIN_LENGTH}
+                        style={{
+                          width: '100%',
+                          padding: '12px 0',
+                          borderRadius: 10,
+                          background: '#fff',
+                          color: '#1A3C6B',
+                          border: 'none',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          opacity:
+                            pinStatus === 'submitting' || pin.length !== PIN_LENGTH
+                              ? 0.55
+                              : 1,
+                          cursor: pinStatus === 'submitting' ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {pinStatus === 'submitting' && <Spinner color="#1A3C6B" />}
+                        {pinStatus === 'submitting' ? 'Verifying…' : 'Verify'}
+                      </button>
+
+                      {pinStatus === 'error' && pinErrorMsg && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: '#fca5a5',
+                            lineHeight: 1.4,
+                            textAlign: 'center',
+                          }}
+                        >
+                          {pinErrorMsg}
+                        </p>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handlePinBack}
+                        disabled={pinStatus === 'submitting'}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#AABDE0',
+                          fontSize: 11,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.08em',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          alignSelf: 'center',
+                        }}
+                      >
+                        ← Back
+                      </button>
+                    </div>
                   )}
-                </form>
+                </div>
               )}
             </>
           )}
