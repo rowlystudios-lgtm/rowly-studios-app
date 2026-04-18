@@ -7,17 +7,19 @@ import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
-const BG = '#0a0a0a'
-const CARD_BG = '#141414'
-const CARD_BORDER = '#222222'
-const TEXT_PRIMARY = '#ffffff'
-const TEXT_MUTED = '#888888'
-const NAVY = '#1A3C6B'
-const ACCENT = '#2E5099'
+const BG = '#1A3C6B'
+const CARD_BG = '#2E5099'
+const CARD_BORDER = 'rgba(170, 189, 224, 0.2)'
+const TEXT_PRIMARY = '#FFFFFF'
+const TEXT_MUTED = '#AABDE0'
+const SHOWREEL_BG = '#2E5099'
+const AVAILABLE_GREEN = '#4ade80'
+const BUTTON_PRIMARY = '#1A3C6B'
+const LINK = '#AABDE0'
 
 function formatRate(cents: number | null | undefined): string {
   if (!cents) return '—'
-  return `$${(cents / 100).toLocaleString()}`
+  return `$${(cents / 100).toLocaleString()} / day`
 }
 
 function fullName(
@@ -94,10 +96,15 @@ export default function ProfilePage() {
               {subHeader}
             </p>
           )}
+          {profile?.phone && (
+            <p className="text-[12px] mt-1" style={{ color: TEXT_MUTED }}>
+              {profile.phone}
+            </p>
+          )}
           {profile?.verified && (
             <span
               className="inline-block mt-3 text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
-              style={{ background: NAVY, color: '#ffffff' }}
+              style={{ background: '#AABDE0', color: BUTTON_PRIMARY }}
             >
               ✓ Verified
             </span>
@@ -111,9 +118,9 @@ export default function ProfilePage() {
                 className="text-[10px] uppercase tracking-wider font-semibold mb-1"
                 style={{ color: TEXT_MUTED }}
               >
-                Day rate
+                Day Rate
               </p>
-              <p className="text-[22px] font-bold" style={{ color: TEXT_PRIMARY }}>
+              <p className="text-[18px] font-bold" style={{ color: TEXT_PRIMARY }}>
                 {formatRate(talent?.day_rate_cents)}
               </p>
             </div>
@@ -125,9 +132,9 @@ export default function ProfilePage() {
                 className="text-[10px] uppercase tracking-wider font-semibold mb-1"
                 style={{ color: TEXT_MUTED }}
               >
-                Rate floor
+                Floor
               </p>
-              <p className="text-[22px] font-bold" style={{ color: TEXT_PRIMARY }}>
+              <p className="text-[18px] font-bold" style={{ color: TEXT_PRIMARY }}>
                 {formatRate(talent?.rate_floor_cents)}
               </p>
             </div>
@@ -149,7 +156,7 @@ export default function ProfilePage() {
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 rounded-[14px] p-4 mb-6 transition-opacity hover:opacity-90"
-            style={{ background: NAVY, color: '#ffffff' }}
+            style={{ background: SHOWREEL_BG, color: '#ffffff', border: `1px solid ${CARD_BORDER}` }}
           >
             <span
               className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
@@ -172,7 +179,7 @@ export default function ProfilePage() {
             <Link
               href="/app/profile/edit"
               className="inline-block mt-1 text-[11px] uppercase tracking-wider underline"
-              style={{ color: ACCENT }}
+              style={{ color: LINK }}
             >
               Add in Edit Profile →
             </Link>
@@ -273,8 +280,8 @@ function AvailabilitySection({
             width: 10,
             height: 10,
             borderRadius: 999,
-            background: available ? '#2ecc71' : TEXT_MUTED,
-            boxShadow: available ? '0 0 0 3px rgba(46,204,113,0.15)' : 'none',
+            background: available ? AVAILABLE_GREEN : 'rgba(170, 189, 224, 0.4)',
+            boxShadow: available ? '0 0 0 3px rgba(74, 222, 128, 0.25)' : 'none',
             flexShrink: 0,
           }}
         />
@@ -300,7 +307,7 @@ function AvailabilitySection({
             width: 44,
             height: 26,
             borderRadius: 999,
-            background: available ? ACCENT : '#333',
+            background: available ? AVAILABLE_GREEN : 'rgba(170, 189, 224, 0.25)',
             position: 'relative',
             transition: 'background 150ms ease',
             opacity: status === 'saving' ? 0.6 : 1,
@@ -425,13 +432,13 @@ function ChangePasswordSection({
             type="button"
             onClick={open}
             className="shrink-0 rounded-[10px] px-3 py-2 text-[11px] uppercase tracking-wider font-semibold"
-            style={{ background: NAVY, color: '#ffffff' }}
+            style={{ background: BUTTON_PRIMARY, color: '#ffffff' }}
           >
             Change password
           </button>
         </div>
         {status === 'done' && (
-          <p className="text-[12px] mt-3" style={{ color: '#2ecc71' }}>
+          <p className="text-[12px] mt-3" style={{ color: AVAILABLE_GREEN }}>
             Password updated successfully.
           </p>
         )}
@@ -498,7 +505,7 @@ function ChangePasswordSection({
               type="submit"
               disabled={busy || !currentPassword || !newPassword || !confirm}
               className="rounded-[10px] px-4 py-2 text-[11px] uppercase tracking-wider font-semibold disabled:opacity-50 flex items-center gap-2"
-              style={{ background: NAVY, color: '#ffffff' }}
+              style={{ background: BUTTON_PRIMARY, color: '#ffffff' }}
             >
               {busy && <Spinner />}
               {status === 'verifying' ? 'Verifying…' : status === 'updating' ? 'Updating…' : 'Update password'}
@@ -508,7 +515,7 @@ function ChangePasswordSection({
               onClick={cancel}
               disabled={busy}
               className="text-[11px] uppercase tracking-wider underline disabled:opacity-50"
-              style={{ color: ACCENT }}
+              style={{ color: LINK }}
             >
               Cancel
             </button>

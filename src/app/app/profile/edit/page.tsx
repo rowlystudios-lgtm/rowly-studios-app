@@ -10,6 +10,13 @@ import { CITY_OPTIONS, DEPARTMENT_LABELS, type Department } from '@/lib/types'
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024 // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 
+const BG = '#1A3C6B'
+const CARD_BG = '#2E5099'
+const CARD_BORDER = 'rgba(170, 189, 224, 0.2)'
+const TEXT_PRIMARY = '#FFFFFF'
+const TEXT_MUTED = '#AABDE0'
+const BUTTON_PRIMARY = '#1A3C6B'
+
 type FormState = {
   first_name: string
   last_name: string
@@ -216,16 +223,32 @@ export default function EditProfilePage() {
       return
     }
 
+    updateProfile({
+      first_name: first || null,
+      last_name: last || null,
+      full_name: fullName,
+      city: form.city || null,
+      phone: form.phone || null,
+    })
     await refresh()
+
     setSaving(false)
     setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
+
+    setTimeout(() => {
+      router.push('/app/profile')
+    }, 1000)
   }
 
   if (loading) {
     return (
-      <main className="px-5 py-6 max-w-md mx-auto">
-        <p className="text-[12px] text-rs-blue-fusion/60">Loading…</p>
+      <main
+        className="rounded-t-rs-lg"
+        style={{ background: BG, color: TEXT_PRIMARY, minHeight: 'calc(100dvh - 64px)' }}
+      >
+        <div className="px-5 py-6 max-w-md mx-auto">
+          <p className="text-[12px]" style={{ color: TEXT_MUTED }}>Loading…</p>
+        </div>
       </main>
     )
   }
@@ -236,15 +259,25 @@ export default function EditProfilePage() {
   const sliderPct = ((rateFloorDollars - sliderMin) / (sliderMax - sliderMin)) * 100
 
   return (
-    <main className="px-5 py-6 max-w-md mx-auto">
+    <main
+      className="rounded-t-rs-lg"
+      style={{ background: BG, color: TEXT_PRIMARY, minHeight: 'calc(100dvh - 64px)' }}
+    >
+      <div className="px-5 py-6 max-w-md mx-auto">
       <Link
         href="/app/profile"
-        className="text-[11px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold"
+        className="text-[11px] uppercase tracking-wider font-semibold"
+        style={{ color: TEXT_MUTED }}
       >
         ← Back to profile
       </Link>
-      <h1 className="text-[22px] font-semibold text-rs-blue-logo mt-3 mb-1">Edit profile</h1>
-      <p className="text-[11px] uppercase tracking-widest text-rs-blue-fusion/60 font-semibold mb-6">
+      <h1 className="text-[22px] font-semibold mt-3 mb-1" style={{ color: TEXT_PRIMARY }}>
+        Edit profile
+      </h1>
+      <p
+        className="text-[11px] uppercase tracking-widest font-semibold mb-6"
+        style={{ color: TEXT_MUTED }}
+      >
         The info clients will see
       </p>
 
@@ -252,8 +285,7 @@ export default function EditProfilePage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
-          capture="user"
+          accept="image/*"
           style={{ display: 'none' }}
           onChange={handleAvatarChange}
         />
@@ -292,17 +324,19 @@ export default function EditProfilePage() {
           onClick={openFilePicker}
           disabled={avatarUploading}
           className="text-[11px] uppercase tracking-wider font-semibold underline mt-3 disabled:opacity-50"
-          style={{ color: '#2E5099' }}
+          style={{ color: TEXT_MUTED }}
         >
           {avatarUploading ? 'Uploading…' : 'Change photo'}
         </button>
         {avatarToast && (
-          <p className="text-[11px] mt-2" style={{ color: '#1a7a3e' }}>
+          <p className="text-[11px] mt-2" style={{ color: '#4ade80' }}>
             {avatarToast}
           </p>
         )}
         {avatarError && (
-          <p className="text-[11px] text-red-700 mt-2 text-center max-w-xs">{avatarError}</p>
+          <p className="text-[11px] mt-2 text-center max-w-xs" style={{ color: '#fca5a5' }}>
+            {avatarError}
+          </p>
         )}
       </div>
 
@@ -426,18 +460,21 @@ export default function EditProfilePage() {
 
           <div>
             <div className="flex items-baseline justify-between">
-              <label className="block text-[11px] font-semibold text-rs-blue-fusion">
+              <label className="block text-[11px] font-semibold" style={{ color: TEXT_MUTED }}>
                 Rate floor
               </label>
               <span
                 className="text-[13px] font-bold"
-                style={{ color: '#1A3C6B' }}
+                style={{ color: TEXT_PRIMARY }}
                 aria-live="polite"
               >
                 ${rateFloorDollars} / day
               </span>
             </div>
-            <p className="text-[11px] text-rs-blue-fusion/60 mt-1 mb-3 leading-relaxed">
+            <p
+              className="text-[11px] mt-1 mb-3 leading-relaxed"
+              style={{ color: TEXT_MUTED }}
+            >
               Jobs posted below this rate won&apos;t show your profile to the client.
             </p>
             <input
@@ -457,7 +494,10 @@ export default function EditProfilePage() {
                 } as React.CSSProperties
               }
             />
-            <div className="flex justify-between text-[10px] text-rs-blue-fusion/50 font-semibold mt-1 uppercase tracking-wider">
+            <div
+              className="flex justify-between text-[10px] font-semibold mt-1 uppercase tracking-wider"
+              style={{ color: TEXT_MUTED }}
+            >
               <span>${sliderMin}</span>
               <span>${sliderMax}</span>
             </div>
@@ -465,7 +505,10 @@ export default function EditProfilePage() {
         </Section>
 
         <Section title="Showreel">
-          <p className="text-[12px] text-rs-blue-fusion/70 leading-relaxed -mt-1">
+          <p
+            className="text-[12px] leading-relaxed -mt-1"
+            style={{ color: TEXT_MUTED }}
+          >
             Paste your Vimeo or YouTube link — update this whenever your reel changes.
           </p>
 
@@ -521,7 +564,18 @@ export default function EditProfilePage() {
           </Field>
         </Section>
 
-        {error && <p className="text-[12px] text-red-700 bg-red-50 rounded-rs p-3">{error}</p>}
+        {error && (
+          <p
+            className="text-[12px] rounded-rs p-3"
+            style={{
+              color: '#fca5a5',
+              background: 'rgba(248, 113, 113, 0.12)',
+              border: '1px solid rgba(248, 113, 113, 0.25)',
+            }}
+          >
+            {error}
+          </p>
+        )}
 
         <div className="flex gap-2 pt-2">
           <Link href="/app/profile" className="flex-1 text-center rs-btn-ghost rs-btn">
@@ -543,6 +597,7 @@ export default function EditProfilePage() {
           )}
         </div>
       </form>
+      </div>
     </main>
   )
 }
@@ -611,10 +666,16 @@ function CheckIcon({ className = '' }: { className?: string }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
+      <p
+        className="text-[10px] uppercase tracking-wider font-semibold mb-2"
+        style={{ color: TEXT_MUTED }}
+      >
         {title}
       </p>
-      <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 space-y-3">
+      <div
+        className="rounded-rs p-4 space-y-3"
+        style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}
+      >
         {children}
       </div>
     </div>
@@ -624,7 +685,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-[11px] font-semibold text-rs-blue-fusion mb-1.5">{label}</span>
+      <span
+        className="block text-[11px] font-semibold mb-1.5"
+        style={{ color: TEXT_MUTED }}
+      >
+        {label}
+      </span>
       {children}
     </label>
   )
