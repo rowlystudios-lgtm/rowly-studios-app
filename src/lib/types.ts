@@ -16,6 +16,7 @@ export type Profile = {
   avatar_url: string | null
   verified: boolean
   verified_at: string | null
+  available: boolean
   created_at: string
   updated_at: string
 }

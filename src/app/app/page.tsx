@@ -11,6 +11,7 @@ export default function AppHome() {
     profile?.full_name?.split(' ')[0] ??
     'there'
   const talent = profile?.talent_profiles?.[0] ?? null
+  const isAdmin = profile?.role === 'admin'
 
   const missing: string[] = []
   if (!profile?.first_name) missing.push('Add your first name')
@@ -18,7 +19,7 @@ export default function AppHome() {
   if (!talent?.department) missing.push('Choose your department')
   if (!talent?.bio) missing.push('Write a short bio')
 
-  const profileComplete = missing.length === 0
+  const showSetupCard = !isAdmin && missing.length > 0
 
   return (
     <main className="px-5 py-6 max-w-md mx-auto">
@@ -27,7 +28,7 @@ export default function AppHome() {
         0 upcoming jobs
       </p>
 
-      {!profileComplete && (
+      {showSetupCard && (
         <div className="bg-[#F6EBC8] border border-[#8a6f1a]/20 rounded-rs p-4 mb-5">
           <p className="text-[10px] uppercase tracking-wider text-[#8a6f1a] font-semibold">
             Finish setting up your profile

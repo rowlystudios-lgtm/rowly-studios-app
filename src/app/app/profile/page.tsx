@@ -7,26 +7,41 @@ import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
-function formatRate(cents: number | null | undefined): string | null {
-  if (!cents) return null
+const BG = '#0a0a0a'
+const CARD_BG = '#141414'
+const CARD_BORDER = '#222222'
+const TEXT_PRIMARY = '#ffffff'
+const TEXT_MUTED = '#888888'
+const NAVY = '#1A3C6B'
+const ACCENT = '#2E5099'
+
+function formatRate(cents: number | null | undefined): string {
+  if (!cents) return '—'
   return `$${(cents / 100).toLocaleString()}`
 }
 
 function fullName(
   profile: { first_name?: string | null; last_name?: string | null; full_name?: string | null } | null
-): string | null {
-  if (!profile) return null
-  const first = profile.first_name?.trim()
-  const last = profile.last_name?.trim()
-  const joined = [first, last].filter(Boolean).join(' ')
-  return joined || profile.full_name || null
+): string {
+  if (!profile) return 'Your name'
+  const joined = [profile.first_name?.trim(), profile.last_name?.trim()]
+    .filter(Boolean)
+    .join(' ')
+  return joined || profile.full_name || 'Your name'
 }
 
-function Spinner() {
+function Spinner({ size = 14, color = TEXT_PRIMARY }: { size?: number; color?: string }) {
   return (
-    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    <svg
+      className="animate-spin"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" stroke={color} strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke={color} strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }
@@ -39,138 +54,279 @@ function PlayIcon({ className = '' }: { className?: string }) {
   )
 }
 
-function LinkIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
-      <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
-    </svg>
-  )
-}
-
 export default function ProfilePage() {
-  const { profile, user, supabase } = useAuth()
+  const { profile, user, supabase, updateProfile } = useAuth()
   const talent = profile?.talent_profiles?.[0] ?? null
 
-  const displayName = fullName(profile) ?? 'Your name'
-  const dayRate = formatRate(talent?.day_rate_cents)
-  const floor = formatRate(talent?.rate_floor_cents)
+  const displayName = fullName(profile)
+  const department = talent?.department
+    ? DEPARTMENT_LABELS[talent.department as Department]
+    : null
+  const subHeader = [department, profile?.city].filter(Boolean).join(' · ')
 
   return (
-    <main className="px-5 py-6 max-w-md mx-auto">
-      <div className="flex items-center gap-4 mb-5">
-        <Avatar url={profile?.avatar_url ?? null} name={displayName} size={80} ring />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-[22px] font-semibold text-rs-blue-logo leading-tight">
+    <main
+      className="rounded-t-rs-lg"
+      style={{
+        background: BG,
+        color: TEXT_PRIMARY,
+        minHeight: 'calc(100dvh - 64px)',
+      }}
+    >
+      <div className="max-w-md mx-auto px-5 pt-6 pb-10">
+        <div className="flex justify-end mb-4">
+          <Link
+            href="/app/profile/edit"
+            className="text-[11px] uppercase tracking-wider underline"
+            style={{ color: TEXT_MUTED }}
+          >
+            Edit profile
+          </Link>
+        </div>
+
+        <div className="flex flex-col items-center text-center mb-8">
+          <Avatar url={profile?.avatar_url ?? null} name={displayName} size={96} />
+          <h1 className="text-[24px] font-bold mt-4 leading-tight" style={{ color: TEXT_PRIMARY }}>
             {displayName}
           </h1>
-          <p className="text-[12px] text-rs-blue-fusion font-medium mt-1">
-            {talent?.primary_role || 'Add your role'}
-            {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department as Department]}`}
-          </p>
-          <p className="text-[11px] text-rs-blue-fusion/60 mt-1">
-            {profile?.city ? `${profile.city} · ` : ''}
-            {profile?.email}
-          </p>
+          {subHeader && (
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+              {subHeader}
+            </p>
+          )}
           {profile?.verified && (
-            <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-semibold bg-rs-blue-fusion text-rs-cream px-2 py-0.5 rounded-full">
+            <span
+              className="inline-block mt-3 text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: NAVY, color: '#ffffff' }}
+            >
               ✓ Verified
             </span>
           )}
         </div>
-      </div>
 
-      <Link href="/app/profile/edit" className="rs-btn w-full text-center block mb-6">
-        Edit profile
-      </Link>
-
-      <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-        Bio
-      </p>
-      <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
-        <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-          {talent?.bio || (
-            <span className="text-rs-blue-fusion/40 italic">
-              Tell clients a bit about yourself — your background, style, what sets you apart.
-            </span>
-          )}
-        </p>
-      </div>
-
-      <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-        Rates
-      </p>
-      <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5 space-y-2">
-        <div className="flex justify-between text-[13px]">
-          <span className="text-rs-blue-fusion/70 font-medium">Day rate</span>
-          <span className="font-bold text-rs-blue-logo">
-            {dayRate ? `${dayRate} / day` : '—'}
-          </span>
-        </div>
-        <div className="flex justify-between text-[12px]">
-          <span className="text-rs-blue-fusion/60 font-medium">Floor</span>
-          <span className="font-semibold text-rs-blue-fusion">
-            {floor ? `${floor} / day` : '—'}
-          </span>
-        </div>
-      </div>
-
-      <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-        Showreel
-      </p>
-      {talent?.showreel_url ? (
-        <a
-          href={talent.showreel_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-3 bg-rs-blue-logo rounded-rs p-4 text-rs-cream mb-5 hover:opacity-90 transition-opacity"
-        >
-          <span className="w-9 h-9 rounded-full bg-rs-cream/15 flex items-center justify-center flex-shrink-0">
-            <PlayIcon className="w-3.5 h-3.5 text-rs-cream" />
-          </span>
-          <span className="flex-1 text-[13px] font-semibold uppercase tracking-wider">
-            View showreel
-          </span>
-          <span className="text-[16px]" aria-hidden>
-            →
-          </span>
-        </a>
-      ) : (
-        <div className="flex items-center gap-3 bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
-          <LinkIcon className="w-4 h-4 text-rs-blue-fusion/50 flex-shrink-0" />
-          <span className="flex-1 text-[13px] text-rs-blue-fusion/60 italic">
-            No showreel added yet
-          </span>
-        </div>
-      )}
-
-      {talent?.equipment && (
-        <>
-          <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-            Equipment
-          </p>
-          <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
-            <p className="text-[13px] text-rs-blue-fusion leading-relaxed">{talent.equipment}</p>
+        <Card>
+          <div className="grid grid-cols-2" style={{ gap: 0 }}>
+            <div className="pr-4">
+              <p
+                className="text-[10px] uppercase tracking-wider font-semibold mb-1"
+                style={{ color: TEXT_MUTED }}
+              >
+                Day rate
+              </p>
+              <p className="text-[22px] font-bold" style={{ color: TEXT_PRIMARY }}>
+                {formatRate(talent?.day_rate_cents)}
+              </p>
+            </div>
+            <div
+              className="pl-4"
+              style={{ borderLeft: `1px solid ${CARD_BORDER}` }}
+            >
+              <p
+                className="text-[10px] uppercase tracking-wider font-semibold mb-1"
+                style={{ color: TEXT_MUTED }}
+              >
+                Rate floor
+              </p>
+              <p className="text-[22px] font-bold" style={{ color: TEXT_PRIMARY }}>
+                {formatRate(talent?.rate_floor_cents)}
+              </p>
+            </div>
           </div>
-        </>
-      )}
+        </Card>
 
-      <div className="border-t border-rs-blue-fusion/15 mt-8 pt-6">
-        <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-3">
-          Account &amp; Security
-        </p>
-        <ChangePasswordSection email={profile?.email ?? user?.email ?? null} supabase={supabase} />
+        <SectionHeader>Availability</SectionHeader>
+        <AvailabilitySection
+          userId={user?.id ?? null}
+          available={profile?.available ?? true}
+          supabase={supabase}
+          onChange={(val) => updateProfile({ available: val })}
+        />
+
+        <SectionHeader>Showreel</SectionHeader>
+        {talent?.showreel_url ? (
+          <a
+            href={talent.showreel_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-[14px] p-4 mb-6 transition-opacity hover:opacity-90"
+            style={{ background: NAVY, color: '#ffffff' }}
+          >
+            <span
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.15)' }}
+            >
+              <PlayIcon className="w-3.5 h-3.5" />
+            </span>
+            <span className="flex-1 text-[13px] font-semibold uppercase tracking-wider">
+              View showreel
+            </span>
+            <span className="text-[16px]" aria-hidden>
+              →
+            </span>
+          </a>
+        ) : (
+          <Card className="mb-6">
+            <p className="text-[13px]" style={{ color: TEXT_MUTED }}>
+              No showreel added yet
+            </p>
+            <Link
+              href="/app/profile/edit"
+              className="inline-block mt-1 text-[11px] uppercase tracking-wider underline"
+              style={{ color: ACCENT }}
+            >
+              Add in Edit Profile →
+            </Link>
+          </Card>
+        )}
+
+        <SectionHeader>About</SectionHeader>
+        <Card className="mb-6">
+          {talent?.bio ? (
+            <p
+              className="text-[14px] leading-relaxed whitespace-pre-wrap"
+              style={{ color: TEXT_PRIMARY }}
+            >
+              {talent.bio}
+            </p>
+          ) : (
+            <p className="text-[13px]" style={{ color: TEXT_MUTED }}>
+              No bio added yet
+            </p>
+          )}
+        </Card>
+
+        <div style={{ borderTop: `1px solid ${CARD_BORDER}` }} className="mt-10 pt-6">
+          <SectionHeader>Account &amp; Security</SectionHeader>
+          <ChangePasswordSection
+            email={profile?.email ?? user?.email ?? null}
+            supabase={supabase}
+          />
+        </div>
       </div>
     </main>
+  )
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      className="text-[10px] uppercase tracking-wider font-semibold mt-6 mb-2"
+      style={{ color: TEXT_MUTED }}
+    >
+      {children}
+    </p>
+  )
+}
+
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`rounded-[14px] p-4 ${className}`}
+      style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}
+    >
+      {children}
+    </div>
+  )
+}
+
+type AvailStatus = 'idle' | 'saving' | 'error'
+
+function AvailabilitySection({
+  userId,
+  available,
+  supabase,
+  onChange,
+}: {
+  userId: string | null
+  available: boolean
+  supabase: ReturnType<typeof useAuth>['supabase']
+  onChange: (val: boolean) => void
+}) {
+  const [status, setStatus] = useState<AvailStatus>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+
+  async function toggle() {
+    if (!userId || status === 'saving') return
+    const next = !available
+    onChange(next)
+    setStatus('saving')
+    setErrorMsg('')
+    const { error } = await supabase
+      .from('profiles')
+      .update({ available: next })
+      .eq('id', userId)
+    if (error) {
+      onChange(!next)
+      setStatus('error')
+      setErrorMsg(error.message)
+      return
+    }
+    setStatus('idle')
+  }
+
+  return (
+    <Card className="mb-6">
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            background: available ? '#2ecc71' : TEXT_MUTED,
+            boxShadow: available ? '0 0 0 3px rgba(46,204,113,0.15)' : 'none',
+            flexShrink: 0,
+          }}
+        />
+        <div className="flex-1 min-w-0">
+          <p className="text-[14px] font-semibold" style={{ color: TEXT_PRIMARY }}>
+            {available ? 'Available' : 'Unavailable'}
+          </p>
+          <p className="text-[11px] mt-0.5" style={{ color: TEXT_MUTED }}>
+            {available
+              ? 'Clients can request you for new jobs.'
+              : 'You won’t appear to clients browsing talent.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={status === 'saving' || !userId}
+          role="switch"
+          aria-checked={available}
+          aria-label="Toggle availability"
+          className="flex-shrink-0"
+          style={{
+            width: 44,
+            height: 26,
+            borderRadius: 999,
+            background: available ? ACCENT : '#333',
+            position: 'relative',
+            transition: 'background 150ms ease',
+            opacity: status === 'saving' ? 0.6 : 1,
+            border: 'none',
+            cursor: status === 'saving' ? 'wait' : 'pointer',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute',
+              top: 3,
+              left: available ? 21 : 3,
+              width: 20,
+              height: 20,
+              borderRadius: 999,
+              background: '#ffffff',
+              transition: 'left 150ms ease',
+            }}
+          />
+        </button>
+      </div>
+      {status === 'error' && errorMsg && (
+        <p className="text-[11px] mt-3 text-red-400">{errorMsg}</p>
+      )}
+    </Card>
   )
 }
 
@@ -208,7 +364,7 @@ function ChangePasswordSection({
 
     if (!email) {
       setStatus('error')
-      setErrorMsg('Could not read your email from the profile. Refresh and try again.')
+      setErrorMsg('Could not read your email. Refresh and try again.')
       return
     }
     if (newPassword.length < 8) {
@@ -255,102 +411,110 @@ function ChangePasswordSection({
 
   if (status === 'idle' || status === 'done') {
     return (
-      <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10">
+      <Card>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[13px] font-semibold text-rs-blue-logo">Password</p>
-            <p className="text-[11px] text-rs-blue-fusion/60 mt-0.5">
+            <p className="text-[13px] font-semibold" style={{ color: TEXT_PRIMARY }}>
+              Password
+            </p>
+            <p className="text-[11px] mt-0.5" style={{ color: TEXT_MUTED }}>
               Keep your account secure. Change it any time.
             </p>
           </div>
           <button
             type="button"
             onClick={open}
-            className="shrink-0 rounded-[10px] px-3 py-2 text-[11px] uppercase tracking-wider font-semibold text-white"
-            style={{ backgroundColor: '#1A3C6B' }}
+            className="shrink-0 rounded-[10px] px-3 py-2 text-[11px] uppercase tracking-wider font-semibold"
+            style={{ background: NAVY, color: '#ffffff' }}
           >
             Change password
           </button>
         </div>
         {status === 'done' && (
-          <p className="text-[12px] mt-3" style={{ color: '#1A3C6B' }}>
+          <p className="text-[12px] mt-3" style={{ color: '#2ecc71' }}>
             Password updated successfully.
           </p>
         )}
-      </div>
+      </Card>
     )
   }
 
   const busy = status === 'verifying' || status === 'updating'
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 space-y-3">
-      <p className="text-[13px] font-semibold text-rs-blue-logo">Change password</p>
+    <form onSubmit={handleSubmit}>
+      <Card>
+        <p className="text-[13px] font-semibold mb-3" style={{ color: TEXT_PRIMARY }}>
+          Change password
+        </p>
 
-      <div>
-        <label className="block text-[11px] font-semibold text-rs-blue-fusion mb-1.5">
-          Current password
-        </label>
-        <PasswordInput
-          required
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-          autoComplete="current-password"
-          disabled={busy}
-        />
-      </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[11px] font-semibold mb-1.5" style={{ color: TEXT_MUTED }}>
+              Current password
+            </label>
+            <PasswordInput
+              required
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              disabled={busy}
+            />
+          </div>
 
-      <div>
-        <label className="block text-[11px] font-semibold text-rs-blue-fusion mb-1.5">
-          New password
-        </label>
-        <PasswordInput
-          required
-          minLength={8}
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-          placeholder="Min 8 characters"
-          autoComplete="new-password"
-          disabled={busy}
-        />
-      </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1.5" style={{ color: TEXT_MUTED }}>
+              New password
+            </label>
+            <PasswordInput
+              required
+              minLength={8}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Min 8 characters"
+              autoComplete="new-password"
+              disabled={busy}
+            />
+          </div>
 
-      <div>
-        <label className="block text-[11px] font-semibold text-rs-blue-fusion mb-1.5">
-          Confirm new password
-        </label>
-        <PasswordInput
-          required
-          minLength={8}
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          autoComplete="new-password"
-          disabled={busy}
-        />
-      </div>
+          <div>
+            <label className="block text-[11px] font-semibold mb-1.5" style={{ color: TEXT_MUTED }}>
+              Confirm new password
+            </label>
+            <PasswordInput
+              required
+              minLength={8}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              disabled={busy}
+            />
+          </div>
 
-      {errorMsg && <p className="text-[12px] text-red-700 leading-relaxed">{errorMsg}</p>}
+          {errorMsg && <p className="text-[12px] text-red-400 leading-relaxed">{errorMsg}</p>}
 
-      <div className="flex items-center gap-3 pt-1">
-        <button
-          type="submit"
-          disabled={busy || !currentPassword || !newPassword || !confirm}
-          className="rounded-[10px] px-4 py-2 text-[11px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center gap-2"
-          style={{ backgroundColor: '#1A3C6B' }}
-        >
-          {busy && <Spinner />}
-          {status === 'verifying' ? 'Verifying…' : status === 'updating' ? 'Updating…' : 'Update password'}
-        </button>
-        <button
-          type="button"
-          onClick={cancel}
-          disabled={busy}
-          className="text-[11px] uppercase tracking-wider underline disabled:opacity-50"
-          style={{ color: '#2E5099' }}
-        >
-          Cancel
-        </button>
-      </div>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={busy || !currentPassword || !newPassword || !confirm}
+              className="rounded-[10px] px-4 py-2 text-[11px] uppercase tracking-wider font-semibold disabled:opacity-50 flex items-center gap-2"
+              style={{ background: NAVY, color: '#ffffff' }}
+            >
+              {busy && <Spinner />}
+              {status === 'verifying' ? 'Verifying…' : status === 'updating' ? 'Updating…' : 'Update password'}
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              disabled={busy}
+              className="text-[11px] uppercase tracking-wider underline disabled:opacity-50"
+              style={{ color: ACCENT }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Card>
     </form>
   )
 }
