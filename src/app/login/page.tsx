@@ -375,14 +375,6 @@ function LoginInner() {
     })
   }
 
-  if (status === 'checking') {
-    return (
-      <main className="min-h-[100dvh] flex items-center justify-center rs-bg-fusion">
-        <RSLogo size={48} />
-      </main>
-    )
-  }
-
   return (
     <>
       <InstallBanner />
@@ -640,7 +632,7 @@ function LoginInner() {
                   placeholder="you@email.com"
                   className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
                   style={{ borderColor: '#AABDE0' }}
-                  disabled={status === 'submitting'}
+                  disabled={status === 'submitting' || status === 'checking'}
                   autoComplete="email"
                 />
 
@@ -649,7 +641,7 @@ function LoginInner() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Password"
-                  disabled={status === 'submitting'}
+                  disabled={status === 'submitting' || status === 'checking'}
                   autoComplete="current-password"
                 />
 
@@ -666,12 +658,19 @@ function LoginInner() {
 
                 <button
                   type="submit"
-                  disabled={status === 'submitting' || !email || !password}
+                  disabled={
+                    status === 'submitting' ||
+                    status === 'checking' ||
+                    !email ||
+                    !password
+                  }
                   className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
                   style={{ backgroundColor: '#1A3C6B' }}
                 >
-                  {status === 'submitting' && <Spinner />}
-                  {status === 'submitting'
+                  {(status === 'submitting' || status === 'checking') && <Spinner />}
+                  {status === 'checking'
+                    ? 'Loading…'
+                    : status === 'submitting'
                     ? 'Signing in…'
                     : selectedRole === 'talent'
                     ? 'Sign in as talent'
