@@ -3,22 +3,23 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
-function formatRate(cents: number | null | undefined) {
-  if (!cents) return '—'
+function formatRate(cents: number | null | undefined): string | null {
+  if (!cents) return null
   return `$${(cents / 100).toLocaleString()}`
 }
 
-function initials(name: string | null | undefined) {
-  if (!name) return '?'
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
+function fullName(
+  profile: { first_name?: string | null; last_name?: string | null; full_name?: string | null } | null
+): string | null {
+  if (!profile) return null
+  const first = profile.first_name?.trim()
+  const last = profile.last_name?.trim()
+  const joined = [first, last].filter(Boolean).join(' ')
+  return joined || profile.full_name || null
 }
 
 function Spinner() {
@@ -30,28 +31,56 @@ function Spinner() {
   )
 }
 
+function PlayIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5z" />
+    </svg>
+  )
+}
+
+function LinkIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  )
+}
+
 export default function ProfilePage() {
   const { profile, user, supabase } = useAuth()
   const talent = profile?.talent_profiles?.[0] ?? null
 
+  const displayName = fullName(profile) ?? 'Your name'
+  const dayRate = formatRate(talent?.day_rate_cents)
+  const floor = formatRate(talent?.rate_floor_cents)
+
   return (
     <main className="px-5 py-6 max-w-md mx-auto">
       <div className="flex items-center gap-4 mb-5">
-        <div
-          className="w-20 h-20 rounded-full bg-[#E8EAED] flex items-center justify-center text-xl font-bold text-rs-blue-logo"
-          style={{ boxShadow: '0 0 0 2px #1E3A6B, 0 0 0 4px #FBF5E4' }}
-        >
-          {initials(profile?.full_name ?? profile?.email)}
-        </div>
+        <Avatar url={profile?.avatar_url ?? null} name={displayName} size={80} ring />
         <div className="flex-1 min-w-0">
           <h1 className="text-[22px] font-semibold text-rs-blue-logo leading-tight">
-            {profile?.full_name || 'Your name'}
+            {displayName}
           </h1>
           <p className="text-[12px] text-rs-blue-fusion font-medium mt-1">
             {talent?.primary_role || 'Add your role'}
             {talent?.department && ` · ${DEPARTMENT_LABELS[talent.department as Department]}`}
           </p>
-          <p className="text-[11px] text-rs-blue-fusion/60 mt-1">{profile?.email}</p>
+          <p className="text-[11px] text-rs-blue-fusion/60 mt-1">
+            {profile?.city ? `${profile.city} · ` : ''}
+            {profile?.email}
+          </p>
           {profile?.verified && (
             <span className="inline-block mt-2 text-[10px] uppercase tracking-wider font-semibold bg-rs-blue-fusion text-rs-cream px-2 py-0.5 rounded-full">
               ✓ Verified
@@ -81,45 +110,57 @@ export default function ProfilePage() {
         Rates
       </p>
       <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5 space-y-2">
-        <div className="flex justify-between text-[12px]">
-          <span className="text-rs-blue-fusion/60 font-medium">Day rate</span>
-          <span className="font-bold text-rs-blue-logo">{formatRate(talent?.day_rate_cents)}</span>
+        <div className="flex justify-between text-[13px]">
+          <span className="text-rs-blue-fusion/70 font-medium">Day rate</span>
+          <span className="font-bold text-rs-blue-logo">
+            {dayRate ? `${dayRate} / day` : '—'}
+          </span>
         </div>
         <div className="flex justify-between text-[12px]">
-          <span className="text-rs-blue-fusion/60 font-medium">Half day</span>
-          <span className="font-bold text-rs-blue-logo">
-            {formatRate(talent?.half_day_rate_cents)}
+          <span className="text-rs-blue-fusion/60 font-medium">Floor</span>
+          <span className="font-semibold text-rs-blue-fusion">
+            {floor ? `${floor} / day` : '—'}
           </span>
         </div>
       </div>
 
       <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-        Equipment
+        Showreel
       </p>
-      <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
-        <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-          {talent?.equipment || (
-            <span className="text-rs-blue-fusion/40 italic">
-              List the gear you own and bring to jobs.
-            </span>
-          )}
-        </p>
-      </div>
+      {talent?.showreel_url ? (
+        <a
+          href={talent.showreel_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 bg-rs-blue-logo rounded-rs p-4 text-rs-cream mb-5 hover:opacity-90 transition-opacity"
+        >
+          <span className="w-9 h-9 rounded-full bg-rs-cream/15 flex items-center justify-center flex-shrink-0">
+            <PlayIcon className="w-3.5 h-3.5 text-rs-cream" />
+          </span>
+          <span className="flex-1 text-[13px] font-semibold uppercase tracking-wider">
+            View showreel
+          </span>
+          <span className="text-[16px]" aria-hidden>
+            →
+          </span>
+        </a>
+      ) : (
+        <div className="flex items-center gap-3 bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
+          <LinkIcon className="w-4 h-4 text-rs-blue-fusion/50 flex-shrink-0" />
+          <span className="flex-1 text-[13px] text-rs-blue-fusion/60 italic">
+            No showreel added yet
+          </span>
+        </div>
+      )}
 
-      {talent?.showreel_url && (
+      {talent?.equipment && (
         <>
           <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-2">
-            Showreel
+            Equipment
           </p>
-          <a
-            href={talent.showreel_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block bg-rs-blue-logo rounded-rs p-6 text-center text-rs-cream mb-5"
-          >
-            <p className="text-[11px] uppercase tracking-wider font-semibold">▶ Watch showreel</p>
-            <p className="text-[10px] opacity-60 mt-1 break-all">{talent.showreel_url}</p>
-          </a>
+          <div className="bg-white rounded-rs p-4 border border-rs-blue-fusion/10 mb-5">
+            <p className="text-[13px] text-rs-blue-fusion leading-relaxed">{talent.equipment}</p>
+          </div>
         </>
       )}
 
@@ -127,10 +168,7 @@ export default function ProfilePage() {
         <p className="text-[10px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold mb-3">
           Account &amp; Security
         </p>
-        <ChangePasswordSection
-          email={profile?.email ?? user?.email ?? null}
-          supabase={supabase}
-        />
+        <ChangePasswordSection email={profile?.email ?? user?.email ?? null} supabase={supabase} />
       </div>
     </main>
   )
@@ -291,9 +329,7 @@ function ChangePasswordSection({
         />
       </div>
 
-      {errorMsg && (
-        <p className="text-[12px] text-red-700 leading-relaxed">{errorMsg}</p>
-      )}
+      {errorMsg && <p className="text-[12px] text-red-700 leading-relaxed">{errorMsg}</p>}
 
       <div className="flex items-center gap-3 pt-1">
         <button

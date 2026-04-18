@@ -1,10 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
+import { Avatar } from '@/components/Avatar'
 import { CITY_OPTIONS, DEPARTMENT_LABELS, type Department } from '@/lib/types'
+
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024 // 5MB
+const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 
 type FormState = {
   first_name: string
@@ -38,7 +42,7 @@ const INITIAL: FormState = {
 
 export default function EditProfilePage() {
   const router = useRouter()
-  const { user, supabase, refresh } = useAuth()
+  const { user, profile: ctxProfile, supabase, refresh, updateProfile } = useAuth()
   const userId = user?.id ?? null
 
   const [form, setForm] = useState<FormState>(INITIAL)
@@ -47,6 +51,11 @@ export default function EditProfilePage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [editingReel, setEditingReel] = useState(false)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarToast, setAvatarToast] = useState('')
+  const [avatarError, setAvatarError] = useState('')
 
   useEffect(() => {
     if (!userId) return
@@ -94,6 +103,64 @@ export default function EditProfilePage() {
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
+  }
+
+  function openFilePicker() {
+    if (avatarUploading) return
+    fileInputRef.current?.click()
+  }
+
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    // reset the input so choosing the same file again re-fires change
+    e.target.value = ''
+    if (!file || !userId) return
+
+    setAvatarError('')
+    setAvatarToast('')
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setAvatarError('Please use a JPEG, PNG or WebP photo.')
+      return
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError('Photo must be under 5MB.')
+      return
+    }
+
+    setAvatarUploading(true)
+
+    const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'
+    const path = `${userId}/avatar.${ext}`
+
+    const upload = await supabase.storage
+      .from('avatars')
+      .upload(path, file, { upsert: true, contentType: file.type })
+
+    if (upload.error) {
+      setAvatarUploading(false)
+      setAvatarError(upload.error.message)
+      return
+    }
+
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    const bustedUrl = `${data.publicUrl}?t=${Date.now()}`
+
+    const save = await supabase
+      .from('profiles')
+      .update({ avatar_url: bustedUrl })
+      .eq('id', userId)
+
+    if (save.error) {
+      setAvatarUploading(false)
+      setAvatarError(save.error.message)
+      return
+    }
+
+    updateProfile({ avatar_url: bustedUrl })
+    setAvatarUploading(false)
+    setAvatarToast('Photo updated')
+    setTimeout(() => setAvatarToast(''), 2500)
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -180,6 +247,64 @@ export default function EditProfilePage() {
       <p className="text-[11px] uppercase tracking-widest text-rs-blue-fusion/60 font-semibold mb-6">
         The info clients will see
       </p>
+
+      <div className="flex flex-col items-center mb-6">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          capture="user"
+          style={{ display: 'none' }}
+          onChange={handleAvatarChange}
+        />
+        <button
+          type="button"
+          onClick={openFilePicker}
+          disabled={avatarUploading}
+          className="relative rounded-full disabled:opacity-80"
+          aria-label="Change photo"
+          style={{ width: 80, height: 80 }}
+        >
+          <Avatar
+            url={ctxProfile?.avatar_url ?? null}
+            name={[form.first_name, form.last_name].filter(Boolean).join(' ') || ctxProfile?.email || null}
+            size={80}
+            ring
+          />
+          {avatarUploading && (
+            <span
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(10,10,10,0.55)',
+                borderRadius: '9999px',
+              }}
+            >
+              <UploadSpinner />
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={openFilePicker}
+          disabled={avatarUploading}
+          className="text-[11px] uppercase tracking-wider font-semibold underline mt-3 disabled:opacity-50"
+          style={{ color: '#2E5099' }}
+        >
+          {avatarUploading ? 'Uploading…' : 'Change photo'}
+        </button>
+        {avatarToast && (
+          <p className="text-[11px] mt-2" style={{ color: '#1a7a3e' }}>
+            {avatarToast}
+          </p>
+        )}
+        {avatarError && (
+          <p className="text-[11px] text-red-700 mt-2 text-center max-w-xs">{avatarError}</p>
+        )}
+      </div>
 
       <form onSubmit={handleSave} className="space-y-5">
         <Section title="About you">
@@ -446,6 +571,22 @@ function LinkIcon({ className = '', style }: { className?: string; style?: React
     >
       <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
       <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  )
+}
+
+function UploadSpinner() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      className="animate-spin"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" stroke="#FBF5E4" strokeOpacity="0.35" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="#FBF5E4" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }

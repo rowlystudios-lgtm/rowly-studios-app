@@ -6,11 +6,19 @@ import { useAuth } from '@/lib/auth-context'
 export default function AppHome() {
   const { profile } = useAuth()
 
-  const firstName = profile?.full_name?.split(' ')[0] ?? 'there'
+  const firstName =
+    profile?.first_name ??
+    profile?.full_name?.split(' ')[0] ??
+    'there'
   const talent = profile?.talent_profiles?.[0] ?? null
-  const profileComplete = Boolean(
-    talent?.department && talent?.primary_role && talent?.day_rate_cents
-  )
+
+  const missing: string[] = []
+  if (!profile?.first_name) missing.push('Add your first name')
+  if (!profile?.last_name) missing.push('Add your last name')
+  if (!talent?.department) missing.push('Choose your department')
+  if (!talent?.bio) missing.push('Write a short bio')
+
+  const profileComplete = missing.length === 0
 
   return (
     <main className="px-5 py-6 max-w-md mx-auto">
@@ -22,13 +30,21 @@ export default function AppHome() {
       {!profileComplete && (
         <div className="bg-[#F6EBC8] border border-[#8a6f1a]/20 rounded-rs p-4 mb-5">
           <p className="text-[10px] uppercase tracking-wider text-[#8a6f1a] font-semibold">
-            Complete your profile
+            Finish setting up your profile
           </p>
           <p className="text-[13px] text-rs-blue-fusion mt-1 leading-relaxed">
-            Add your role, rate, and showreel so clients can see you and request bookings.
+            A few more details and clients can start requesting you.
           </p>
-          <Link href="/app/profile/edit" className="rs-btn mt-3 inline-block">
-            Set up profile
+          <ul className="mt-3 space-y-1">
+            {missing.map((m) => (
+              <li key={m} className="flex items-start gap-2 text-[12px] text-rs-blue-fusion">
+                <span className="mt-[6px] w-1.5 h-1.5 rounded-full bg-[#8a6f1a] flex-shrink-0" />
+                <span>{m}</span>
+              </li>
+            ))}
+          </ul>
+          <Link href="/app/profile/edit" className="rs-btn mt-4 inline-block">
+            Continue
           </Link>
         </div>
       )}
