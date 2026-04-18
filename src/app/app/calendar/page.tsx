@@ -9,11 +9,13 @@ const BG = '#1A3C6B'
 const TEXT = '#FFFFFF'
 const TEXT_MUTED = '#AABDE0'
 
+const AVAILABLE_HOVER_BG = '#f0f4ff'
+
 const STATE_STYLE: Record<DayState, { bg: string; color: string; borderColor?: string }> = {
   available: {
-    bg: 'rgba(255,255,255,0.06)',
-    color: TEXT,
-    borderColor: 'rgba(170,189,224,0.15)',
+    bg: '#FFFFFF',
+    color: '#1A3C6B',
+    borderColor: 'rgba(26,60,107,0.12)',
   },
   unavailable: { bg: '#0a1f44', color: TEXT_MUTED },
   requested: { bg: '#d4950a', color: TEXT },
@@ -305,8 +307,8 @@ export default function CalendarPage() {
                   aspectRatio: '1 / 1',
                   borderRadius: 8,
                   border: 'none',
-                  outline: isToday ? '1.5px solid #fff' : 'none',
-                  outlineOffset: isToday ? -1 : 0,
+                  outline: isToday ? '2px solid #1A3C6B' : 'none',
+                  outlineOffset: isToday ? -2 : 0,
                   background: style.bg,
                   color: style.color,
                   fontSize: 13,
@@ -322,7 +324,7 @@ export default function CalendarPage() {
                 onMouseEnter={(e) => {
                   if (state === 'available' && !saving) {
                     ;(e.currentTarget as HTMLButtonElement).style.background =
-                      'rgba(255,255,255,0.14)'
+                      AVAILABLE_HOVER_BG
                   }
                 }}
                 onMouseLeave={(e) => {
