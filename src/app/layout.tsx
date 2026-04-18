@@ -20,12 +20,12 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: '/icon-192.png',
-    apple: '/icon-192.png',
+    apple: '/apple-touch-icon.png',
   },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#0a0a0a',
+  themeColor: '#1A3C6B',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -45,8 +45,8 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="RS App" />
-        <meta name="theme-color" content="#0a0a0a" />
-        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <meta name="theme-color" content="#1A3C6B" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
       <body className="font-sans">{children}</body>
     </html>
