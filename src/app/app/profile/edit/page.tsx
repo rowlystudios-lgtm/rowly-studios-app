@@ -49,7 +49,7 @@ const INITIAL: FormState = {
 
 export default function EditProfilePage() {
   const router = useRouter()
-  const { user, profile: ctxProfile, supabase, refresh, updateProfile } = useAuth()
+  const { user, profile: ctxProfile, supabase, updateProfile } = useAuth()
   const userId = user?.id ?? null
 
   const [form, setForm] = useState<FormState>(INITIAL)
@@ -230,14 +230,10 @@ export default function EditProfilePage() {
       city: form.city || null,
       phone: form.phone || null,
     })
-    await refresh()
-
     setSaving(false)
     setSaved(true)
-
-    setTimeout(() => {
-      router.push('/app/profile')
-    }, 1000)
+    // Navigate immediately — profile page fetches its own fresh data on mount
+    router.push('/app/profile')
   }
 
   if (loading) {

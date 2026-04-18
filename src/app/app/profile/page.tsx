@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
-import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { DEPARTMENT_LABELS, type Department, type TalentProfile } from '@/lib/types'
 
 const BG = '#1A3C6B'
 const CARD_BG = '#2E5099'
@@ -62,7 +62,28 @@ function PlayIcon({ className = '' }: { className?: string }) {
 
 export default function ProfilePage() {
   const { profile, user, supabase, updateProfile } = useAuth()
-  const talent = profile?.talent_profiles?.[0] ?? null
+
+  const [talent, setTalent] = useState<TalentProfile | null>(null)
+  const [talentLoading, setTalentLoading] = useState(true)
+
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    supabase
+      .from('talent_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setTalent(data as TalentProfile | null)
+          setTalentLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, supabase])
 
   const displayName = fullName(profile)
   const departmentLabel = talent?.department
@@ -119,7 +140,11 @@ export default function ProfilePage() {
         <Card>
           <FieldLabel>Department</FieldLabel>
           <p className="text-[16px] font-semibold mt-1" style={{ color: TEXT_PRIMARY }}>
-            {departmentLabel ?? <Muted>Not set</Muted>}
+            {talentLoading ? (
+              <Muted>Loading…</Muted>
+            ) : (
+              departmentLabel ?? <Muted>Not set</Muted>
+            )}
           </p>
         </Card>
 
@@ -129,13 +154,13 @@ export default function ProfilePage() {
             <div className="pr-4">
               <FieldLabel>Day Rate</FieldLabel>
               <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
-                {formatMoney(talent?.day_rate_cents)}
+                {talentLoading ? <Muted>…</Muted> : formatMoney(talent?.day_rate_cents)}
               </p>
             </div>
             <div className="pl-4" style={{ borderLeft: `1px solid ${CARD_BORDER}` }}>
               <FieldLabel>Rate Floor</FieldLabel>
               <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
-                {formatMoney(talent?.rate_floor_cents)}
+                {talentLoading ? <Muted>…</Muted> : formatMoney(talent?.rate_floor_cents)}
               </p>
             </div>
           </div>
@@ -144,7 +169,11 @@ export default function ProfilePage() {
         {/* Equipment */}
         <Card>
           <FieldLabel>Equipment</FieldLabel>
-          {talent?.equipment ? (
+          {talentLoading ? (
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+              Loading…
+            </p>
+          ) : talent?.equipment ? (
             <p
               className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
               style={{ color: TEXT_PRIMARY }}
@@ -169,7 +198,11 @@ export default function ProfilePage() {
         {/* About */}
         <Card>
           <FieldLabel>About</FieldLabel>
-          {talent?.bio ? (
+          {talentLoading ? (
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+              Loading…
+            </p>
+          ) : talent?.bio ? (
             <p
               className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
               style={{ color: TEXT_PRIMARY }}
@@ -184,7 +217,16 @@ export default function ProfilePage() {
         </Card>
 
         {/* Showreel */}
-        <ShowreelBlock url={talent?.showreel_url ?? null} />
+        {talentLoading ? (
+          <Card>
+            <FieldLabel>Showreel</FieldLabel>
+            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
+              Loading…
+            </p>
+          </Card>
+        ) : (
+          <ShowreelBlock url={talent?.showreel_url ?? null} />
+        )}
 
         {/* Account & Security */}
         <div style={{ borderTop: `1px solid ${CARD_BORDER}` }} className="mt-10 pt-6">
