@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
+import { InstallBanner } from '@/components/InstallBanner'
 import { createClient } from '@/lib/supabase-browser'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
@@ -106,7 +107,9 @@ function LoginInner() {
   }
 
   return (
-    <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
+    <>
+      <InstallBanner />
+      <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
       <Link href="/" className="flex flex-col items-center gap-4 mb-8">
         <RSLogo size={64} />
         <span className="text-xs tracking-[2px] text-rs-cream uppercase font-semibold">
@@ -208,6 +211,7 @@ function LoginInner() {
       >
         ← Back
       </Link>
-    </main>
+      </main>
+    </>
   )
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
+import { InstallBanner } from '@/components/InstallBanner'
 import { createClient } from '@/lib/supabase-server'
 
 export default async function Home() {
@@ -14,7 +15,9 @@ export default async function Home() {
   }
 
   return (
-    <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
+    <>
+      <InstallBanner />
+      <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
       <div className="flex flex-col items-center gap-5 mb-10">
         <RSLogo size={88} />
         <div className="text-center">
@@ -46,6 +49,7 @@ export default async function Home() {
       <p className="text-[10px] tracking-widest uppercase text-rs-cream/40 mt-10">
         v0.1 · Beta · {new Date().getFullYear()}
       </p>
-    </main>
+      </main>
+    </>
   )
 }
