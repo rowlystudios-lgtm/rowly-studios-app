@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
+import { AdminGuard } from '@/components/AdminGuard'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
@@ -40,7 +41,15 @@ function fullName(row: Row): string {
   )
 }
 
-export default function AdminTalentPage() {
+export default function AdminTalentPageWrapper() {
+  return (
+    <AdminGuard>
+      <AdminTalentPage />
+    </AdminGuard>
+  )
+}
+
+function AdminTalentPage() {
   const { supabase } = useAuth()
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)

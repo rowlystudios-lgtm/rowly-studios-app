@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
+import { AdminGuard } from '@/components/AdminGuard'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 
 const CARD_BG = '#2E5099'
@@ -39,7 +40,15 @@ function fullName(r: Row): string {
   )
 }
 
-export default function AdminClientsPage() {
+export default function AdminClientsPageWrapper() {
+  return (
+    <AdminGuard>
+      <AdminClientsPage />
+    </AdminGuard>
+  )
+}
+
+function AdminClientsPage() {
   const { supabase } = useAuth()
   const [rows, setRows] = useState<Row[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})

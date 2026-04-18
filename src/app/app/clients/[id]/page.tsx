@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
+import { AdminGuard } from '@/components/AdminGuard'
 import { JobStatusBadge } from '@/components/StatusBadge'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { formatDateRange } from '@/lib/jobs'
@@ -53,7 +54,15 @@ function unwrap<T>(v: T | T[] | null): T | null {
   return Array.isArray(v) ? v[0] ?? null : v
 }
 
-export default function AdminClientDetailPage() {
+export default function AdminClientDetailPageWrapper() {
+  return (
+    <AdminGuard>
+      <AdminClientDetailPage />
+    </AdminGuard>
+  )
+}
+
+function AdminClientDetailPage() {
   const params = useParams<{ id: string }>()
   const { supabase } = useAuth()
   const id = params?.id

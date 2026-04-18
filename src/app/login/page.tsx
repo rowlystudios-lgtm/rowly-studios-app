@@ -8,6 +8,7 @@ import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
 import { PinInput } from '@/components/PinInput'
 import { createClient } from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
 type AdminStep = 'password' | 'pin'
@@ -68,6 +69,7 @@ function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
+  const { refresh } = useAuth()
 
   const [email, setEmail] = useState('')
   const [resetEmail, setResetEmail] = useState('')
@@ -93,15 +95,50 @@ function LoginInner() {
 
   useEffect(() => {
     async function check() {
+      const wantsAdminPin =
+        searchParams.get('admin') === '1' && searchParams.get('reason') === 'pin'
+
       const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        router.replace('/app')
-      } else {
+
+      if (!user) {
         setStatus('idle')
+        if (searchParams.get('admin') === '1') {
+          setShowAdminForm(true)
+        }
+        return
       }
+
+      if (wantsAdminPin) {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('role, email')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (profileRow?.role === 'admin') {
+          setAdminEmail(profileRow.email ?? user.email ?? '')
+          setShowAdminForm(true)
+          setAdminStep('pin')
+          setPin('')
+          setPinAttempts(0)
+          setPinStatus('idle')
+          setPinErrorMsg('')
+          setAdminStatus('idle')
+          setAdminErrorMsg('')
+          setStatus('idle')
+          return
+        }
+
+        // Session exists but this isn't an admin account — sign out and show login
+        await supabase.auth.signOut()
+        setStatus('idle')
+        return
+      }
+
+      router.replace('/app')
     }
     check()
-  }, [router, supabase])
+  }, [router, supabase, searchParams])
 
   useEffect(() => {
     const err = searchParams.get('error')
@@ -199,8 +236,10 @@ function LoginInner() {
 
     if (valid === true) {
       setPinStatus('idle')
+      // Re-fetch the profile so pin_verified_at is fresh in AuthContext
+      // before AdminGuard checks it on /app.
+      await refresh()
       router.push('/app')
-      router.refresh()
       return
     }
 
@@ -563,6 +602,23 @@ function LoginInner() {
                     </form>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {searchParams.get('reason') === 'pin' && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: '#AABDE0',
+                            background: 'rgba(170,189,224,0.1)',
+                            border: '1px solid rgba(170,189,224,0.2)',
+                            borderRadius: 10,
+                            padding: '10px 12px',
+                            textAlign: 'center',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Your admin session requires PIN verification to continue.
+                        </p>
+                      )}
+
                       <div style={{ textAlign: 'center' }}>
                         <p
                           style={{

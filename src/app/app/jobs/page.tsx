@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
+import { AdminGuard } from '@/components/AdminGuard'
 import {
   JobStatusBadge,
   BookingStatusBadge,
@@ -98,15 +99,17 @@ function formatMoney(cents: number | null | undefined): string {
 
 export default function AdminJobsPage() {
   return (
-    <Suspense
-      fallback={
-        <PageShell>
-          <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>
-        </PageShell>
-      }
-    >
-      <AdminJobsInner />
-    </Suspense>
+    <AdminGuard>
+      <Suspense
+        fallback={
+          <PageShell>
+            <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>
+          </PageShell>
+        }
+      >
+        <AdminJobsInner />
+      </Suspense>
+    </AdminGuard>
   )
 }
 

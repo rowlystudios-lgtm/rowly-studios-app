@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
+import { AdminGuard } from '@/components/AdminGuard'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
@@ -61,7 +62,15 @@ function getVimeoId(url: string): string | null {
   return match ? match[1] : null
 }
 
-export default function AdminTalentDetailPage() {
+export default function AdminTalentDetailPageWrapper() {
+  return (
+    <AdminGuard>
+      <AdminTalentDetailPage />
+    </AdminGuard>
+  )
+}
+
+function AdminTalentDetailPage() {
   const params = useParams<{ id: string }>()
   const { supabase } = useAuth()
   const id = params?.id

@@ -20,6 +20,7 @@ export type Profile = {
   verified_at: string | null
   available: boolean
   last_view_mode: ViewMode | null
+  pin_verified_at: string | null
   created_at: string
   updated_at: string
 }

@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context'
 import { TalentOverview } from '@/components/TalentOverview'
 import { ClientOverview } from '@/components/ClientOverview'
 import { AdminDashboard } from '@/components/AdminDashboard'
+import { AdminGuard } from '@/components/AdminGuard'
 import { PageShell } from '@/components/PageShell'
 
 export default function AppHome() {
@@ -11,9 +12,11 @@ export default function AppHome() {
 
   if (viewMode === 'admin') {
     return (
-      <PageShell>
-        <AdminDashboard />
-      </PageShell>
+      <AdminGuard>
+        <PageShell>
+          <AdminDashboard />
+        </PageShell>
+      </AdminGuard>
     )
   }
 
