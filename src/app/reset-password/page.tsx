@@ -41,21 +41,38 @@ export default function ResetPasswordPage() {
   const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
-    // detectSessionInUrl in the browser client auto-exchanges ?code= on load.
-    // Give it a tick, then check for a session.
     let cancelled = false
-    async function check() {
-      const { data: { user }, error } = await supabase.auth.getUser()
+    let resolved = false
+
+    // Supabase fires PASSWORD_RECOVERY when the client parses a recovery
+    // token from the URL hash (or exchanges a ?code= recovery link).
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return
-      if (error || !user) {
-        setStatus('expired')
-      } else {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
+        resolved = true
         setStatus('idle')
       }
-    }
-    check()
+    })
+
+    // Fallback: if the user already has a session (e.g. signed in and
+    // navigated here manually), let them change their password.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (cancelled || resolved) return
+      if (user) {
+        resolved = true
+        setStatus('idle')
+      } else {
+        // Give onAuthStateChange a moment to fire after URL parsing.
+        setTimeout(() => {
+          if (cancelled || resolved) return
+          setStatus('expired')
+        }, 1500)
+      }
+    })
+
     return () => {
       cancelled = true
+      sub.subscription.unsubscribe()
     }
   }, [supabase])
 
@@ -78,11 +95,11 @@ export default function ResetPasswordPage() {
     const { error } = await supabase.auth.updateUser({ password })
 
     if (error) {
-      setStatus('error')
       const msg = error.message.toLowerCase()
       if (msg.includes('session') || msg.includes('expired') || msg.includes('invalid')) {
         setStatus('expired')
       } else {
+        setStatus('error')
         setErrorMsg(error.message)
       }
       return

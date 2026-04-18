@@ -1,23 +1,64 @@
-import { createClient } from '@/lib/supabase-server'
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase-browser'
+import type { Profile, TalentProfile } from '@/lib/types'
 
-export default async function AppHome() {
+export default function AppHome() {
+  const router = useRouter()
   const supabase = createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user!.id)
-    .maybeSingle()
+  const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [talentProfile, setTalentProfile] = useState<TalentProfile | null>(null)
 
-  const { data: talentProfile } = await supabase
-    .from('talent_profiles')
-    .select('*')
-    .eq('id', user!.id)
-    .maybeSingle()
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.replace('/login')
+        return
+      }
+
+      const [{ data: p }, { data: tp }] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+        supabase.from('talent_profiles').select('*').eq('id', user.id).maybeSingle(),
+      ])
+
+      if (cancelled) return
+      setProfile(p as Profile | null)
+      setTalentProfile(tp as TalentProfile | null)
+      setLoading(false)
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [router, supabase])
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '60vh',
+          color: '#1A3C6B',
+          fontSize: 13,
+          letterSpacing: 2,
+          textTransform: 'uppercase',
+        }}
+      >
+        Loading…
+      </div>
+    )
+  }
 
   const firstName = profile?.full_name?.split(' ')[0] ?? 'there'
 
@@ -40,10 +81,7 @@ export default async function AppHome() {
           <p className="text-[13px] text-rs-blue-fusion mt-1 leading-relaxed">
             Add your role, rate, and showreel so clients can see you and request bookings.
           </p>
-          <Link
-            href="/app/profile/edit"
-            className="rs-btn mt-3 inline-block"
-          >
+          <Link href="/app/profile/edit" className="rs-btn mt-3 inline-block">
             Set up profile
           </Link>
         </div>
@@ -72,7 +110,7 @@ export default async function AppHome() {
           className="block bg-white rounded-rs p-3 border border-rs-blue-fusion/10 hover:border-rs-blue-fusion/30"
         >
           <p className="text-[13px] font-semibold text-rs-blue-logo">Mark availability</p>
-          <p className="text-[11px] text-rs-blue-fusion/60 mt-0.5">Tell clients which days you're free</p>
+          <p className="text-[11px] text-rs-blue-fusion/60 mt-0.5">Tell clients which days you&apos;re free</p>
         </Link>
       </div>
     </main>

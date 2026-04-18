@@ -46,27 +46,39 @@ const ANDROID_STEPS: Step[] = [
   },
 ]
 
-function detectPlatform(): Platform {
-  if (typeof navigator === 'undefined') return 'ios'
-  const ua = navigator.userAgent || ''
-  if (/android/i.test(ua)) return 'android'
-  return 'ios'
-}
-
 export default function GetStartedPage() {
+  const [isMounted, setIsMounted] = useState(false)
   const [platform, setPlatform] = useState<Platform>('ios')
   const [standalone, setStandalone] = useState(false)
-  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setPlatform(detectPlatform())
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      // @ts-expect-error — iOS Safari exposes navigator.standalone
-      window.navigator.standalone === true
-    setStandalone(isStandalone)
-    setMounted(true)
+    const ua = navigator.userAgent || ''
+    setPlatform(/Android/i.test(ua) ? 'android' : 'ios')
+
+    const standaloneMatch =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches
+    const iosStandalone =
+      (navigator as unknown as { standalone?: boolean }).standalone === true
+    setStandalone(standaloneMatch || iosStandalone)
+
+    setIsMounted(true)
   }, [])
+
+  if (!isMounted) {
+    return (
+      <main className="min-h-[100dvh] bg-[#0a0a0a] text-white">
+        <div className="mx-auto max-w-md px-6 py-10">
+          <div className="flex items-center gap-3 mb-10">
+            <RSLogo size={40} />
+            <span className="text-[11px] tracking-[2px] uppercase font-semibold text-white/80">
+              Rowly Studios
+            </span>
+          </div>
+        </div>
+      </main>
+    )
+  }
 
   const steps = platform === 'ios' ? IOS_STEPS : ANDROID_STEPS
 
@@ -80,7 +92,7 @@ export default function GetStartedPage() {
           </span>
         </Link>
 
-        {mounted && standalone ? (
+        {standalone ? (
           <section className="space-y-4">
             <h1 className="text-[22px] font-semibold leading-tight">You&apos;re all set.</h1>
             <p className="text-[14px] text-white/70 leading-relaxed">

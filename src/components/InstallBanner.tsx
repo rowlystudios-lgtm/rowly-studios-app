@@ -5,31 +5,33 @@ import Link from 'next/link'
 
 const STORAGE_KEY = 'rs-app-install-banner-dismissed'
 
-function isMobile(): boolean {
-  if (typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent || ''
-  return /android|iphone|ipad|ipod/i.test(ua)
-}
-
-function isStandalone(): boolean {
-  if (typeof window === 'undefined') return false
-  if (window.matchMedia('(display-mode: standalone)').matches) return true
-  // @ts-expect-error — iOS Safari exposes navigator.standalone
-  return window.navigator.standalone === true
-}
-
 export function InstallBanner() {
+  const [isMounted, setIsMounted] = useState(false)
   const [show, setShow] = useState(false)
 
   useEffect(() => {
-    if (!isMobile()) return
-    if (isStandalone()) return
+    setIsMounted(true)
+
+    let dismissed: string | null = null
     try {
-      if (window.localStorage.getItem(STORAGE_KEY) === '1') return
+      dismissed = window.localStorage.getItem(STORAGE_KEY)
     } catch {
-      // localStorage blocked — show anyway
+      // localStorage blocked — treat as not dismissed
     }
-    setShow(true)
+
+    const standaloneMatch =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches
+    // iOS Safari exposes navigator.standalone
+    const iosStandalone =
+      typeof navigator !== 'undefined' &&
+      (navigator as unknown as { standalone?: boolean }).standalone === true
+    const isStandalone = standaloneMatch || iosStandalone
+
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(ua)
+
+    setShow(!dismissed && !isStandalone && isMobile)
   }, [])
 
   function dismiss() {
@@ -41,7 +43,7 @@ export function InstallBanner() {
     }
   }
 
-  if (!show) return null
+  if (!isMounted || !show) return null
 
   return (
     <div className="w-full bg-[#0a0a0a] text-white text-[12px] px-4 py-3 flex items-center gap-3">
