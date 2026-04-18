@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useAuth, roleOf } from '@/lib/auth-context'
-import type { UserRole } from '@/lib/types'
+import { useAuth } from '@/lib/auth-context'
+import type { ViewMode } from '@/lib/types'
 
 type Tab = { href: string; label: string; icon: React.ReactNode; matches?: (path: string) => boolean }
 
@@ -67,7 +67,7 @@ const BuildingIcon = (
   </svg>
 )
 
-const TABS: Record<UserRole, Tab[]> = {
+const TABS: Record<ViewMode, Tab[]> = {
   talent: [
     { href: '/app', label: 'Overview', icon: BriefcaseIcon, matches: (p) => p === '/app' },
     { href: '/app/calendar', label: 'Calendar', icon: CalendarIcon },
@@ -90,9 +90,8 @@ const TABS: Record<UserRole, Tab[]> = {
 
 export function TabBar() {
   const pathname = usePathname()
-  const { profile } = useAuth()
-  const role = roleOf(profile)
-  const tabs = TABS[role]
+  const { viewMode } = useAuth()
+  const tabs = TABS[viewMode] ?? TABS.talent
 
   return (
     <nav

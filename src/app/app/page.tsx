@@ -1,16 +1,15 @@
 'use client'
 
-import { useAuth, roleOf } from '@/lib/auth-context'
+import { useAuth } from '@/lib/auth-context'
 import { TalentOverview } from '@/components/TalentOverview'
 import { ClientOverview } from '@/components/ClientOverview'
 import { AdminDashboard } from '@/components/AdminDashboard'
 import { PageShell } from '@/components/PageShell'
 
 export default function AppHome() {
-  const { profile } = useAuth()
-  const role = roleOf(profile)
+  const { viewMode } = useAuth()
 
-  if (role === 'admin') {
+  if (viewMode === 'admin') {
     return (
       <PageShell>
         <AdminDashboard />
@@ -18,7 +17,7 @@ export default function AppHome() {
     )
   }
 
-  if (role === 'client') {
+  if (viewMode === 'client') {
     return (
       <PageShell>
         <ClientOverview />

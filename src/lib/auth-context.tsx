@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { User, Session, SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase-browser'
-import type { Profile, TalentProfile, UserRole } from '@/lib/types'
+import type { Profile, TalentProfile, UserRole, ViewMode } from '@/lib/types'
 
 export type FullProfile = Profile & {
   talent_profiles?: TalentProfile[] | null
@@ -17,6 +17,8 @@ type AuthCtx = {
   supabase: SupabaseClient
   refresh: () => Promise<void>
   updateProfile: (patch: Partial<FullProfile>) => void
+  viewMode: ViewMode
+  setViewMode: (mode: ViewMode) => void
 }
 
 const supabase = createClient()
@@ -29,13 +31,24 @@ const AuthContext = createContext<AuthCtx>({
   supabase,
   refresh: async () => {},
   updateProfile: () => {},
+  viewMode: 'talent',
+  setViewMode: () => {},
 })
+
+function defaultViewMode(profile: FullProfile | null): ViewMode {
+  if (!profile) return 'talent'
+  if (profile.role === 'admin') {
+    return (profile.last_view_mode as ViewMode) ?? 'admin'
+  }
+  return profile.role as ViewMode
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<FullProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [viewMode, setViewModeState] = useState<ViewMode>('talent')
 
   async function loadProfile(userId: string) {
     const { data } = await supabase
@@ -43,7 +56,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .select('*, talent_profiles(*)')
       .eq('id', userId)
       .maybeSingle()
-    setProfile((data as FullProfile | null) ?? null)
+    const row = (data as FullProfile | null) ?? null
+    setProfile(row)
+    setViewModeState(defaultViewMode(row))
     setLoading(false)
   }
 
@@ -59,7 +74,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await loadProfile(s.user.id)
     } else {
       setProfile(null)
+      setViewModeState('talent')
       setLoading(false)
+    }
+  }
+
+  async function handleSetViewMode(mode: ViewMode) {
+    setViewModeState(mode)
+    if (profile?.role === 'admin' && profile.id) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ last_view_mode: mode })
+        .eq('id', profile.id)
+      if (!error) {
+        setProfile((p) => (p ? { ...p, last_view_mode: mode } : p))
+      }
     }
   }
 
@@ -83,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loadProfile(session.user.id)
       } else {
         setProfile(null)
+        setViewModeState('talent')
         setLoading(false)
       }
     })
@@ -91,7 +121,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, supabase, refresh, updateProfile }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        loading,
+        supabase,
+        refresh,
+        updateProfile,
+        viewMode,
+        setViewMode: handleSetViewMode,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

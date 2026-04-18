@@ -4,6 +4,8 @@ export type AvailabilityStatus = 'available' | 'hold' | 'unavailable'
 export type BookingStatus = 'requested' | 'accepted' | 'declined' | 'cancelled' | 'completed'
 export type JobStatus = 'draft' | 'submitted' | 'crewing' | 'confirmed' | 'wrapped' | 'cancelled'
 
+export type ViewMode = 'talent' | 'admin' | 'client'
+
 export type Profile = {
   id: string
   email: string
@@ -17,6 +19,7 @@ export type Profile = {
   verified: boolean
   verified_at: string | null
   available: boolean
+  last_view_mode: ViewMode | null
   created_at: string
   updated_at: string
 }
