@@ -5,9 +5,12 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
+import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
+
+const RESET_REDIRECT = 'https://rowly-studios-app.vercel.app/reset-password'
 
 export default function LoginPage() {
   return (
@@ -21,12 +24,34 @@ export default function LoginPage() {
   )
 }
 
+function Spinner() {
+  return (
+    <svg
+      className="animate-spin"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path
+        d="M21 12a9 9 0 0 0-9-9"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
 
   const [email, setEmail] = useState('')
+  const [resetEmail, setResetEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<Status>('checking')
   const [errorMsg, setErrorMsg] = useState('')
@@ -62,8 +87,10 @@ function LoginInner() {
     if (error) {
       setStatus('error')
       const msg = error.message.toLowerCase()
-      if (msg.includes('invalid') && msg.includes('credential')) {
-        setErrorMsg('Incorrect email or password. Please try again.')
+      if (msg.includes('user not found') || msg.includes('no user found')) {
+        setErrorMsg('No account found with that email. Contact Rowly Studios to get access.')
+      } else if (msg.includes('invalid') && (msg.includes('credential') || msg.includes('password'))) {
+        setErrorMsg('Incorrect password. Use "Forgot password?" below to reset it.')
       } else if (msg.includes('email not confirmed')) {
         setErrorMsg('Please confirm your email first — check your inbox for the confirmation link.')
       } else {
@@ -78,16 +105,12 @@ function LoginInner() {
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault()
-    if (!email) {
-      setErrorMsg('Enter your email above first, then click "Forgot password?"')
-      setStatus('error')
-      return
-    }
+    if (!resetEmail) return
     setStatus('reset-sending')
     setErrorMsg('')
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset-password`,
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+      redirectTo: RESET_REDIRECT,
     })
 
     if (error) {
@@ -96,6 +119,19 @@ function LoginInner() {
     } else {
       setStatus('reset-sent')
     }
+  }
+
+  function openReset() {
+    setResetEmail(email)
+    setShowReset(true)
+    setErrorMsg('')
+    setStatus('idle')
+  }
+
+  function backToSignIn() {
+    setShowReset(false)
+    setErrorMsg('')
+    setStatus('idle')
   }
 
   if (status === 'checking') {
@@ -110,107 +146,135 @@ function LoginInner() {
     <>
       <InstallBanner />
       <main className="min-h-[100dvh] flex flex-col items-center justify-center px-6 py-12 rs-bg-fusion">
-      <Link href="/" className="flex flex-col items-center gap-4 mb-8">
-        <RSLogo size={64} />
-        <span className="text-xs tracking-[2px] text-rs-cream uppercase font-semibold">
-          Rowly Studios
-        </span>
-      </Link>
+        <Link href="/" className="flex flex-col items-center gap-4 mb-8">
+          <RSLogo size={64} />
+          <span className="text-xs tracking-[2px] text-rs-cream uppercase font-semibold">
+            Rowly Studios
+          </span>
+        </Link>
 
-      <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
-        {status === 'reset-sent' ? (
-          <div className="text-center space-y-3">
-            <p className="text-sm font-semibold text-rs-blue-logo uppercase tracking-wide">
-              Check your inbox
-            </p>
-            <p className="text-[13px] text-rs-blue-fusion leading-relaxed">
-              We sent a password-reset link to <strong>{email}</strong>. Open it to set a new password.
-            </p>
-            <button
-              onClick={() => {
-                setStatus('idle')
-                setShowReset(false)
-              }}
-              className="text-[11px] uppercase tracking-wider text-rs-blue-fusion/70 underline mt-4"
-            >
-              Back to sign in
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={showReset ? handleReset : handleSignIn} className="space-y-3">
-            <label className="block text-[11px] uppercase tracking-wider font-semibold text-rs-blue-fusion">
-              {showReset ? 'Reset your password' : 'Sign in'}
-            </label>
+        <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
+          {status === 'reset-sent' ? (
+            <div className="text-center space-y-3">
+              <p className="text-sm font-semibold uppercase tracking-wide" style={{ color: '#1A3C6B' }}>
+                Check your email
+              </p>
+              <p className="text-[13px] leading-relaxed" style={{ color: '#2E5099' }}>
+                We&apos;ve sent a reset link to <strong>{resetEmail}</strong>.
+              </p>
+              <button
+                onClick={backToSignIn}
+                className="text-[11px] uppercase tracking-wider underline mt-4"
+                style={{ color: '#2E5099' }}
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : showReset ? (
+            <form onSubmit={handleReset} className="space-y-3">
+              <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
+                Reset your password
+              </label>
+              <p className="text-[12px] leading-relaxed" style={{ color: '#2E5099' }}>
+                Enter your account email and we&apos;ll send you a link to set a new password.
+              </p>
 
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@email.com"
-              className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
-              disabled={status === 'submitting' || status === 'reset-sending'}
-              autoComplete="email"
-            />
-
-            {!showReset && (
               <input
-                type="password"
+                type="email"
+                required
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="you@email.com"
+                className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                style={{ borderColor: '#AABDE0' }}
+                disabled={status === 'reset-sending'}
+                autoComplete="email"
+              />
+
+              <button
+                type="submit"
+                disabled={status === 'reset-sending' || !resetEmail}
+                className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ backgroundColor: '#1A3C6B' }}
+              >
+                {status === 'reset-sending' && <Spinner />}
+                {status === 'reset-sending' ? 'Sending…' : 'Send reset link'}
+              </button>
+
+              {status === 'error' && errorMsg && (
+                <p className="text-[11px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
+              )}
+
+              <button
+                type="button"
+                onClick={backToSignIn}
+                className="block mx-auto text-[11px] uppercase tracking-wider underline pt-2"
+                style={{ color: '#2E5099' }}
+              >
+                Back to sign in
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSignIn} className="space-y-3">
+              <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
+                Sign in
+              </label>
+
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+                className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                style={{ borderColor: '#AABDE0' }}
+                disabled={status === 'submitting'}
+                autoComplete="email"
+              />
+
+              <PasswordInput
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
                 disabled={status === 'submitting'}
                 autoComplete="current-password"
               />
-            )}
 
-            <button
-              type="submit"
-              disabled={status === 'submitting' || status === 'reset-sending' || !email || (!showReset && !password)}
-              className="rs-btn w-full disabled:opacity-50"
-            >
-              {showReset
-                ? (status === 'reset-sending' ? 'Sending…' : 'Send reset link')
-                : (status === 'submitting' ? 'Signing in…' : 'Sign in')}
-            </button>
-
-            {status === 'error' && errorMsg && (
-              <p className="text-[11px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
-            )}
-
-            <div className="flex items-center justify-between pt-3 text-[11px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowReset((v) => !v)
-                  setErrorMsg('')
-                  setStatus('idle')
-                }}
-                className="uppercase tracking-wider text-rs-blue-fusion/70 underline"
-              >
-                {showReset ? 'Back to sign in' : 'Forgot password?'}
-              </button>
-              {!showReset && (
-                <Link
-                  href="/signup"
-                  className="uppercase tracking-wider text-rs-blue-fusion/70 underline"
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={openReset}
+                  className="text-[11px] underline"
+                  style={{ color: '#2E5099' }}
                 >
-                  Create account
-                </Link>
-              )}
-            </div>
-          </form>
-        )}
-      </div>
+                  Forgot password?
+                </button>
+              </div>
 
-      <Link
-        href="/"
-        className="text-[11px] uppercase tracking-wider text-rs-cream/60 mt-8"
-      >
-        ← Back
-      </Link>
+              <button
+                type="submit"
+                disabled={status === 'submitting' || !email || !password}
+                className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ backgroundColor: '#1A3C6B' }}
+              >
+                {status === 'submitting' && <Spinner />}
+                {status === 'submitting' ? 'Signing in…' : 'Sign in'}
+              </button>
+
+              {status === 'error' && errorMsg && (
+                <p className="text-[12px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
+              )}
+            </form>
+          )}
+        </div>
+
+        <Link
+          href="/"
+          className="text-[11px] uppercase tracking-wider text-rs-cream/60 mt-8"
+        >
+          ← Back
+        </Link>
       </main>
     </>
   )

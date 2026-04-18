@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import { AppHeader } from '@/components/AppHeader'
 import { TabBar } from '@/components/TabBar'
+import { Toast } from '@/components/Toast'
 import type { UserRole } from '@/lib/types'
 
 export default async function AppLayout({
@@ -28,6 +29,7 @@ export default async function AppLayout({
 
   return (
     <div className="min-h-[100dvh] bg-rs-blue-fusion">
+      <Toast />
       <AppHeader />
       <div className="bg-rs-cream min-h-[calc(100dvh-64px)] rounded-t-rs-lg pb-[100px]">
         {children}
