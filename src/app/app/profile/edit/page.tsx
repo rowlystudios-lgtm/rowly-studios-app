@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 type FormState = {
@@ -34,26 +34,22 @@ const INITIAL: FormState = {
 
 export default function EditProfilePage() {
   const router = useRouter()
-  const supabase = createClient()
+  const { user, supabase, refresh } = useAuth()
+  const userId = user?.id ?? null
   const [form, setForm] = useState<FormState>(INITIAL)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!userId) return
+    let cancelled = false
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/login')
-        return
-      }
-
       const [{ data: profile }, { data: talent }] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-        supabase.from('talent_profiles').select('*').eq('id', user.id).maybeSingle(),
+        supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+        supabase.from('talent_profiles').select('*').eq('id', userId).maybeSingle(),
       ])
+      if (cancelled) return
 
       setForm({
         full_name: profile?.full_name ?? '',
@@ -72,7 +68,10 @@ export default function EditProfilePage() {
       setLoading(false)
     }
     load()
-  }, [router, supabase])
+    return () => {
+      cancelled = true
+    }
+  }, [supabase, userId])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -83,10 +82,7 @@ export default function EditProfilePage() {
     setSaving(true)
     setError('')
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
+    if (!userId) {
       setError('Not signed in')
       setSaving(false)
       return
@@ -99,7 +95,7 @@ export default function EditProfilePage() {
         phone: form.phone || null,
         city: form.city || null,
       })
-      .eq('id', user.id)
+      .eq('id', userId)
 
     if (profileUpdate.error) {
       setError(profileUpdate.error.message)
@@ -109,7 +105,7 @@ export default function EditProfilePage() {
 
     const talentUpsert = await supabase.from('talent_profiles').upsert(
       {
-        id: user.id,
+        id: userId,
         department: form.department || null,
         primary_role: form.primary_role || null,
         bio: form.bio || null,
@@ -129,8 +125,8 @@ export default function EditProfilePage() {
       return
     }
 
+    await refresh()
     router.push('/app/profile')
-    router.refresh()
   }
 
   if (loading) {

@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase-browser'
+import { useAuth } from '@/lib/auth-context'
 import type { AvailabilityStatus } from '@/lib/types'
 
 type DayStatus = AvailabilityStatus | null
@@ -27,9 +26,8 @@ function nextStatus(current: DayStatus): DayStatus {
 }
 
 export default function CalendarPage() {
-  const router = useRouter()
-  const supabase = createClient()
-  const [userId, setUserId] = useState<string | null>(null)
+  const { user, supabase } = useAuth()
+  const userId = user?.id ?? null
   const [loading, setLoading] = useState(true)
   const [savingDate, setSavingDate] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, DayStatus>>({})
@@ -45,26 +43,20 @@ export default function CalendarPage() {
   )
 
   useEffect(() => {
+    if (!userId) return
+    let cancelled = false
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/login')
-        return
-      }
-      setUserId(user.id)
-
       const from = ymd(monthStart)
       const to = ymd(monthEnd)
 
       const { data } = await supabase
         .from('availability')
         .select('date, status')
-        .eq('talent_id', user.id)
+        .eq('talent_id', userId)
         .gte('date', from)
         .lte('date', to)
 
+      if (cancelled) return
       const map: Record<string, DayStatus> = {}
       for (const row of data ?? []) {
         map[row.date] = row.status as AvailabilityStatus
@@ -73,7 +65,10 @@ export default function CalendarPage() {
       setLoading(false)
     }
     load()
-  }, [monthStart, monthEnd, router, supabase])
+    return () => {
+      cancelled = true
+    }
+  }, [monthStart, monthEnd, supabase, userId])
 
   async function toggleDay(date: Date) {
     if (!userId) return

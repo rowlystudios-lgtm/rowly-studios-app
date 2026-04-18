@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useAuth, roleOf } from '@/lib/auth-context'
 import type { UserRole } from '@/lib/types'
 
 const TABS: Record<UserRole, { href: string; label: string; icon: React.ReactNode }[]> = {
@@ -63,12 +64,25 @@ const TABS: Record<UserRole, { href: string; label: string; icon: React.ReactNod
   ],
 }
 
-export function TabBar({ role }: { role: UserRole }) {
+export function TabBar() {
   const pathname = usePathname()
+  const { profile } = useAuth()
+  const role = roleOf(profile)
   const tabs = TABS[role]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-rs-cream border-t border-rs-blue-fusion/10 px-3 pt-2 pb-[env(safe-area-inset-bottom,1rem)] flex justify-around z-50">
+    <nav
+      className="flex justify-around border-t border-rs-blue-fusion/10 px-3 pt-2"
+      style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        background: 'var(--rs-cream, #FBF5E4)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
+      }}
+    >
       {tabs.map((tab) => {
         const isActive = pathname === tab.href
         return (

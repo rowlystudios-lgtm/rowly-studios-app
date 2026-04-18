@@ -1,69 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase-browser'
-import type { Profile, TalentProfile } from '@/lib/types'
+import { useAuth } from '@/lib/auth-context'
 
 export default function AppHome() {
-  const router = useRouter()
-  const supabase = createClient()
-
-  const [loading, setLoading] = useState(true)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [talentProfile, setTalentProfile] = useState<TalentProfile | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/login')
-        return
-      }
-
-      const [{ data: p }, { data: tp }] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-        supabase.from('talent_profiles').select('*').eq('id', user.id).maybeSingle(),
-      ])
-
-      if (cancelled) return
-      setProfile(p as Profile | null)
-      setTalentProfile(tp as TalentProfile | null)
-      setLoading(false)
-    }
-
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [router, supabase])
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '60vh',
-          color: '#1A3C6B',
-          fontSize: 13,
-          letterSpacing: 2,
-          textTransform: 'uppercase',
-        }}
-      >
-        Loading…
-      </div>
-    )
-  }
+  const { profile } = useAuth()
 
   const firstName = profile?.full_name?.split(' ')[0] ?? 'there'
-
+  const talent = profile?.talent_profiles?.[0] ?? null
   const profileComplete = Boolean(
-    talentProfile?.department && talentProfile?.primary_role && talentProfile?.day_rate_cents
+    talent?.department && talent?.primary_role && talent?.day_rate_cents
   )
 
   return (
