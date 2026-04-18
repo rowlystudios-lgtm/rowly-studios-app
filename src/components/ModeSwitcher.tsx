@@ -19,7 +19,8 @@ export function ModeSwitcher() {
   return (
     <div
       style={{
-        background: 'rgba(0,0,0,0.25)',
+        background: '#1A3C6B',
+        borderBottom: '1px solid rgba(170,189,224,0.15)',
         padding: '8px 12px',
         display: 'flex',
         alignItems: 'center',

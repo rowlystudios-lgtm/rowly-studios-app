@@ -26,8 +26,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-[100dvh] bg-rs-blue-fusion">
       <Toast />
-      {isAdmin && <ModeSwitcher />}
       <AppHeader />
+      {isAdmin && <ModeSwitcher />}
       <div
         className="bg-rs-cream min-h-[calc(100dvh-64px)] rounded-t-rs-lg"
         style={{
