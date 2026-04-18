@@ -1,37 +1,80 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
-import type { AvailabilityStatus } from '@/lib/types'
 
-type DayStatus = AvailabilityStatus | null
+type DayState = 'booked' | 'requested' | 'unavailable' | 'available'
+
+const BG = '#1A3C6B'
+const TEXT = '#FFFFFF'
+const TEXT_MUTED = '#AABDE0'
+
+const STATE_STYLE: Record<DayState, { bg: string; color: string; borderColor?: string }> = {
+  available: {
+    bg: 'rgba(255,255,255,0.06)',
+    color: TEXT,
+    borderColor: 'rgba(170,189,224,0.15)',
+  },
+  unavailable: { bg: '#0a1f44', color: TEXT_MUTED },
+  requested: { bg: '#d4950a', color: TEXT },
+  booked: { bg: '#166534', color: TEXT },
+}
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
+const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
-function ymd(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+function ymd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
-function nextStatus(current: DayStatus): DayStatus {
-  if (current === null) return 'available'
-  if (current === 'available') return 'hold'
-  if (current === 'hold') return 'unavailable'
-  return null
+function parseLocalDate(iso: string): Date | null {
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null
+  return new Date(parts[0], parts[1] - 1, parts[2])
+}
+
+function addDays(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+type JobDateRow = { start_date: string | null; end_date: string | null }
+type BookingRow = {
+  status: 'requested' | 'confirmed' | 'declined'
+  jobs: JobDateRow | JobDateRow[] | null
+}
+
+function unwrapJob(raw: JobDateRow | JobDateRow[] | null): JobDateRow | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) return raw[0] ?? null
+  return raw
 }
 
 export default function CalendarPage() {
   const { user, supabase } = useAuth()
   const userId = user?.id ?? null
+
+  const [viewDate, setViewDate] = useState<Date>(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [statuses, setStatuses] = useState<Record<string, DayState>>({})
   const [loading, setLoading] = useState(true)
   const [savingDate, setSavingDate] = useState<string | null>(null)
-  const [statuses, setStatuses] = useState<Record<string, DayStatus>>({})
-  const [viewDate, setViewDate] = useState(new Date())
+  const [error, setError] = useState<string>('')
 
   const monthStart = useMemo(
     () => new Date(viewDate.getFullYear(), viewDate.getMonth(), 1),
@@ -41,53 +84,111 @@ export default function CalendarPage() {
     () => new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0),
     [viewDate]
   )
+  const today = useMemo(() => {
+    const t = new Date()
+    return new Date(t.getFullYear(), t.getMonth(), t.getDate())
+  }, [])
 
   useEffect(() => {
     if (!userId) return
     let cancelled = false
-    async function load() {
-      const from = ymd(monthStart)
-      const to = ymd(monthEnd)
 
-      const { data } = await supabase
-        .from('availability')
-        .select('date, status')
-        .eq('talent_id', userId)
-        .gte('date', from)
-        .lte('date', to)
+    async function load() {
+      setLoading(true)
+      setError('')
+
+      const fromStr = ymd(monthStart)
+      const toStr = ymd(monthEnd)
+
+      const [unavailRes, confirmedRes, requestedRes] = await Promise.all([
+        supabase
+          .from('talent_unavailability')
+          .select('date')
+          .eq('talent_id', userId)
+          .gte('date', fromStr)
+          .lte('date', toStr),
+        supabase
+          .from('job_bookings')
+          .select('status, jobs(start_date, end_date)')
+          .eq('talent_id', userId)
+          .eq('status', 'confirmed'),
+        supabase
+          .from('job_bookings')
+          .select('status, jobs(start_date, end_date)')
+          .eq('talent_id', userId)
+          .eq('status', 'requested'),
+      ])
 
       if (cancelled) return
-      const map: Record<string, DayStatus> = {}
-      for (const row of data ?? []) {
-        map[row.date] = row.status as AvailabilityStatus
+
+      const map: Record<string, DayState> = {}
+
+      // Apply in increasing priority: unavailable < requested < booked
+      for (const row of (unavailRes.data as { date: string }[] | null) ?? []) {
+        map[row.date] = 'unavailable'
       }
+
+      const expand = (rows: BookingRow[] | null, state: 'requested' | 'booked') => {
+        for (const row of rows ?? []) {
+          const job = unwrapJob(row.jobs)
+          if (!job?.start_date) continue
+          const start = parseLocalDate(job.start_date)
+          const end = job.end_date ? parseLocalDate(job.end_date) : start
+          if (!start || !end) continue
+          for (let d = start; d <= end; d = addDays(d, 1)) {
+            // Booked overrides requested, requested overrides unavailable
+            const current = map[ymd(d)]
+            if (state === 'booked' || !current || current === 'unavailable') {
+              map[ymd(d)] = state
+            }
+          }
+        }
+      }
+
+      expand(requestedRes.data as BookingRow[] | null, 'requested')
+      expand(confirmedRes.data as BookingRow[] | null, 'booked')
+
       setStatuses(map)
       setLoading(false)
     }
+
     load()
     return () => {
       cancelled = true
     }
-  }, [monthStart, monthEnd, supabase, userId])
+  }, [userId, supabase, monthStart, monthEnd])
 
   async function toggleDay(date: Date) {
     if (!userId) return
     const dateStr = ymd(date)
     if (savingDate) return
 
-    const current = statuses[dateStr] ?? null
-    const next = nextStatus(current)
+    const current = statuses[dateStr] ?? 'available'
+    if (current === 'booked' || current === 'requested') return
 
+    const next: DayState = current === 'unavailable' ? 'available' : 'unavailable'
     setStatuses((s) => ({ ...s, [dateStr]: next }))
     setSavingDate(dateStr)
+    setError('')
 
-    if (next === null) {
-      await supabase.from('availability').delete().eq('talent_id', userId).eq('date', dateStr)
+    let err: { message: string } | null = null
+    if (next === 'unavailable') {
+      const { error } = await supabase
+        .from('talent_unavailability')
+        .insert({ talent_id: userId, date: dateStr })
+      err = error
     } else {
-      await supabase.from('availability').upsert(
-        { talent_id: userId, date: dateStr, status: next },
-        { onConflict: 'talent_id,date' }
-      )
+      const { error } = await supabase
+        .from('talent_unavailability')
+        .delete()
+        .eq('talent_id', userId)
+        .eq('date', dateStr)
+      err = error
+    }
+
+    if (err) {
+      setStatuses((s) => ({ ...s, [dateStr]: current }))
+      setError(err.message)
     }
 
     setSavingDate(null)
@@ -97,84 +198,138 @@ export default function CalendarPage() {
     setViewDate((d) => new Date(d.getFullYear(), d.getMonth() + delta, 1))
   }
 
-  const today = new Date()
-  const todayStr = ymd(today)
-
-  const firstDayOfWeek = monthStart.getDay()
+  const firstDow = monthStart.getDay()
   const daysInMonth = monthEnd.getDate()
-
-  const cells: { date: Date | null; dateStr: string | null }[] = []
-  for (let i = 0; i < firstDayOfWeek; i++) cells.push({ date: null, dateStr: null })
+  const cells: { date: Date | null }[] = []
+  for (let i = 0; i < firstDow; i++) cells.push({ date: null })
   for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(viewDate.getFullYear(), viewDate.getMonth(), d)
-    cells.push({ date, dateStr: ymd(date) })
+    cells.push({ date: new Date(viewDate.getFullYear(), viewDate.getMonth(), d) })
   }
-  while (cells.length % 7 !== 0) cells.push({ date: null, dateStr: null })
-
-  const availCount = Object.values(statuses).filter((s) => s === 'available').length
-  const holdCount = Object.values(statuses).filter((s) => s === 'hold').length
-  const blockedCount = Object.values(statuses).filter((s) => s === 'unavailable').length
+  while (cells.length % 7 !== 0) cells.push({ date: null })
 
   return (
-    <main className="px-5 py-6 max-w-md mx-auto">
-      <h1 className="text-[22px] font-semibold text-rs-blue-logo">My availability</h1>
-      <p className="text-[11px] uppercase tracking-widest text-rs-blue-fusion/60 font-semibold mt-1 mb-4">
-        Tap a date to cycle status
-      </p>
+    <main
+      className="rounded-t-rs-lg"
+      style={{ background: BG, color: TEXT, minHeight: 'calc(100dvh - 64px)' }}
+    >
+      <div className="max-w-md mx-auto px-5 pt-6 pb-10">
+        <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Calendar</h1>
+        <p style={{ fontSize: 12, color: TEXT_MUTED, marginBottom: 18 }}>
+          Tap a day to mark yourself unavailable.
+        </p>
 
-      <div className="flex items-center justify-between mb-3">
-        <button
-          onClick={() => changeMonth(-1)}
-          className="text-[12px] font-semibold text-rs-blue-fusion px-3 py-1 rounded-rs hover:bg-rs-blue-fusion/5"
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 12px',
+            marginBottom: 12,
+          }}
         >
-          ← Prev
-        </button>
-        <h2 className="text-[14px] font-semibold text-rs-blue-logo">
-          {MONTHS[viewDate.getMonth()]} {viewDate.getFullYear()}
-        </h2>
-        <button
-          onClick={() => changeMonth(1)}
-          className="text-[12px] font-semibold text-rs-blue-fusion px-3 py-1 rounded-rs hover:bg-rs-blue-fusion/5"
-        >
-          Next →
-        </button>
-      </div>
-
-      <div className="flex gap-3 mb-3 text-[10px] flex-wrap font-medium">
-        <Legend color="#DCE7EC" label="Available" textColor="#496275" />
-        <Legend color="#F6EBC8" label="Hold" textColor="#8a6f1a" />
-        <Legend color="#1E3A6B" label="Unavailable" textColor="#fff" />
-      </div>
-
-      <div className="bg-white rounded-rs p-3 border border-rs-blue-fusion/10">
-        <div className="grid grid-cols-7 gap-1 mb-1.5 text-[9px] text-rs-blue-fusion/50 text-center uppercase tracking-wider font-semibold">
-          <div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div>
+          <ArrowButton aria-label="Previous month" onClick={() => changeMonth(-1)}>
+            ‹
+          </ArrowButton>
+          <h2 style={{ fontSize: 16, fontWeight: 500, color: TEXT }}>
+            {MONTHS[viewDate.getMonth()]} {viewDate.getFullYear()}
+          </h2>
+          <ArrowButton aria-label="Next month" onClick={() => changeMonth(1)}>
+            ›
+          </ArrowButton>
         </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((cell, i) => {
-            if (!cell.date || !cell.dateStr) {
-              return <div key={i} className="aspect-square" />
-            }
-            const status = statuses[cell.dateStr] ?? null
-            const isToday = cell.dateStr === todayStr
-            const saving = savingDate === cell.dateStr
 
-            let bg = 'transparent'
-            let color = 'rgba(30,58,107,0.7)'
-            if (status === 'available') { bg = '#DCE7EC'; color = '#496275' }
-            if (status === 'hold') { bg = '#F6EBC8'; color = '#8a6f1a' }
-            if (status === 'unavailable') { bg = '#1E3A6B'; color = '#FBF5E4' }
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 3,
+            padding: '0 12px',
+            marginBottom: 6,
+          }}
+        >
+          {DOW.map((d) => (
+            <div
+              key={d}
+              style={{
+                textAlign: 'center',
+                fontSize: 11,
+                color: TEXT_MUTED,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                paddingBottom: 4,
+              }}
+            >
+              {d}
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 3,
+            padding: '0 12px',
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          {cells.map((cell, i) => {
+            if (!cell.date) {
+              return <div key={i} style={{ aspectRatio: '1 / 1' }} />
+            }
+            const dateStr = ymd(cell.date)
+            const state: DayState = statuses[dateStr] ?? 'available'
+            const style = STATE_STYLE[state]
+            const isToday = isSameDay(cell.date, today)
+            const inPast = cell.date < today && !isToday
+            const saving = savingDate === dateStr
+            const systemLocked = state === 'booked' || state === 'requested'
+
+            const title = systemLocked
+              ? state === 'booked'
+                ? 'Confirmed job on this date'
+                : 'Job request pending — confirm or decline in Overview'
+              : state === 'unavailable'
+              ? 'Marked unavailable — tap to clear'
+              : 'Tap to mark unavailable'
 
             return (
               <button
                 key={i}
+                type="button"
+                title={title}
                 onClick={() => toggleDay(cell.date!)}
-                disabled={loading || saving}
-                className="aspect-square rounded-md flex items-center justify-center text-[11px] font-semibold transition-opacity disabled:opacity-50"
+                disabled={loading || saving || systemLocked}
                 style={{
-                  background: bg,
-                  color,
-                  boxShadow: isToday ? 'inset 0 0 0 2px #1E3A6B' : undefined,
+                  aspectRatio: '1 / 1',
+                  borderRadius: 8,
+                  border: 'none',
+                  outline: isToday ? '1.5px solid #fff' : 'none',
+                  outlineOffset: isToday ? -1 : 0,
+                  background: style.bg,
+                  color: style.color,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: systemLocked ? 'default' : saving ? 'wait' : 'pointer',
+                  opacity: inPast ? 0.4 : 1,
+                  transition: 'background 120ms ease, opacity 120ms ease',
+                  boxShadow:
+                    state === 'available' && style.borderColor
+                      ? `inset 0 0 0 1px ${style.borderColor}`
+                      : undefined,
+                }}
+                onMouseEnter={(e) => {
+                  if (state === 'available' && !saving) {
+                    ;(e.currentTarget as HTMLButtonElement).style.background =
+                      'rgba(255,255,255,0.14)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (state === 'available') {
+                    ;(e.currentTarget as HTMLButtonElement).style.background =
+                      STATE_STYLE.available.bg
+                  }
                 }}
               >
                 {cell.date.getDate()}
@@ -182,37 +337,101 @@ export default function CalendarPage() {
             )
           })}
         </div>
-      </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-4">
-        <Stat label="Available" value={availCount} />
-        <Stat label="Hold" value={holdCount} />
-        <Stat label="Blocked" value={blockedCount} />
-      </div>
+        {error && (
+          <p
+            style={{
+              fontSize: 12,
+              color: '#fca5a5',
+              marginTop: 12,
+              padding: '10px 12px',
+              background: 'rgba(248,113,113,0.12)',
+              border: '1px solid rgba(248,113,113,0.25)',
+              borderRadius: 10,
+            }}
+          >
+            {error}
+          </p>
+        )}
 
-      {loading && (
-        <p className="text-[11px] text-rs-blue-fusion/60 text-center mt-4">Loading dates…</p>
-      )}
+        <div style={{ marginTop: 24, padding: '0 12px' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 10,
+            }}
+          >
+            <LegendItem label="Available" swatchStyle={STATE_STYLE.available} outlined />
+            <LegendItem label="Unavailable" swatchStyle={STATE_STYLE.unavailable} />
+            <LegendItem label="On hold" swatchStyle={STATE_STYLE.requested} />
+            <LegendItem label="Booked" swatchStyle={STATE_STYLE.booked} />
+          </div>
+          <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.5 }}>
+            Tap any available day to mark unavailable. Tap again to clear.
+          </p>
+        </div>
+      </div>
     </main>
   )
 }
 
-function Legend({ color, label, textColor }: { color: string; label: string; textColor: string }) {
+function ArrowButton({
+  children,
+  onClick,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <span className="flex items-center gap-1.5 text-rs-blue-logo">
-      <span className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />
-      {label}
-    </span>
+    <button
+      type="button"
+      onClick={onClick}
+      {...rest}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        background: 'rgba(255,255,255,0.08)',
+        border: 'none',
+        color: TEXT,
+        fontSize: 18,
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </button>
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function LegendItem({
+  label,
+  swatchStyle,
+  outlined,
+}: {
+  label: string
+  swatchStyle: { bg: string; color: string; borderColor?: string }
+  outlined?: boolean
+}) {
   return (
-    <div className="bg-white rounded-rs p-3 border border-rs-blue-fusion/10 text-center">
-      <p className="text-[9px] uppercase tracking-wider text-rs-blue-fusion/60 font-semibold">
-        {label}
-      </p>
-      <p className="text-[20px] font-bold text-rs-blue-logo mt-1">{value}</p>
-    </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span
+        aria-hidden
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 3,
+          background: swatchStyle.bg,
+          boxShadow:
+            outlined && swatchStyle.borderColor
+              ? `inset 0 0 0 1px ${swatchStyle.borderColor}`
+              : undefined,
+        }}
+      />
+      <span style={{ fontSize: 11, color: TEXT_MUTED, fontWeight: 500 }}>{label}</span>
+    </span>
   )
 }
