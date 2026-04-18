@@ -107,6 +107,11 @@ function AdminTalentPage() {
   }
 
   const verifiedCount = rows.filter((r) => r.verified).length
+  const pendingCount = rows.filter((r) => !r.verified).length
+  const sortedRows = [...rows].sort((a, b) => {
+    if (a.verified === b.verified) return 0
+    return a.verified ? 1 : -1
+  })
 
   return (
     <PageShell>
@@ -117,12 +122,29 @@ function AdminTalentPage() {
           : `${rows.length} talent · ${verifiedCount} verified`}
       </p>
 
+      {!loading && pendingCount > 0 && (
+        <div
+          style={{
+            background: 'rgba(212,149,10,0.15)',
+            border: '1px solid rgba(212,149,10,0.35)',
+            borderRadius: 12,
+            padding: '12px 14px',
+            color: '#d4950a',
+            fontSize: 13,
+            fontWeight: 600,
+            marginBottom: 12,
+          }}
+        >
+          ⚠ {pendingCount} talent account{pendingCount === 1 ? '' : 's'} awaiting approval
+        </div>
+      )}
+
       {error && (
         <p style={{ fontSize: 13, color: '#fca5a5', marginBottom: 10 }}>{error}</p>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.map((row) => {
+        {sortedRows.map((row) => {
           const tp = unwrap(row.talent_profiles)
           const dept = tp?.department ? DEPARTMENT_LABELS[tp.department] : null
           const name = fullName(row)
@@ -190,41 +212,65 @@ function AdminTalentPage() {
                   flexShrink: 0,
                 }}
               />
-              <button
-                type="button"
-                onClick={() => toggleVerified(row)}
-                disabled={toggling === row.id}
-                aria-label={row.verified ? 'Unverify' : 'Verify'}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 999,
-                  border: 'none',
-                  background: row.verified
-                    ? 'rgba(74,222,128,0.2)'
-                    : 'rgba(170,189,224,0.15)',
-                  color: row.verified ? AVAILABLE_GREEN : TEXT_MUTED,
-                  cursor: toggling === row.id ? 'wait' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  transition: 'background 120ms ease',
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              {row.verified ? (
+                <button
+                  type="button"
+                  onClick={() => toggleVerified(row)}
+                  disabled={toggling === row.id}
+                  aria-label="Unverify"
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 999,
+                    border: 'none',
+                    background: 'rgba(74,222,128,0.2)',
+                    color: AVAILABLE_GREEN,
+                    cursor: toggling === row.id ? 'wait' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    transition: 'background 120ms ease',
+                  }}
                 >
-                  <polyline points="4 12 10 18 20 6" />
-                </svg>
-              </button>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="4 12 10 18 20 6" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggleVerified(row)}
+                  disabled={toggling === row.id}
+                  aria-label="Approve talent"
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    border: '1px solid rgba(212,149,10,0.45)',
+                    background: 'rgba(212,149,10,0.18)',
+                    color: '#d4950a',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    cursor: toggling === row.id ? 'wait' : 'pointer',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
+                    transition: 'background 120ms ease',
+                  }}
+                >
+                  {toggling === row.id ? 'Saving…' : 'Pending'}
+                </button>
+              )}
             </div>
           )
         })}

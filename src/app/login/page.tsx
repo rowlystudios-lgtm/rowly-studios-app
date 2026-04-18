@@ -13,10 +13,12 @@ import { useAuth } from '@/lib/auth-context'
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
 type AdminStep = 'password' | 'pin'
 type AdminStatus = 'idle' | 'submitting' | 'error'
+type Mode = 'signin' | 'signup'
 
 const RESET_REDIRECT = 'https://rowly-studios-app.vercel.app/reset-password'
 const PIN_LENGTH = 6
 const MAX_PIN_ATTEMPTS = 3
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default function LoginPage() {
   return (
@@ -78,6 +80,14 @@ function LoginInner() {
   const [errorMsg, setErrorMsg] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [selectedRole, setSelectedRole] = useState<'talent' | 'client'>('talent')
+
+  const [mode, setMode] = useState<Mode>('signin')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showTalentPending, setShowTalentPending] = useState(false)
+  const [pendingEmail, setPendingEmail] = useState('')
 
   const [showAdminForm, setShowAdminForm] = useState(false)
   const [adminStep, setAdminStep] = useState<AdminStep>('password')
@@ -148,6 +158,163 @@ function LoginInner() {
       setStatus('error')
     }
   }, [searchParams])
+
+  function resetSignupFields() {
+    setFirstName('')
+    setLastName('')
+    setCompanyName('')
+    setPassword('')
+    setConfirmPassword('')
+    setErrorMsg('')
+    setStatus('idle')
+  }
+
+  function switchMode(next: Mode) {
+    setMode(next)
+    setErrorMsg('')
+    setStatus('idle')
+    if (next === 'signin') {
+      setConfirmPassword('')
+      setFirstName('')
+      setLastName('')
+      setCompanyName('')
+    }
+  }
+
+  async function handleSignUp(e: React.FormEvent) {
+    e.preventDefault()
+    setStatus('submitting')
+    setErrorMsg('')
+
+    const first = firstName.trim()
+    const last = lastName.trim()
+    const company = companyName.trim()
+    const cleanEmail = email.trim()
+
+    if (!first || !last) {
+      setStatus('error')
+      setErrorMsg('Please enter your first and last name.')
+      return
+    }
+    if (selectedRole === 'client' && !company) {
+      setStatus('error')
+      setErrorMsg('Please enter your company name.')
+      return
+    }
+    if (!EMAIL_RE.test(cleanEmail)) {
+      setStatus('error')
+      setErrorMsg('Please enter a valid email address.')
+      return
+    }
+    if (password.length < 8) {
+      setStatus('error')
+      setErrorMsg('Password must be at least 8 characters.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setStatus('error')
+      setErrorMsg('Passwords do not match.')
+      return
+    }
+
+    // 1. Create the user through Supabase auth (GoTrue handles hashing etc.)
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+    })
+
+    if (error) {
+      setStatus('error')
+      const lower = error.message.toLowerCase()
+      if (lower.includes('already registered') || lower.includes('already exists')) {
+        setErrorMsg('An account already exists with this email. Sign in instead.')
+      } else if (lower.includes('password should be at least')) {
+        setErrorMsg('Password must be at least 8 characters.')
+      } else {
+        setErrorMsg(error.message)
+      }
+      return
+    }
+
+    const userId = data.user?.id
+    if (!userId) {
+      setStatus('error')
+      setErrorMsg('Something went wrong. Please try again.')
+      return
+    }
+
+    // 2. Auto-confirm email via edge function (bypasses free-tier email delivery)
+    try {
+      await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=confirm-email`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId }),
+        }
+      )
+    } catch {
+      // Non-fatal — if confirmation fails, signInWithPassword below will surface it.
+    }
+
+    // 3. Sign in so subsequent updates run as an authenticated user (RLS).
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    })
+    if (signInError) {
+      setStatus('error')
+      setErrorMsg('Account created but sign-in failed. Please sign in manually.')
+      setMode('signin')
+      setConfirmPassword('')
+      return
+    }
+
+    // 4. Populate the profile row created by the handle_new_user trigger.
+    const fullName = `${first} ${last}`
+    const profileUpdate = await supabase
+      .from('profiles')
+      .update({
+        first_name: first,
+        last_name: last,
+        full_name: fullName,
+        role: selectedRole,
+        verified: selectedRole === 'client',
+      })
+      .eq('id', userId)
+
+    if (profileUpdate.error) {
+      setStatus('error')
+      setErrorMsg(profileUpdate.error.message)
+      return
+    }
+
+    // 5. Clients: make sure client_profiles has a row with the company name.
+    if (selectedRole === 'client') {
+      const clientUpsert = await supabase
+        .from('client_profiles')
+        .upsert({ id: userId, company_name: company }, { onConflict: 'id' })
+      if (clientUpsert.error) {
+        setStatus('error')
+        setErrorMsg(clientUpsert.error.message)
+        return
+      }
+    }
+
+    // 6. Route based on role.
+    if (selectedRole === 'talent') {
+      // Sign the talent out so they can't reach /app before admin approval.
+      await supabase.auth.signOut()
+      setPendingEmail(cleanEmail)
+      resetSignupFields()
+      setShowTalentPending(true)
+      return
+    }
+
+    setStatus('idle')
+    router.replace('/app')
+    router.refresh()
+  }
 
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault()
@@ -386,7 +553,7 @@ function LoginInner() {
           </span>
         </Link>
 
-        {status !== 'reset-sent' && !showReset && (
+        {status !== 'reset-sent' && !showReset && !showTalentPending && (
           <div className="w-full max-w-sm">
             <p
               style={{
@@ -557,7 +724,56 @@ function LoginInner() {
         )}
 
         <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
-          {status === 'reset-sent' ? (
+          {showTalentPending ? (
+            <div className="text-center space-y-3" style={{ padding: '8px 2px' }}>
+              <p
+                className="text-sm font-semibold uppercase tracking-wide"
+                style={{ color: '#1A3C6B' }}
+              >
+                You&apos;re on the list
+              </p>
+              <p
+                className="text-[13px] leading-relaxed"
+                style={{ color: '#2E5099' }}
+              >
+                Your talent profile is being reviewed by the Rowly Studios team.
+                We&apos;ll email you at <strong>{pendingEmail}</strong> when your
+                account is approved. This usually takes 1–2 business days.
+              </p>
+              <p
+                className="text-[11px] leading-relaxed pt-2"
+                style={{ color: 'rgba(46,80,153,0.7)' }}
+              >
+                Questions? Contact{' '}
+                <a
+                  href="mailto:rowlystudios@gmail.com"
+                  style={{ color: '#1A3C6B', textDecoration: 'underline' }}
+                >
+                  rowlystudios@gmail.com
+                </a>
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTalentPending(false)
+                  setPendingEmail('')
+                  setMode('signin')
+                  setEmail('')
+                  setPassword('')
+                  setConfirmPassword('')
+                  setFirstName('')
+                  setLastName('')
+                  setCompanyName('')
+                  setErrorMsg('')
+                  setStatus('idle')
+                }}
+                className="text-[11px] uppercase tracking-wider underline mt-4"
+                style={{ color: '#2E5099' }}
+              >
+                ← Back to sign in
+              </button>
+            </div>
+          ) : status === 'reset-sent' ? (
             <div className="text-center space-y-3">
               <p className="text-sm font-semibold uppercase tracking-wide" style={{ color: '#1A3C6B' }}>
                 Check your email
@@ -619,68 +835,246 @@ function LoginInner() {
             </form>
           ) : (
             <>
-              <form onSubmit={handleSignIn} className="space-y-3">
-                <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
-                  {selectedRole === 'talent' ? 'Talent sign in' : 'Client sign in'}
-                </label>
+              <div
+                role="tablist"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  padding: 3,
+                  borderRadius: 999,
+                  background: 'rgba(26,60,107,0.08)',
+                  marginBottom: 16,
+                }}
+              >
+                {(['signin', 'signup'] as Mode[]).map((m) => {
+                  const active = mode === m
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => switchMode(m)}
+                      style={{
+                        padding: '8px 0',
+                        borderRadius: 999,
+                        border: 'none',
+                        background: active ? '#1A3C6B' : 'transparent',
+                        color: active ? '#ffffff' : 'rgba(46,80,153,0.65)',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        cursor: 'pointer',
+                        transition: 'background 150ms ease, color 150ms ease',
+                      }}
+                    >
+                      {m === 'signin' ? 'Sign in' : 'Create account'}
+                    </button>
+                  )
+                })}
+              </div>
 
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@email.com"
-                  className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
-                  style={{ borderColor: '#AABDE0' }}
-                  disabled={status === 'submitting' || status === 'checking'}
-                  autoComplete="email"
-                />
+              {mode === 'signin' ? (
+                <form onSubmit={handleSignIn} className="space-y-3">
+                  <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
+                    {selectedRole === 'talent' ? 'Talent sign in' : 'Client sign in'}
+                  </label>
 
-                <PasswordInput
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  disabled={status === 'submitting' || status === 'checking'}
-                  autoComplete="current-password"
-                />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@email.com"
+                    className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                    style={{ borderColor: '#AABDE0' }}
+                    disabled={status === 'submitting' || status === 'checking'}
+                    autoComplete="email"
+                  />
 
-                <div className="flex justify-end">
+                  <PasswordInput
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    disabled={status === 'submitting' || status === 'checking'}
+                    autoComplete="current-password"
+                  />
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={openReset}
+                      className="text-[11px] underline"
+                      style={{ color: '#2E5099' }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+
                   <button
-                    type="button"
-                    onClick={openReset}
-                    className="text-[11px] underline"
-                    style={{ color: '#2E5099' }}
+                    type="submit"
+                    disabled={
+                      status === 'submitting' ||
+                      status === 'checking' ||
+                      !email ||
+                      !password
+                    }
+                    className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#1A3C6B' }}
                   >
-                    Forgot password?
+                    {(status === 'submitting' || status === 'checking') && <Spinner />}
+                    {status === 'checking'
+                      ? 'Loading…'
+                      : status === 'submitting'
+                      ? 'Signing in…'
+                      : selectedRole === 'talent'
+                      ? 'Sign in as talent'
+                      : 'Sign in as client'}
                   </button>
-                </div>
 
-                <button
-                  type="submit"
-                  disabled={
-                    status === 'submitting' ||
-                    status === 'checking' ||
-                    !email ||
-                    !password
-                  }
-                  className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
-                  style={{ backgroundColor: '#1A3C6B' }}
-                >
-                  {(status === 'submitting' || status === 'checking') && <Spinner />}
-                  {status === 'checking'
-                    ? 'Loading…'
-                    : status === 'submitting'
-                    ? 'Signing in…'
-                    : selectedRole === 'talent'
-                    ? 'Sign in as talent'
-                    : 'Sign in as client'}
-                </button>
+                  {status === 'error' && errorMsg && (
+                    <p className="text-[12px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
+                  )}
+                </form>
+              ) : (
+                <form onSubmit={handleSignUp} className="space-y-3">
+                  <label
+                    className="block text-[11px] uppercase tracking-wider font-semibold"
+                    style={{ color: '#1A3C6B' }}
+                  >
+                    {selectedRole === 'talent' ? 'Create talent account' : 'Create client account'}
+                  </label>
 
-                {status === 'error' && errorMsg && (
-                  <p className="text-[12px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <input
+                      type="text"
+                      required
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="First name"
+                      className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                      style={{ borderColor: '#AABDE0' }}
+                      disabled={status === 'submitting'}
+                      autoComplete="given-name"
+                    />
+                    <input
+                      type="text"
+                      required
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="Last name"
+                      className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                      style={{ borderColor: '#AABDE0' }}
+                      disabled={status === 'submitting'}
+                      autoComplete="family-name"
+                    />
+                  </div>
+
+                  {selectedRole === 'client' && (
+                    <input
+                      type="text"
+                      required
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="Company name"
+                      className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                      style={{ borderColor: '#AABDE0' }}
+                      disabled={status === 'submitting'}
+                      autoComplete="organization"
+                    />
+                  )}
+
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@email.com"
+                    className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
+                    style={{ borderColor: '#AABDE0' }}
+                    disabled={status === 'submitting'}
+                    autoComplete="email"
+                  />
+
+                  <PasswordInput
+                    required
+                    minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password (min 8 characters)"
+                    disabled={status === 'submitting'}
+                    autoComplete="new-password"
+                  />
+                  <PasswordInput
+                    required
+                    minLength={8}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm password"
+                    disabled={status === 'submitting'}
+                    autoComplete="new-password"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={
+                      status === 'submitting' ||
+                      !firstName ||
+                      !lastName ||
+                      !email ||
+                      !password ||
+                      !confirmPassword ||
+                      (selectedRole === 'client' && !companyName)
+                    }
+                    className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                    style={{ backgroundColor: '#1A3C6B' }}
+                  >
+                    {status === 'submitting' && <Spinner />}
+                    {status === 'submitting'
+                      ? 'Creating account…'
+                      : selectedRole === 'talent'
+                      ? 'Create talent account'
+                      : 'Create client account'}
+                  </button>
+
+                  {status === 'error' && errorMsg && (
+                    <p className="text-[12px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
+                  )}
+                </form>
+              )}
+
+              <p
+                className="text-center pt-3"
+                style={{ fontSize: 12, color: '#2E5099' }}
+              >
+                {mode === 'signin' ? (
+                  <>
+                    New here?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('signup')}
+                      className="underline font-semibold"
+                      style={{ color: '#1A3C6B' }}
+                    >
+                      Create an account →
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('signin')}
+                      className="underline font-semibold"
+                      style={{ color: '#1A3C6B' }}
+                    >
+                      Sign in →
+                    </button>
+                  </>
                 )}
-              </form>
+              </p>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 14px' }}>
                 <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.08)' }} />
