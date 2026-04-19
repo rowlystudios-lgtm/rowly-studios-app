@@ -118,8 +118,6 @@ async function searchNominatim(
     addressdetails: '1',
     countrycodes: 'us',
     limit: '8',
-    // Spec-requested landmark/POI toggle.
-    featuretype: 'settlement',
   })
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?${params}`,
