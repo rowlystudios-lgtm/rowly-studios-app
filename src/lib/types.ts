@@ -1,13 +1,9 @@
+import { DEPARTMENTS, type DepartmentKey } from '@/lib/crew-taxonomy'
+
 export type UserRole = 'talent' | 'client' | 'admin'
-export type Department =
-  | 'camera'
-  | 'photography'
-  | 'styling'
-  | 'glam'
-  | 'post'
-  | 'production'
-  | 'direction'
-  | 'other'
+// Department is an alias for DepartmentKey — the single source of truth is
+// src/lib/crew-taxonomy.ts. Imports from '@/lib/types' keep working.
+export type Department = DepartmentKey
 export type AvailabilityStatus = 'available' | 'hold' | 'unavailable'
 export type BookingStatus = 'requested' | 'accepted' | 'declined' | 'cancelled' | 'completed'
 export type JobStatus = 'draft' | 'submitted' | 'crewing' | 'confirmed' | 'wrapped' | 'cancelled'
@@ -72,13 +68,9 @@ export type Availability = {
   created_at: string
 }
 
-export const DEPARTMENT_LABELS: Record<Department, string> = {
-  camera: 'Camera',
-  photography: 'Photography',
-  styling: 'Styling',
-  glam: 'Glam',
-  post: 'Post',
-  production: 'Production',
-  direction: 'Direction',
-  other: 'Other',
-}
+// Computed from the taxonomy so there's one source of truth.
+// Widened to Record<string, string> so legacy DB values (e.g. 'camera',
+// 'direction') still render a label instead of undefined.
+export const DEPARTMENT_LABELS: Record<string, string> = Object.fromEntries(
+  DEPARTMENTS.map((d) => [d.key, d.label])
+)

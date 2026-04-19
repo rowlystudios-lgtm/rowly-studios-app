@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
-import { CITY_OPTIONS, DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { CITY_OPTIONS, type Department } from '@/lib/types'
+import { DEPARTMENTS, deptRoles, type DepartmentKey } from '@/lib/crew-taxonomy'
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024 // 5MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
@@ -392,28 +393,56 @@ export default function EditProfilePage() {
           <Field label="Department">
             <select
               value={form.department}
-              onChange={(e) => update('department', e.target.value as Department | '')}
+              onChange={(e) => {
+                const dept = e.target.value as DepartmentKey | ''
+                setForm((f) => ({
+                  ...f,
+                  department: dept as Department | '',
+                  // Reset primary_role when department changes so it
+                  // matches an option in the new role list.
+                  primary_role: dept ? deptRoles(dept)[0] ?? '' : '',
+                }))
+              }}
               className="rs-input"
               required
             >
-              <option value="">Choose a department</option>
-              {(Object.keys(DEPARTMENT_LABELS) as Department[]).map((d) => (
-                <option key={d} value={d}>
-                  {DEPARTMENT_LABELS[d]}
+              <option value="">Select department…</option>
+              {DEPARTMENTS.map((d) => (
+                <option key={d.key} value={d.key}>
+                  {d.fullLabel}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="Primary role">
-            <input
-              type="text"
-              value={form.primary_role}
-              onChange={(e) => update('primary_role', e.target.value)}
-              placeholder="1st AC · DP · Stylist · Editor"
-              className="rs-input"
-              required
-            />
-          </Field>
+
+          {form.department && (() => {
+            const roles = deptRoles(form.department)
+            const isLegacy =
+              form.primary_role !== '' && !roles.includes(form.primary_role)
+            return (
+              <Field label="Primary role">
+                <select
+                  value={form.primary_role}
+                  onChange={(e) => update('primary_role', e.target.value)}
+                  className="rs-input"
+                  required
+                >
+                  <option value="">Select your role…</option>
+                  {isLegacy && (
+                    <option value={form.primary_role}>
+                      {form.primary_role} (current)
+                    </option>
+                  )}
+                  {roles.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )
+          })()}
+
           <Field label="Bio">
             <textarea
               value={form.bio}

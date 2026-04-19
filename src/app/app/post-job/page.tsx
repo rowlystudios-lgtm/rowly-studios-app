@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { CREW_OPTIONS } from '@/lib/jobs'
+import { CREW_OPTIONS } from '@/lib/crew-taxonomy'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import {
   PAGE_BG,

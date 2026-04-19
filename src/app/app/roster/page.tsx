@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { DEPARTMENTS } from '@/lib/crew-taxonomy'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -17,27 +18,14 @@ const BUTTON_PRIMARY = '#1A3C6B'
 
 type Side = 'production' | 'post'
 
+// Departments grouped by roster side. Everything except 'post' lives on the
+// production side. 'other' is excluded — roster filters are craft-first.
+const POST_KEYS: Department[] = ['post']
 const DEPTS_BY_SIDE: Record<Side, Department[]> = {
-  production: ['camera', 'styling', 'glam', 'production', 'direction', 'other'],
-  post: ['post'],
-}
-
-// 'camera' and 'photography' are treated as the same chip in the UI.
-const DEPT_ALIASES: Partial<Record<Department, Department[]>> = {
-  camera: ['camera', 'photography'],
-}
-
-function deptMatches(talentDept: Department | null, filterDept: Department): boolean {
-  if (!talentDept) return false
-  if (talentDept === filterDept) return true
-  const aliases = DEPT_ALIASES[filterDept]
-  if (aliases && aliases.includes(talentDept)) return true
-  return false
-}
-
-// Override label in the roster dropdown so 'camera' reads as the merged chip.
-const ROSTER_DEPT_LABEL: Partial<Record<Department, string>> = {
-  camera: 'Camera / Photography',
+  production: DEPARTMENTS
+    .filter((d) => d.key !== 'post' && d.key !== 'other')
+    .map((d) => d.key),
+  post: POST_KEYS,
 }
 
 type TalentProfileLite = {
@@ -309,7 +297,7 @@ function RosterInner() {
       if (side === 'production') return t.department !== 'post'
       return t.department === 'post'
     })
-    if (dept !== 'all') list = list.filter((t) => deptMatches(t.department, dept))
+    if (dept !== 'all') list = list.filter((t) => t.department === dept)
     if (query) list = list.filter((t) => t.name.toLowerCase().includes(query))
     return list
   }, [talent, side, dept, query])
@@ -388,7 +376,7 @@ function RosterInner() {
           </option>
           {DEPTS_BY_SIDE[side].map((d) => (
             <option key={d} value={d}>
-              {ROSTER_DEPT_LABEL[d] ?? DEPARTMENT_LABELS[d]}
+              {DEPARTMENT_LABELS[d]}
             </option>
           ))}
         </select>

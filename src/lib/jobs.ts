@@ -17,15 +17,24 @@ export type JobRow = {
   crew_needed?: string[] | null
 }
 
+// Crew labels for rendering job.crew_needed chips. Keys mirror the
+// taxonomy in src/lib/crew-taxonomy.ts for new jobs, with legacy keys
+// (mua, editing, gaffer, pa) kept so jobs created under the old schema
+// still render.
 export const CREW_LABELS: Record<string, string> = {
+  // New taxonomy keys
   photography: 'Camera / Photography',
   video: 'Video / DP',
-  production: 'Production Manager',
   styling: 'Styling',
-  mua: 'Hair & Makeup',
+  glam: 'Hair & Makeup',
   art_direction: 'Art Direction',
-  editing: 'Edit & Post',
+  production: 'Production Manager',
+  lighting: 'Lighting / Gaffer',
+  post: 'Edit & Post',
   sound: 'Sound',
+  // Legacy keys (pre-taxonomy refactor)
+  mua: 'Hair & Makeup',
+  editing: 'Edit & Post',
   gaffer: 'Lighting / Gaffer',
   pa: 'Production Assistant',
 }
@@ -35,41 +44,43 @@ export const CREW_LABELS: Record<string, string> = {
  * Used to pre-seed the Roster department filter when a client browses
  * talent for a specific job.
  */
+// Legacy department alias — kept for back-compat with code still importing
+// from '@/lib/jobs'. New code should import DepartmentKey from crew-taxonomy.
 export type TalentDepartment =
-  | 'camera'
   | 'photography'
+  | 'video'
   | 'styling'
   | 'glam'
-  | 'post'
+  | 'art_direction'
   | 'production'
-  | 'direction'
+  | 'lighting'
+  | 'post'
+  | 'sound'
   | 'other'
 
+// Used to pre-seed the Roster department filter when a client browses
+// talent for a specific job. Now a 1:1 mapping since crew keys and
+// department keys are aligned under the taxonomy.
 export const CREW_TO_DEPARTMENT: Record<string, TalentDepartment> = {
-  photography: 'camera',
-  video: 'camera',
+  photography: 'photography',
+  video: 'video',
   production: 'production',
   styling: 'styling',
+  glam: 'glam',
+  art_direction: 'art_direction',
+  lighting: 'lighting',
+  post: 'post',
+  sound: 'sound',
+  // Legacy crew keys
   mua: 'glam',
-  art_direction: 'direction',
   editing: 'post',
-  sound: 'post',
-  gaffer: 'camera',
+  gaffer: 'lighting',
   pa: 'production',
 }
 
-export const CREW_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: 'photography', label: CREW_LABELS.photography },
-  { key: 'video', label: CREW_LABELS.video },
-  { key: 'production', label: CREW_LABELS.production },
-  { key: 'styling', label: CREW_LABELS.styling },
-  { key: 'mua', label: CREW_LABELS.mua },
-  { key: 'art_direction', label: CREW_LABELS.art_direction },
-  { key: 'editing', label: CREW_LABELS.editing },
-  { key: 'sound', label: CREW_LABELS.sound },
-  { key: 'gaffer', label: CREW_LABELS.gaffer },
-  { key: 'pa', label: CREW_LABELS.pa },
-]
+// CREW_OPTIONS lives in crew-taxonomy.ts now. Re-exported here so existing
+// imports from '@/lib/jobs' keep working.
+export { CREW_OPTIONS } from '@/lib/crew-taxonomy'
 
 export type BookingStatus = 'requested' | 'confirmed' | 'declined'
 
