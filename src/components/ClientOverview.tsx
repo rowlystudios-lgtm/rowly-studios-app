@@ -4,7 +4,12 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { JobStatusBadge } from '@/components/StatusBadge'
-import { formatDateRange, formatLongDate, greeting } from '@/lib/jobs'
+import {
+  formatLongDate,
+  greeting,
+  summariseShootDays,
+  type ShootDay,
+} from '@/lib/jobs'
 import type { JobStatus } from '@/lib/job-status'
 
 const CARD_BG = '#2E5099'
@@ -20,6 +25,8 @@ type JobSummary = {
   location: string | null
   status: JobStatus
   num_talent: number | null
+  shoot_days: ShootDay[] | null
+  call_time: string | null
 }
 
 type ClientRow = {
@@ -49,7 +56,9 @@ export function ClientOverview() {
       const [jobsRes, clientRes] = await Promise.all([
         supabase
           .from('jobs')
-          .select('id, title, start_date, end_date, location, status, num_talent')
+          .select(
+            'id, title, start_date, end_date, location, status, num_talent, shoot_days, call_time'
+          )
           .eq('client_id', uid)
           .order('start_date', { ascending: false })
           .limit(10),
@@ -274,7 +283,7 @@ export function ClientOverview() {
 }
 
 function JobRow({ job }: { job: JobSummary }) {
-  const date = job.start_date ? formatDateRange(job.start_date, job.end_date) : ''
+  const date = summariseShootDays(job)
   return (
     <div
       style={{

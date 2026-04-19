@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
+import { CREW_OPTIONS } from '@/lib/jobs'
 import {
   PAGE_BG,
   TEXT_PRIMARY,
@@ -14,29 +15,44 @@ import {
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
+const CHIP_INACTIVE_BG = 'rgba(255,255,255,0.06)'
+const CHIP_INACTIVE_BORDER = 'rgba(170,189,224,0.2)'
+
+type ShootDayInput = { date: string; call_time: string }
 
 type FormState = {
   title: string
   description: string
-  location: string
-  start_date: string
-  end_date: string
-  call_time: string
-  day_rate: string
-  num_talent: string
+  address_line: string
+  address_city: string
+  address_state: string
+  address_zip: string
+  shoot_days: ShootDayInput[]
+  crew_needed: string[]
   client_notes: string
 }
 
 const INITIAL: FormState = {
   title: '',
   description: '',
-  location: '',
-  start_date: '',
-  end_date: '',
-  call_time: '08:00',
-  day_rate: '',
-  num_talent: '1',
+  address_line: '',
+  address_city: '',
+  address_state: 'CA',
+  address_zip: '',
+  shoot_days: [{ date: '', call_time: '08:00' }],
+  crew_needed: [],
   client_notes: '',
+}
+
+function formatAddress(form: FormState): string {
+  const line = form.address_line.trim()
+  const city = form.address_city.trim()
+  const state = form.address_state.trim().toUpperCase()
+  const zip = form.address_zip.trim()
+  const cityStateZip = [city, state && zip ? `${state} ${zip}` : state || zip]
+    .filter(Boolean)
+    .join(', ')
+  return [line, cityStateZip].filter(Boolean).join(', ')
 }
 
 export default function PostJobPage() {
@@ -57,7 +73,6 @@ function PostJobInner() {
   const [error, setError] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
-  // Pre-fill note if user came from a specific talent's profile.
   useEffect(() => {
     const talentId = params.get('talent')
     if (!talentId) return
@@ -76,8 +91,7 @@ function PostJobInner() {
         setForm((f) => ({
           ...f,
           client_notes:
-            f.client_notes ||
-            `Please book ${name} for this job if available.`,
+            f.client_notes || `Please book ${name} for this job if available.`,
         }))
       })
     return () => {
@@ -89,39 +103,97 @@ function PostJobInner() {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  function updateShootDay(index: number, patch: Partial<ShootDayInput>) {
+    setForm((f) => ({
+      ...f,
+      shoot_days: f.shoot_days.map((d, i) => (i === index ? { ...d, ...patch } : d)),
+    }))
+  }
+
+  function addShootDay() {
+    setForm((f) => ({
+      ...f,
+      shoot_days: [
+        ...f.shoot_days,
+        {
+          date: '',
+          call_time: f.shoot_days[f.shoot_days.length - 1]?.call_time ?? '08:00',
+        },
+      ],
+    }))
+  }
+
+  function removeShootDay(index: number) {
+    setForm((f) => ({
+      ...f,
+      shoot_days: f.shoot_days.filter((_, i) => i !== index),
+    }))
+  }
+
+  function toggleCrew(key: string) {
+    setForm((f) => ({
+      ...f,
+      crew_needed: f.crew_needed.includes(key)
+        ? f.crew_needed.filter((k) => k !== key)
+        : [...f.crew_needed, key],
+    }))
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
     setError('')
 
     if (!user?.id) {
       setError('Not signed in')
-      setSaving(false)
       return
     }
 
-    const numTalent = Math.max(1, parseInt(form.num_talent, 10) || 1)
-    const dayRateCents = form.day_rate
-      ? Math.round(parseFloat(form.day_rate) * 100)
-      : null
+    if (!form.address_line.trim() || !form.address_city.trim() || !form.address_state.trim() || !form.address_zip.trim()) {
+      setError('Please fill in the full street address.')
+      return
+    }
 
-    const { error } = await supabase.from('jobs').insert({
+    const validDays = form.shoot_days.filter((d) => d.date)
+    if (validDays.length === 0) {
+      setError('Please add at least one shoot day with a date.')
+      return
+    }
+
+    if (form.crew_needed.length === 0) {
+      setError('Please select at least one crew type needed.')
+      return
+    }
+
+    setSaving(true)
+
+    const sortedDays = [...validDays].sort((a, b) => a.date.localeCompare(b.date))
+    const addressString = formatAddress(form)
+
+    const { error: insertError } = await supabase.from('jobs').insert({
       client_id: user.id,
       title: form.title.trim(),
       description: form.description.trim() || null,
-      location: form.location.trim() || null,
-      start_date: form.start_date,
-      end_date: form.end_date || form.start_date,
-      call_time: form.call_time || null,
-      day_rate_cents: dayRateCents,
-      num_talent: numTalent,
+      address_line: form.address_line.trim() || null,
+      address_city: form.address_city.trim() || null,
+      address_state: form.address_state.trim().toUpperCase() || null,
+      address_zip: form.address_zip.trim() || null,
+      location: addressString || null,
+      shoot_days: sortedDays.map((d) => ({
+        date: d.date,
+        call_time: d.call_time || null,
+      })),
+      start_date: sortedDays[0].date,
+      end_date: sortedDays[sortedDays.length - 1].date,
+      call_time: sortedDays[0].call_time || null,
+      crew_needed: form.crew_needed,
       client_notes: form.client_notes.trim() || null,
+      day_rate_cents: null,
       status: 'submitted',
     })
 
     setSaving(false)
-    if (error) {
-      setError(error.message)
+    if (insertError) {
+      setError(insertError.message)
       return
     }
 
@@ -201,6 +273,8 @@ function PostJobInner() {
     )
   }
 
+  const multiDay = form.shoot_days.length > 1
+
   return (
     <Shell>
       <Link
@@ -215,18 +289,11 @@ function PostJobInner() {
       >
         ← Back
       </Link>
-      <h1
-        style={{
-          fontSize: 22,
-          fontWeight: 600,
-          marginTop: 12,
-          marginBottom: 4,
-        }}
-      >
+      <h1 style={{ fontSize: 22, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>
         Post a job
       </h1>
       <p style={{ fontSize: 12, color: TEXT_MUTED, marginBottom: 20 }}>
-        Give us the shape of the job and admin will crew it.
+        Give us the shape of the job and we&apos;ll crew it.
       </p>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -237,106 +304,196 @@ function PostJobInner() {
               required
               value={form.title}
               onChange={(e) => update('title', e.target.value)}
-              placeholder="Nike SS26 Campaign — Day 1"
+              placeholder="Nike SS26 Campaign"
               className="rs-input"
             />
           </Field>
-          <Field label="Description" required>
+          <Field label="Description">
             <textarea
-              required
               value={form.description}
               onChange={(e) => update('description', e.target.value)}
-              placeholder="What does this job involve?"
+              placeholder="Tell us about the project"
               rows={4}
               className="rs-input resize-none"
             />
           </Field>
-          <Field label="Location" required>
+        </Section>
+
+        <Section title="Location">
+          <Field label="Street address" required>
             <input
               type="text"
               required
-              value={form.location}
-              onChange={(e) => update('location', e.target.value)}
-              placeholder="Los Angeles, CA"
+              value={form.address_line}
+              onChange={(e) => update('address_line', e.target.value)}
+              placeholder="123 Main Street, Suite 200"
               className="rs-input"
+              autoComplete="address-line1"
             />
           </Field>
-        </Section>
-
-        <Section title="When">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Start date" required>
+          <Field label="City" required>
+            <input
+              type="text"
+              required
+              value={form.address_city}
+              onChange={(e) => update('address_city', e.target.value)}
+              placeholder="Los Angeles"
+              className="rs-input"
+              autoComplete="address-level2"
+            />
+          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 10 }}>
+            <Field label="State" required>
               <input
-                type="date"
+                type="text"
                 required
-                value={form.start_date}
-                onChange={(e) => update('start_date', e.target.value)}
+                maxLength={2}
+                value={form.address_state}
+                onChange={(e) =>
+                  update('address_state', e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase())
+                }
+                placeholder="CA"
                 className="rs-input"
+                autoCapitalize="characters"
+                autoComplete="address-level1"
+                style={{ textTransform: 'uppercase' }}
               />
             </Field>
-            <Field label="End date">
+            <Field label="Zip" required>
               <input
-                type="date"
-                value={form.end_date}
-                onChange={(e) => update('end_date', e.target.value)}
+                type="text"
+                required
+                inputMode="numeric"
+                maxLength={10}
+                value={form.address_zip}
+                onChange={(e) =>
+                  update('address_zip', e.target.value.replace(/[^0-9-]/g, ''))
+                }
+                placeholder="90028"
                 className="rs-input"
+                autoComplete="postal-code"
               />
             </Field>
           </div>
-          <Field label="Call time">
-            <input
-              type="time"
-              value={form.call_time}
-              onChange={(e) => update('call_time', e.target.value)}
-              className="rs-input"
-            />
-          </Field>
         </Section>
 
-        <Section title="Crew &amp; rate">
-          <Field label="Offered day rate">
-            <div style={{ position: 'relative' }}>
-              <span
+        <Section title="Shoot day(s)">
+          <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: -2, lineHeight: 1.5 }}>
+            Add a row for each day of the shoot — everything is billed at a day rate.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {form.shoot_days.map((day, i) => (
+              <div
+                key={i}
                 style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: '#888',
-                  pointerEvents: 'none',
-                  fontSize: 14,
+                  display: 'grid',
+                  gridTemplateColumns: multiDay ? '1fr 120px 32px' : '1fr 120px',
+                  gap: 8,
+                  alignItems: 'center',
                 }}
               >
-                $
-              </span>
-              <input
-                type="number"
-                min="0"
-                step="25"
-                value={form.day_rate}
-                onChange={(e) => update('day_rate', e.target.value)}
-                placeholder="0"
-                className="rs-input"
-                style={{ paddingLeft: 24 }}
-              />
-            </div>
-          </Field>
-          <Field label="Number of talent needed">
-            <input
-              type="number"
-              min={1}
-              value={form.num_talent}
-              onChange={(e) => update('num_talent', e.target.value)}
-              className="rs-input"
-            />
-          </Field>
+                <input
+                  type="date"
+                  required
+                  value={day.date}
+                  onChange={(e) => updateShootDay(i, { date: e.target.value })}
+                  className="rs-input"
+                />
+                <input
+                  type="time"
+                  value={day.call_time}
+                  onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
+                  className="rs-input"
+                />
+                {multiDay && (
+                  <button
+                    type="button"
+                    onClick={() => removeShootDay(i)}
+                    aria-label={`Remove day ${i + 1}`}
+                    style={{
+                      width: 32,
+                      height: 36,
+                      borderRadius: 10,
+                      border: `1px solid ${CHIP_INACTIVE_BORDER}`,
+                      background: CHIP_INACTIVE_BG,
+                      color: TEXT_MUTED,
+                      fontSize: 16,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={addShootDay}
+            style={{
+              alignSelf: 'flex-start',
+              padding: '8px 12px',
+              borderRadius: 10,
+              background: 'transparent',
+              color: LINK_COLOR,
+              border: `1px dashed rgba(170,189,224,0.4)`,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            + Add another day
+          </button>
         </Section>
 
-        <Section title="Notes for talent">
+        <Section title="Crew needed">
+          <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: -2, lineHeight: 1.5 }}>
+            Select the departments you need — we&apos;ll match you with the right talent.
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 8,
+            }}
+          >
+            {CREW_OPTIONS.map((opt) => {
+              const active = form.crew_needed.includes(opt.key)
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => toggleCrew(opt.key)}
+                  aria-pressed={active}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: `1px solid ${active ? '#ffffff' : CHIP_INACTIVE_BORDER}`,
+                    background: active ? '#ffffff' : CHIP_INACTIVE_BG,
+                    color: active ? '#1A3C6B' : TEXT_MUTED,
+                    fontSize: 13,
+                    fontWeight: active ? 600 : 500,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    transition: 'all 120ms ease',
+                    lineHeight: 1.25,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+        </Section>
+
+        <Section title="Notes">
           <textarea
             value={form.client_notes}
             onChange={(e) => update('client_notes', e.target.value)}
-            placeholder="Anything talent should know — NDA, dress code, parking, key contact."
+            placeholder="Anything else the crew should know: NDA, parking, dress code, key contact."
             rows={4}
             className="rs-input resize-none"
           />
@@ -357,42 +514,54 @@ function PostJobInner() {
           </p>
         )}
 
-        <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
-          <Link
-            href="/app"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Link
+              href="/app"
+              style={{
+                flex: 1,
+                padding: '14px 0',
+                borderRadius: 12,
+                background: 'rgba(255,255,255,0.08)',
+                color: TEXT_MUTED,
+                textAlign: 'center',
+                border: '1px solid rgba(170,189,224,0.2)',
+                fontSize: 13,
+                fontWeight: 500,
+                textDecoration: 'none',
+              }}
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '14px 0',
+                borderRadius: 12,
+                background: '#fff',
+                color: BUTTON_PRIMARY,
+                border: 'none',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: saving ? 'wait' : 'pointer',
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? 'Submitting…' : 'Submit job request'}
+            </button>
+          </div>
+          <p
             style={{
-              flex: 1,
-              padding: '14px 0',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.08)',
+              fontSize: 11,
               color: TEXT_MUTED,
               textAlign: 'center',
-              border: '1px solid rgba(170,189,224,0.2)',
-              fontSize: 13,
-              fontWeight: 500,
-              textDecoration: 'none',
+              lineHeight: 1.5,
             }}
           >
-            Cancel
-          </Link>
-          <button
-            type="submit"
-            disabled={saving}
-            style={{
-              flex: 1,
-              padding: '14px 0',
-              borderRadius: 12,
-              background: '#fff',
-              color: BUTTON_PRIMARY,
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: saving ? 'wait' : 'pointer',
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
-            {saving ? 'Submitting…' : 'Submit job'}
-          </button>
+            Our team will review your request and be in touch within 24 hours.
+          </p>
         </div>
       </form>
     </Shell>

@@ -10,7 +10,11 @@ import {
   BookingStatusBadge,
 } from '@/components/StatusBadge'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
-import { formatDateRange } from '@/lib/jobs'
+import {
+  CREW_LABELS,
+  summariseShootDays,
+  type ShootDay,
+} from '@/lib/jobs'
 import type { BookingStatus, JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
@@ -42,6 +46,8 @@ type JobRow = {
   admin_notes: string | null
   status: JobStatus
   client_id: string | null
+  shoot_days: ShootDay[] | null
+  crew_needed: string[] | null
   profiles: ClientMini | ClientMini[] | null
 }
 
@@ -136,6 +142,7 @@ function AdminJobsInner() {
       .select(
         `id, title, description, location, start_date, end_date, call_time,
          day_rate_cents, num_talent, client_notes, admin_notes, status, client_id,
+         shoot_days, crew_needed,
          profiles!jobs_client_id_fkey (id, first_name, last_name, full_name)`
       )
       .order('start_date', { ascending: false, nullsFirst: false })
@@ -770,8 +777,7 @@ function CompletedCard({
         </p>
         <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
           {clientName(job.profiles)}
-          {job.start_date && ' · '}
-          {job.start_date && formatDateRange(job.start_date, job.end_date)}
+          {summariseShootDays(job) && ` · ${summariseShootDays(job).split(' · Call ')[0]}`}
           {confirmedCount > 0 && ` · ${confirmedCount} talent`}
         </p>
       </div>
@@ -781,15 +787,17 @@ function CompletedCard({
 }
 
 function JobDetailLines({ job }: { job: JobRow }) {
+  const dateSummary = summariseShootDays(job)
+  const crewLabels =
+    Array.isArray(job.crew_needed) && job.crew_needed.length > 0
+      ? job.crew_needed.map((k) => CREW_LABELS[k] ?? k)
+      : []
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {job.start_date && (
+      {dateSummary && (
         <p style={{ fontSize: 12, color: TEXT_PRIMARY }}>
           <span style={{ color: TEXT_MUTED }}>When: </span>
-          {formatDateRange(job.start_date, job.end_date)}
-          {job.call_time && (
-            <span style={{ color: TEXT_MUTED }}> · Call {job.call_time.slice(0, 5)}</span>
-          )}
+          {dateSummary}
         </p>
       )}
       {job.location && (
@@ -798,17 +806,25 @@ function JobDetailLines({ job }: { job: JobRow }) {
           {job.location}
         </p>
       )}
-      <p style={{ fontSize: 12, color: TEXT_PRIMARY }}>
-        <span style={{ color: TEXT_MUTED }}>Rate: </span>
-        {formatMoney(job.day_rate_cents)} / day
-        {typeof job.num_talent === 'number' && (
-          <span style={{ color: TEXT_MUTED }}> · {job.num_talent} talent</span>
-        )}
-      </p>
+      {(job.day_rate_cents || typeof job.num_talent === 'number') && (
+        <p style={{ fontSize: 12, color: TEXT_PRIMARY }}>
+          <span style={{ color: TEXT_MUTED }}>Rate: </span>
+          {formatMoney(job.day_rate_cents)} / day
+          {typeof job.num_talent === 'number' && (
+            <span style={{ color: TEXT_MUTED }}> · {job.num_talent} talent</span>
+          )}
+        </p>
+      )}
       <p style={{ fontSize: 12, color: TEXT_PRIMARY }}>
         <span style={{ color: TEXT_MUTED }}>Client: </span>
         {clientName(job.profiles)}
       </p>
+      {crewLabels.length > 0 && (
+        <p style={{ fontSize: 12, color: TEXT_PRIMARY, lineHeight: 1.4 }}>
+          <span style={{ color: TEXT_MUTED }}>Crew: </span>
+          {crewLabels.join(' · ')}
+        </p>
+      )}
       {job.description && (
         <p
           style={{

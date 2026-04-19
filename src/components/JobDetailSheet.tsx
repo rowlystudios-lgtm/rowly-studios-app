@@ -2,10 +2,11 @@
 
 import { useEffect } from 'react'
 import {
+  CREW_LABELS,
   formatCallTime,
-  formatDateRange,
   formatMoney,
   getMapsUrl,
+  resolveShootDays,
   type Booking,
 } from '@/lib/jobs'
 import { AddToCalendar } from './AddToCalendar'
@@ -48,9 +49,12 @@ export function JobDetailSheet({
   if (!booking) return null
 
   const job = booking.job
-  const dateStr = formatDateRange(job.start_date, job.end_date)
-  const callStr = formatCallTime(job.call_time)
+  const shootDays = resolveShootDays(job)
   const offered = formatMoney(job.day_rate_cents)
+  const crewLabels =
+    Array.isArray(job.crew_needed) && job.crew_needed.length > 0
+      ? job.crew_needed.map((k) => CREW_LABELS[k] ?? k)
+      : []
 
   function openMaps(e: React.MouseEvent) {
     e.preventDefault()
@@ -134,16 +138,31 @@ export function JobDetailSheet({
           </div>
 
           <Card>
-            <Label>When</Label>
-            <p style={{ fontSize: 14, marginTop: 4 }}>
-              {dateStr}
-              {callStr && (
-                <>
-                  <span style={{ color: TEXT_MUTED }}> · Call </span>
-                  {callStr}
-                </>
-              )}
-            </p>
+            <Label>Shoot day{shootDays.length === 1 ? '' : 's'}</Label>
+            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {shootDays.map((d, i) => {
+                const parts = d.date.split('-').map(Number)
+                const date =
+                  parts.length === 3 && !parts.some(Number.isNaN)
+                    ? new Date(parts[0], parts[1] - 1, parts[2])
+                    : null
+                const dateLabel = date
+                  ? `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]} ${date.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()]}`
+                  : d.date
+                const callLabel = formatCallTime(d.call_time)
+                return (
+                  <p key={`${d.date}-${i}`} style={{ fontSize: 14 }}>
+                    {dateLabel}
+                    {callLabel && (
+                      <>
+                        <span style={{ color: TEXT_MUTED }}> · Call </span>
+                        {callLabel}
+                      </>
+                    )}
+                  </p>
+                )
+              })}
+            </div>
           </Card>
 
           {job.location && (
@@ -176,6 +195,36 @@ export function JobDetailSheet({
               {offered} <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>/ day</span>
             </p>
           </Card>
+
+          {crewLabels.length > 0 && (
+            <Card>
+              <Label>Crew needed</Label>
+              <div
+                style={{
+                  marginTop: 6,
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 6,
+                }}
+              >
+                {crewLabels.map((label) => (
+                  <span
+                    key={label}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      background: 'rgba(170,189,224,0.15)',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {job.description && (
             <Card>

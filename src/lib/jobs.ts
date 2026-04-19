@@ -1,3 +1,8 @@
+export type ShootDay = {
+  date: string
+  call_time: string | null
+}
+
 export type JobRow = {
   id: string
   title: string
@@ -8,7 +13,35 @@ export type JobRow = {
   call_time: string | null
   day_rate_cents: number | null
   client_notes: string | null
+  shoot_days?: ShootDay[] | null
+  crew_needed?: string[] | null
 }
+
+export const CREW_LABELS: Record<string, string> = {
+  photography: 'Camera / Photography',
+  video: 'Video / DP',
+  production: 'Production Manager',
+  styling: 'Styling',
+  mua: 'Hair & Makeup',
+  art_direction: 'Art Direction',
+  editing: 'Edit & Post',
+  sound: 'Sound',
+  gaffer: 'Lighting / Gaffer',
+  pa: 'Production Assistant',
+}
+
+export const CREW_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'photography', label: CREW_LABELS.photography },
+  { key: 'video', label: CREW_LABELS.video },
+  { key: 'production', label: CREW_LABELS.production },
+  { key: 'styling', label: CREW_LABELS.styling },
+  { key: 'mua', label: CREW_LABELS.mua },
+  { key: 'art_direction', label: CREW_LABELS.art_direction },
+  { key: 'editing', label: CREW_LABELS.editing },
+  { key: 'sound', label: CREW_LABELS.sound },
+  { key: 'gaffer', label: CREW_LABELS.gaffer },
+  { key: 'pa', label: CREW_LABELS.pa },
+]
 
 export type BookingStatus = 'requested' | 'confirmed' | 'declined'
 
@@ -86,6 +119,89 @@ export function formatCallTime(t: string | null): string {
   const period = h >= 12 ? 'PM' : 'AM'
   const hh = h % 12 || 12
   return `${hh}:${String(m ?? 0).padStart(2, '0')} ${period}`
+}
+
+function ymd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function addDays(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
+function isShootDayArray(value: unknown): value is ShootDay[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (v) =>
+        v &&
+        typeof v === 'object' &&
+        'date' in v &&
+        typeof (v as { date: unknown }).date === 'string'
+    )
+  )
+}
+
+/**
+ * Resolve a booking's shoot days, preferring the structured
+ * shoot_days array when present and falling back to
+ * start_date + end_date + call_time for legacy rows.
+ */
+export function resolveShootDays(job: {
+  shoot_days?: ShootDay[] | null
+  start_date?: string | null
+  end_date?: string | null
+  call_time?: string | null
+}): ShootDay[] {
+  if (isShootDayArray(job.shoot_days) && job.shoot_days.length > 0) {
+    return job.shoot_days.map((d) => ({
+      date: d.date,
+      call_time: d.call_time ?? null,
+    }))
+  }
+  if (!job.start_date) return []
+  const start = parseLocalDate(job.start_date)
+  if (!start) return []
+  const end = job.end_date ? parseLocalDate(job.end_date) : start
+  if (!end || end <= start) {
+    return [{ date: job.start_date, call_time: job.call_time ?? null }]
+  }
+  const days: ShootDay[] = []
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    days.push({ date: ymd(d), call_time: job.call_time ?? null })
+  }
+  return days
+}
+
+/**
+ * One-line summary used on compact job cards.
+ * 1 day:  "Thu 23 Apr · Call 8:00 AM"
+ * 2+ days: "Thu 23 Apr + 2 more days · Call 8:00 AM"
+ */
+export function summariseShootDays(
+  job: {
+    shoot_days?: ShootDay[] | null
+    start_date?: string | null
+    end_date?: string | null
+    call_time?: string | null
+  }
+): string {
+  const days = resolveShootDays(job)
+  if (days.length === 0) return ''
+  const first = parseLocalDate(days[0].date)
+  if (!first) return ''
+  const firstLabel = shortDate(first)
+  const callLabel = formatCallTime(days[0].call_time)
+  const extra = days.length - 1
+  let label = firstLabel
+  if (extra > 0) {
+    label = `${firstLabel} + ${extra} more day${extra === 1 ? '' : 's'}`
+  }
+  if (callLabel) label = `${label} · Call ${callLabel}`
+  return label
 }
 
 export function greeting(now = new Date()): string {

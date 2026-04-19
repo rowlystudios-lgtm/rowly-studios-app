@@ -6,13 +6,12 @@ import { Avatar } from '@/components/Avatar'
 import { AddToCalendar } from '@/components/AddToCalendar'
 import { JobDetailSheet } from '@/components/JobDetailSheet'
 import {
-  formatCallTime,
-  formatDateRange,
   formatLongDate,
   formatMoney,
   getMapsUrl,
   greeting,
   normalizeBooking,
+  summariseShootDays,
   type Booking,
 } from '@/lib/jobs'
 
@@ -54,7 +53,8 @@ export function TalentOverview() {
            jobs (
              id, title, description, location,
              start_date, end_date, call_time,
-             day_rate_cents, client_notes
+             day_rate_cents, client_notes,
+             shoot_days, crew_needed
            )`
         )
         .eq('talent_id', uid)
@@ -318,8 +318,7 @@ function JobCard({
   onDecline,
 }: JobCardProps) {
   const job = booking.job
-  const dateStr = formatDateRange(job.start_date, job.end_date)
-  const callStr = formatCallTime(job.call_time)
+  const dateStr = summariseShootDays(job)
   const rateCents =
     variant === 'confirmed' ? booking.confirmed_rate_cents : job.day_rate_cents
   const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Offered rate'
@@ -377,15 +376,7 @@ function JobCard({
         }}
       >
         <CalendarGlyph />
-        <span>
-          {dateStr}
-          {callStr && (
-            <>
-              <span style={{ color: TEXT_MUTED }}> · Call </span>
-              {callStr}
-            </>
-          )}
-        </span>
+        <span>{dateStr}</span>
       </div>
 
       {/* Location row */}

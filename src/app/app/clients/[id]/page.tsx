@@ -8,7 +8,7 @@ import { Avatar } from '@/components/Avatar'
 import { AdminGuard } from '@/components/AdminGuard'
 import { JobStatusBadge } from '@/components/StatusBadge'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
-import { formatDateRange } from '@/lib/jobs'
+import { summariseShootDays, type ShootDay } from '@/lib/jobs'
 import type { JobStatus } from '@/lib/job-status'
 
 const CARD_BG = '#2E5099'
@@ -45,6 +45,8 @@ type JobRow = {
   title: string
   start_date: string | null
   end_date: string | null
+  call_time: string | null
+  shoot_days: ShootDay[] | null
   location: string | null
   status: JobStatus
 }
@@ -87,7 +89,7 @@ function AdminClientDetailPage() {
           .maybeSingle(),
         supabase
           .from('jobs')
-          .select('id, title, start_date, end_date, location, status')
+          .select('id, title, start_date, end_date, call_time, shoot_days, location, status')
           .eq('client_id', id)
           .order('start_date', { ascending: false }),
       ])
@@ -232,13 +234,17 @@ function AdminClientDetailPage() {
               <p style={{ fontSize: 13, fontWeight: 600, color: TEXT_PRIMARY }}>
                 {j.title}
               </p>
-              {(j.start_date || j.location) && (
-                <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
-                  {j.start_date && formatDateRange(j.start_date, j.end_date)}
-                  {j.start_date && j.location && ' · '}
-                  {j.location}
-                </p>
-              )}
+              {(() => {
+                const when = summariseShootDays(j).split(' · Call ')[0]
+                if (!when && !j.location) return null
+                return (
+                  <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
+                    {when}
+                    {when && j.location && ' · '}
+                    {j.location}
+                  </p>
+                )
+              })()}
             </div>
             <JobStatusBadge status={j.status} small />
           </div>
