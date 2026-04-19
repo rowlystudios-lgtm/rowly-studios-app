@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
@@ -256,6 +256,15 @@ function StatusDot({ job }: { job: JobRow }) {
   return <span style={{ ...base, background: '#1A3C6B', border: '2px solid #AABDE0' }} />
 }
 
+/**
+ * A client can remove a booking iff it's still in the 'requested' state
+ * (admin hasn't approved yet) OR the job has been cancelled (cleanup path).
+ */
+function canRemove(booking: JobBooking, job: JobRow): boolean {
+  if (job.status === 'cancelled') return true
+  return booking.status === 'requested'
+}
+
 const STATUS_ORDER: Record<JobStatus, number> = {
   submitted: 0,
   draft: 0,
@@ -273,45 +282,40 @@ export function ClientOverview() {
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
   const [completedOpen, setCompletedOpen] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     const uid = user?.id
     if (!uid) return
-    let cancelled = false
+    const { data, error } = await supabase
+      .from('jobs')
+      .select(
+        `id, title, status, location, client_notes, description,
+         address_line, address_city, address_state, address_zip,
+         shoot_days, start_date, end_date, call_time,
+         crew_needed, created_at,
+         cancelled_at, wrapped_at,
+         job_bookings (
+           id, status, confirmed_rate_cents,
+           profiles (
+             id, first_name, last_name, avatar_url,
+             talent_profiles (department, primary_role)
+           )
+         )`
+      )
+      .eq('client_id', uid)
+      .order('created_at', { ascending: false })
 
-    async function load() {
-      const { data, error } = await supabase
-        .from('jobs')
-        .select(
-          `id, title, status, location, client_notes, description,
-           address_line, address_city, address_state, address_zip,
-           shoot_days, start_date, end_date, call_time,
-           crew_needed, created_at,
-           cancelled_at, wrapped_at,
-           job_bookings (
-             id, status, confirmed_rate_cents,
-             profiles (
-               id, first_name, last_name, avatar_url,
-               talent_profiles (department, primary_role)
-             )
-           )`
-        )
-        .eq('client_id', uid)
-        .order('created_at', { ascending: false })
-
-      if (cancelled) return
-      if (error) {
-        setError(error.message)
-        setLoading(false)
-        return
-      }
-      setJobs((data ?? []) as JobRow[])
+    if (error) {
+      setError(error.message)
       setLoading(false)
+      return
     }
-    load()
-    return () => {
-      cancelled = true
-    }
+    setJobs((data ?? []) as JobRow[])
+    setLoading(false)
   }, [user?.id, supabase])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   async function deleteJob(job: JobRow): Promise<boolean> {
     const snapshot = jobs
@@ -449,6 +453,7 @@ export function ClientOverview() {
             expanded={expandedJobId === job.id}
             onToggle={() => toggleExpanded(job.id)}
             onDelete={() => deleteJob(job)}
+            onRefresh={load}
             muted={job.status === 'cancelled'}
           />
         ))}
@@ -515,6 +520,7 @@ export function ClientOverview() {
                 expanded={expandedJobId === job.id}
                 onToggle={() => toggleExpanded(job.id)}
                 onDelete={() => deleteJob(job)}
+                onRefresh={load}
                 muted
               />
             ))}
@@ -532,22 +538,28 @@ function ClientJobRow({
   expanded,
   onToggle,
   onDelete,
+  onRefresh,
   muted,
 }: {
   job: JobRow
   expanded: boolean
   onToggle: () => void
   onDelete: () => Promise<boolean>
+  onRefresh: () => void | Promise<void>
   muted?: boolean
 }) {
+  const { supabase } = useAuth()
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [removingId, setRemovingId] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState('')
 
   useEffect(() => {
     if (!expanded) {
       setConfirming(false)
       setDeleteError('')
+      setRemoveError('')
     }
   }, [expanded])
 
@@ -566,6 +578,12 @@ function ClientJobRow({
     else onSet.push(b)
   }
 
+  const hasLockedCrew =
+    job.status !== 'cancelled' &&
+    bookings.some(
+      (b) => b.status === 'admin_approved' || b.status === 'confirmed'
+    )
+
   async function handleDeleteConfirmed() {
     if (deleting) return
     setDeleting(true)
@@ -576,6 +594,26 @@ function ClientJobRow({
       setDeleting(false)
       setConfirming(false)
     }
+  }
+
+  async function handleRemoveBooking(bookingId: string) {
+    if (removingId) return
+    setRemovingId(bookingId)
+    setRemoveError('')
+
+    const { error } = await supabase
+      .from('job_bookings')
+      .delete()
+      .eq('id', bookingId)
+
+    if (error) {
+      setRemoveError(`Could not remove — ${error.message}`)
+      setRemovingId(null)
+      return
+    }
+
+    await onRefresh()
+    setRemovingId(null)
   }
 
   return (
@@ -730,10 +768,39 @@ function ClientJobRow({
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {onSet.length > 0 && (
-                  <CrewGroup title="On-set crew" bookings={onSet} />
+                  <CrewGroup
+                    title="On-set crew"
+                    bookings={onSet}
+                    job={job}
+                    removingId={removingId}
+                    onRemove={handleRemoveBooking}
+                  />
                 )}
                 {post.length > 0 && (
-                  <CrewGroup title="Post-production" bookings={post} />
+                  <CrewGroup
+                    title="Post-production"
+                    bookings={post}
+                    job={job}
+                    removingId={removingId}
+                    onRemove={handleRemoveBooking}
+                  />
+                )}
+                {hasLockedCrew && (
+                  <p
+                    style={{
+                      fontSize: 10,
+                      color: 'rgba(170,189,224,0.5)',
+                      marginTop: 2,
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    Confirmed crew cannot be removed. Contact Rowly Studios to make changes.
+                  </p>
+                )}
+                {removeError && (
+                  <p style={{ fontSize: 11, color: '#fca5a5', marginTop: 4 }}>
+                    {removeError}
+                  </p>
                 )}
               </div>
             )}
@@ -888,7 +955,19 @@ function ExpandedSection({
   )
 }
 
-function CrewGroup({ title, bookings }: { title: string; bookings: JobBooking[] }) {
+function CrewGroup({
+  title,
+  bookings,
+  job,
+  removingId,
+  onRemove,
+}: {
+  title: string
+  bookings: JobBooking[]
+  job: JobRow
+  removingId: string | null
+  onRemove: (bookingId: string) => void | Promise<void>
+}) {
   return (
     <div>
       <p
@@ -909,40 +988,80 @@ function CrewGroup({ title, bookings }: { title: string; bookings: JobBooking[] 
           const tp = unwrap(p?.talent_profiles)
           const name = fullName(p)
           const role = tp?.primary_role ?? (tp?.department ? DEPARTMENT_LABELS[tp.department as Department] : '')
+          const removable = canRemove(b, job)
+          const busy = removingId === b.id
           return (
             <div
               key={b.id}
-              style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                justifyContent: 'space-between',
+              }}
             >
-              <Avatar url={p?.avatar_url ?? null} name={name} size={32} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: TEXT_PRIMARY,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {name}
-                </p>
-                {role && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                <Avatar url={p?.avatar_url ?? null} name={name} size={32} />
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <p
                     style={{
-                      fontSize: 11,
-                      color: TEXT_MUTED,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: TEXT_PRIMARY,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {role}
+                    {name}
                   </p>
-                )}
+                  {role && (
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: TEXT_MUTED,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {role}
+                    </p>
+                  )}
+                </div>
+                <BookingStatusPill status={b.status} />
               </div>
-              <BookingStatusPill status={b.status} />
+              {removable && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(b.id)}
+                  disabled={busy}
+                  aria-label={`Remove ${name}`}
+                  style={{
+                    flexShrink: 0,
+                    background: 'transparent',
+                    border: '1px solid rgba(252,165,165,0.3)',
+                    borderRadius: 6,
+                    color: '#fca5a5',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '4px 8px',
+                    cursor: busy ? 'wait' : 'pointer',
+                    opacity: busy ? 0.5 : 1,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {busy ? '…' : 'Remove'}
+                </button>
+              )}
             </div>
           )
         })}
