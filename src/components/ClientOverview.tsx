@@ -148,18 +148,13 @@ function fullName(p: BookingProfile): string {
 }
 
 function fullMapsQuery(job: JobRow): string {
-  const line = [
+  const parts = [
     job.address_line,
-    [
-      job.address_city,
-      [job.address_state, job.address_zip].filter(Boolean).join(' '),
-    ]
-      .filter(Boolean)
-      .join(', '),
-  ]
-    .filter(Boolean)
-    .join(', ')
-  return line || job.location || ''
+    job.address_city,
+    job.address_state,
+    job.address_zip,
+  ].filter(Boolean) as string[]
+  return parts.join(', ') || job.location || ''
 }
 
 export function ClientOverview() {

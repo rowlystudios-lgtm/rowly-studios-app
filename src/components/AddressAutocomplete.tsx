@@ -208,7 +208,7 @@ function parseResult(item: NominatimResult): AddressResult | null {
   const state = stateRaw.replace(/^US-/, '').toUpperCase().slice(0, 2)
   const city =
     a.city ?? a.town ?? a.village ?? a.suburb ?? a.county ?? ''
-  const zip = a.postcode ?? ''
+  const zip = a.postcode?.trim() ?? ''
 
   // For landmarks without a street address, keep the display name's
   // first segment so the user sees something meaningful.
@@ -256,7 +256,12 @@ async function searchAddress(
       seen.add(key)
       merged.push(r)
     }
-    return merged
+    // Prefer results that actually carry a zip — stable sort.
+    return merged.sort((a, b) => {
+      const aHasZip = a.address_zip ? 1 : 0
+      const bHasZip = b.address_zip ? 1 : 0
+      return bHasZip - aHasZip
+    })
   }
 
   return primary
@@ -342,6 +347,11 @@ export function AddressAutocomplete({
         const results = await searchAddress(q.trim(), controller.signal)
         if (reqId !== requestId.current) return
         setSuggestions(results)
+        // Auto-preview the first result so mobile (no hover) still
+        // gets the mini map.
+        if (results.length > 0 && results[0].lat && results[0].lon) {
+          setPreviewResult(results[0])
+        }
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') return
         if (reqId !== requestId.current) return
@@ -362,7 +372,11 @@ export function AddressAutocomplete({
 
   function handleFocus() {
     if (blurRef.current) clearTimeout(blurRef.current)
-    setRecent(loadRecent())
+    const rec = loadRecent()
+    setRecent(rec)
+    if (rec.length > 0 && rec[0].lat && rec[0].lon) {
+      setPreviewResult(rec[0])
+    }
     setOpen(true)
   }
 
@@ -581,7 +595,7 @@ export function AddressAutocomplete({
             <div
               ref={mapRef}
               style={{
-                height: 140,
+                height: 160,
                 borderTop: '1px solid rgba(170,189,224,0.15)',
                 borderRadius: '0 0 10px 10px',
                 overflow: 'hidden',
