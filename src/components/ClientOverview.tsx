@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
@@ -21,41 +21,6 @@ const TEXT_MUTED = '#AABDE0'
 const LINK_COLOR = '#AABDE0'
 const CONFIRMED_GREEN = '#4ade80'
 const REQUESTED_AMBER = '#d4950a'
-
-const STATUS_STYLES: Record<
-  JobStatus,
-  { bg: string; color: string; label: string }
-> = {
-  submitted: { bg: '#AABDE0', color: '#1A3C6B', label: 'Submitted' },
-  crewing: { bg: '#d4950a', color: '#ffffff', label: 'In review' },
-  confirmed: { bg: '#166534', color: '#ffffff', label: 'Confirmed' },
-  wrapped: { bg: 'rgba(170,189,224,0.15)', color: '#AABDE0', label: 'Completed' },
-  cancelled: { bg: '#7f1d1d', color: '#fca5a5', label: 'Cancelled' },
-  draft: { bg: '#AABDE0', color: '#1A3C6B', label: 'Draft' },
-}
-
-function ClientStatusBadge({ status }: { status: JobStatus }) {
-  const s = STATUS_STYLES[status] ?? STATUS_STYLES.submitted
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '4px 10px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        background: s.bg,
-        color: s.color,
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      {s.label}
-    </span>
-  )
-}
 
 type TalentProfileMini =
   | { department: Department | null; primary_role: string | null }
@@ -94,6 +59,8 @@ type JobRow = {
   call_time: string | null
   crew_needed: string[] | null
   created_at: string
+  cancelled_at: string | null
+  wrapped_at: string | null
   job_bookings: JobBooking[] | null
 }
 
@@ -157,12 +124,105 @@ function fullMapsQuery(job: JobRow): string {
   return parts.join(', ') || job.location || ''
 }
 
+function todayLocalStr(): string {
+  const t = new Date()
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+}
+
+function isLiveToday(job: JobRow): boolean {
+  const todayStr = todayLocalStr()
+  if (job.shoot_days && job.shoot_days.length > 0) {
+    return job.shoot_days.some((d) => d.date === todayStr)
+  }
+  if (job.start_date && job.end_date) {
+    return job.start_date <= todayStr && job.end_date >= todayStr
+  }
+  if (job.start_date) return job.start_date === todayStr
+  return false
+}
+
+type StatusDotKind = JobStatus | 'live'
+
+function getStatusDot(job: JobRow): StatusDotKind {
+  if ((job.status === 'confirmed' || job.status === 'crewing') && isLiveToday(job)) {
+    return 'live'
+  }
+  return job.status
+}
+
+function StatusDot({ job }: { job: JobRow }) {
+  const kind = getStatusDot(job)
+
+  if (kind === 'live') {
+    return (
+      <span
+        style={{
+          background: '#22c55e',
+          color: '#fff',
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          padding: '3px 7px',
+          borderRadius: 999,
+          animation: 'rs-pulse 1.8s ease-in-out infinite',
+          display: 'inline-block',
+          lineHeight: 1,
+        }}
+      >
+        LIVE
+      </span>
+    )
+  }
+
+  const base = {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box' as const,
+  }
+
+  if (kind === 'cancelled') {
+    return (
+      <span style={{ ...base, background: 'transparent', border: '2px solid #ef4444' }}>
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="#ef4444" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="1" y1="1" x2="7" y2="7" />
+          <line x1="7" y1="1" x2="1" y2="7" />
+        </svg>
+      </span>
+    )
+  }
+  if (kind === 'crewing') {
+    return <span style={{ ...base, background: '#d4950a', border: '2px solid #d4950a' }} />
+  }
+  if (kind === 'confirmed') {
+    return <span style={{ ...base, background: '#22c55e', border: '2px solid #22c55e' }} />
+  }
+  if (kind === 'wrapped') {
+    return <span style={{ ...base, background: 'rgba(170,189,224,0.3)', border: '2px solid rgba(170,189,224,0.4)' }} />
+  }
+  // submitted / draft — pending
+  return <span style={{ ...base, background: '#1A3C6B', border: '2px solid #AABDE0' }} />
+}
+
+const STATUS_ORDER: Record<JobStatus, number> = {
+  submitted: 0,
+  draft: 0,
+  crewing: 1,
+  confirmed: 2,
+  cancelled: 3,
+  wrapped: 4,
+}
+
 export function ClientOverview() {
   const { user, supabase } = useAuth()
   const [jobs, setJobs] = useState<JobRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [completedOpen, setCompletedOpen] = useState(false)
 
   useEffect(() => {
     const uid = user?.id
@@ -177,6 +237,7 @@ export function ClientOverview() {
            address_line, address_city, address_state, address_zip,
            shoot_days, start_date, end_date, call_time,
            crew_needed, created_at,
+           cancelled_at, wrapped_at,
            job_bookings (
              id, status, confirmed_rate_cents,
              profiles (
@@ -220,8 +281,67 @@ export function ClientOverview() {
     setExpandedJobId((prev) => (prev === id ? null : id))
   }
 
+  const { activeJobs, completedJobs } = useMemo(() => {
+    const now = new Date()
+    const yesterday = new Date(now)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
+
+    const fiveDaysAgo = new Date(now)
+    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5)
+
+    const active: JobRow[] = []
+    const completed: JobRow[] = []
+
+    for (const j of jobs) {
+      if (j.status === 'wrapped') {
+        const wrappedYesterdayOrEarlier = j.wrapped_at
+          ? new Date(j.wrapped_at) < yesterday
+          : false
+        const endOnOrBeforeYesterday = j.end_date ? j.end_date <= yesterdayStr : false
+        if (wrappedYesterdayOrEarlier || endOnOrBeforeYesterday) {
+          completed.push(j)
+        } else {
+          // Freshly wrapped today — still show up top so client can see it
+          active.push(j)
+        }
+        continue
+      }
+      if (j.status === 'cancelled') {
+        // Show cancelled jobs for 5 days from cancelled_at
+        const stillVisible =
+          !j.cancelled_at || new Date(j.cancelled_at) > fiveDaysAgo
+        if (stillVisible) active.push(j)
+        continue
+      }
+      active.push(j)
+    }
+
+    // Sort active by status group, then created_at desc within group
+    active.sort((a, b) => {
+      const oa = STATUS_ORDER[a.status] ?? 99
+      const ob = STATUS_ORDER[b.status] ?? 99
+      if (oa !== ob) return oa - ob
+      return (b.created_at ?? '').localeCompare(a.created_at ?? '')
+    })
+
+    // Completed: newest wrapped first
+    completed.sort((a, b) => {
+      const wa = a.wrapped_at ?? a.end_date ?? a.created_at ?? ''
+      const wb = b.wrapped_at ?? b.end_date ?? b.created_at ?? ''
+      return wb.localeCompare(wa)
+    })
+
+    return { activeJobs: active, completedJobs: completed }
+  }, [jobs])
+
+  const hasAnything = activeJobs.length > 0 || completedJobs.length > 0
+  const totalVisible = activeJobs.length + completedJobs.length
+
   return (
     <>
+      <style>{`@keyframes rs-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
+
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 2 }}>My Jobs</h1>
       <p
         style={{
@@ -232,14 +352,14 @@ export function ClientOverview() {
       >
         {loading
           ? 'Loading…'
-          : `${jobs.length} job${jobs.length === 1 ? '' : 's'}`}
+          : `${totalVisible} job${totalVisible === 1 ? '' : 's'}`}
       </p>
 
       {error && (
         <p style={{ fontSize: 13, color: '#fca5a5', marginBottom: 10 }}>{error}</p>
       )}
 
-      {!loading && !error && jobs.length === 0 && (
+      {!loading && !error && activeJobs.length === 0 && (
         <div
           style={{
             background: CARD_BG,
@@ -247,6 +367,7 @@ export function ClientOverview() {
             borderRadius: 14,
             padding: '22px 20px',
             textAlign: 'center',
+            marginBottom: completedJobs.length > 0 ? 12 : 0,
           }}
         >
           <p style={{ fontSize: 14, marginBottom: 12 }}>No jobs posted yet.</p>
@@ -272,15 +393,87 @@ export function ClientOverview() {
 
       {!loading &&
         !error &&
-        jobs.map((job) => (
+        activeJobs.map((job) => (
           <ClientJobRow
             key={job.id}
             job={job}
             expanded={expandedJobId === job.id}
             onToggle={() => toggleExpanded(job.id)}
             onDelete={() => deleteJob(job)}
+            muted={job.status === 'cancelled'}
           />
         ))}
+
+      {!loading && !error && completedJobs.length > 0 && (
+        <div style={{ marginTop: activeJobs.length > 0 ? 16 : 0 }}>
+          <button
+            type="button"
+            onClick={() => setCompletedOpen((v) => !v)}
+            aria-expanded={completedOpen}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              background: 'rgba(170,189,224,0.08)',
+              border: '1px solid rgba(170,189,224,0.12)',
+              borderRadius: 10,
+              color: TEXT_PRIMARY,
+              cursor: 'pointer',
+              marginBottom: 10,
+            }}
+          >
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{
+                  color: TEXT_MUTED,
+                  transform: completedOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 150ms ease',
+                }}
+                aria-hidden
+              >
+                <polyline points="9 6 15 12 9 18" />
+              </svg>
+              Completed
+            </span>
+            <span style={{ fontSize: 12, color: TEXT_MUTED }}>
+              {completedJobs.length} job{completedJobs.length === 1 ? '' : 's'}
+            </span>
+          </button>
+
+          {completedOpen &&
+            completedJobs.map((job) => (
+              <ClientJobRow
+                key={job.id}
+                job={job}
+                expanded={expandedJobId === job.id}
+                onToggle={() => toggleExpanded(job.id)}
+                onDelete={() => deleteJob(job)}
+                muted
+              />
+            ))}
+        </div>
+      )}
+
+      {/* Fallback when nothing at all (no active, no completed) — covered by empty state above already */}
+      {!loading && !error && !hasAnything && null}
     </>
   )
 }
@@ -290,11 +483,13 @@ function ClientJobRow({
   expanded,
   onToggle,
   onDelete,
+  muted,
 }: {
   job: JobRow
   expanded: boolean
   onToggle: () => void
   onDelete: () => Promise<boolean>
+  muted?: boolean
 }) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -340,6 +535,7 @@ function ClientJobRow({
         borderRadius: 12,
         marginBottom: 10,
         overflow: 'hidden',
+        opacity: muted ? 0.6 : 1,
       }}
     >
       <button
@@ -362,10 +558,8 @@ function ClientJobRow({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            justifyContent: 'space-between',
           }}
         >
-          <ClientStatusBadge status={job.status} />
           <h3
             style={{
               flex: 1,
@@ -381,6 +575,28 @@ function ClientJobRow({
           >
             {job.title}
           </h3>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 3,
+              flexShrink: 0,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: TEXT_MUTED,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Status
+            </span>
+            <StatusDot job={job} />
+          </div>
           <ChevronIcon expanded={expanded} />
         </div>
         {locationSubtitle && (
@@ -819,4 +1035,3 @@ function PinIcon() {
     </svg>
   )
 }
-

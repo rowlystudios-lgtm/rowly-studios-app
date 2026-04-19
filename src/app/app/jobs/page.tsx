@@ -23,7 +23,7 @@ const CARD_BORDER = 'rgba(170,189,224,0.15)'
 const SOFT_BORDER = 'rgba(170,189,224,0.1)'
 const BUTTON_PRIMARY = '#1A3C6B'
 
-type Segment = 'pending' | 'active' | 'completed'
+type Segment = 'pending' | 'active' | 'completed' | 'cancelled'
 
 type ClientMini = {
   id: string
@@ -48,7 +48,34 @@ type JobRow = {
   client_id: string | null
   shoot_days: ShootDay[] | null
   crew_needed: string[] | null
+  cancelled_at: string | null
+  wrapped_at: string | null
   profiles: ClientMini | ClientMini[] | null
+}
+
+function todayLocalStr(): string {
+  const t = new Date()
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+}
+
+function isLiveToday(job: JobRow): boolean {
+  const todayStr = todayLocalStr()
+  if (Array.isArray(job.shoot_days) && job.shoot_days.length > 0) {
+    return job.shoot_days.some((d) => d.date === todayStr)
+  }
+  if (job.start_date && job.end_date) {
+    return job.start_date <= todayStr && job.end_date >= todayStr
+  }
+  if (job.start_date) return job.start_date === todayStr
+  return false
+}
+
+function formatCancelledOn(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 }
 
 type TalentMini = {
@@ -125,7 +152,13 @@ function AdminJobsInner() {
   const { supabase } = useAuth()
 
   const [segment, setSegment] = useState<Segment>(
-    initialFilter === 'pending' ? 'pending' : 'pending'
+    initialFilter === 'active'
+      ? 'active'
+      : initialFilter === 'completed'
+      ? 'completed'
+      : initialFilter === 'cancelled'
+      ? 'cancelled'
+      : 'pending'
   )
   const [jobs, setJobs] = useState<JobRow[]>([])
   const [bookings, setBookings] = useState<Record<string, BookingWithTalent[]>>({})
@@ -133,6 +166,7 @@ function AdminJobsInner() {
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
   const [assignSheetJob, setAssignSheetJob] = useState<JobRow | null>(null)
+  const [cancelledQuery, setCancelledQuery] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -142,7 +176,7 @@ function AdminJobsInner() {
       .select(
         `id, title, description, location, start_date, end_date, call_time,
          day_rate_cents, num_talent, client_notes, admin_notes, status, client_id,
-         shoot_days, crew_needed,
+         shoot_days, crew_needed, cancelled_at, wrapped_at,
          profiles!jobs_client_id_fkey (id, first_name, last_name, full_name)`
       )
       .order('start_date', { ascending: false, nullsFirst: false })
@@ -192,18 +226,38 @@ function AdminJobsInner() {
     if (segment === 'pending') return jobs.filter((j) => j.status === 'submitted')
     if (segment === 'active')
       return jobs.filter((j) => j.status === 'crewing' || j.status === 'confirmed')
-    return jobs.filter((j) => j.status === 'wrapped' || j.status === 'cancelled')
-  }, [jobs, segment])
+    if (segment === 'completed') return jobs.filter((j) => j.status === 'wrapped')
+
+    // cancelled — show for 6 months from cancelled_at, then filter + search
+    const sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+    const q = cancelledQuery.trim().toLowerCase()
+    return jobs
+      .filter((j) => j.status === 'cancelled')
+      .filter((j) => !j.cancelled_at || new Date(j.cancelled_at) > sixMonthsAgo)
+      .filter((j) => {
+        if (!q) return true
+        const title = j.title?.toLowerCase() ?? ''
+        const cname = clientName(j.profiles).toLowerCase()
+        return title.includes(q) || cname.includes(q)
+      })
+      .sort((a, b) => (b.cancelled_at ?? '').localeCompare(a.cancelled_at ?? ''))
+  }, [jobs, segment, cancelledQuery])
 
   async function reject(job: JobRow) {
     setActionError('')
+    const nowIso = new Date().toISOString()
     const snapshot = jobs
     setJobs((js) =>
-      js.map((j) => (j.id === job.id ? { ...j, status: 'cancelled' as JobStatus } : j))
+      js.map((j) =>
+        j.id === job.id
+          ? { ...j, status: 'cancelled' as JobStatus, cancelled_at: nowIso }
+          : j
+      )
     )
     const { error } = await supabase
       .from('jobs')
-      .update({ status: 'cancelled' })
+      .update({ status: 'cancelled', cancelled_at: nowIso })
       .eq('id', job.id)
     if (error) {
       setJobs(snapshot)
@@ -249,15 +303,18 @@ function AdminJobsInner() {
 
   async function markWrapped(job: JobRow) {
     setActionError('')
+    const nowIso = new Date().toISOString()
     const snapshot = jobs
     setJobs((js) =>
       js.map((j) =>
-        j.id === job.id ? { ...j, status: 'wrapped' as JobStatus } : j
+        j.id === job.id
+          ? { ...j, status: 'wrapped' as JobStatus, wrapped_at: nowIso }
+          : j
       )
     )
     const { error } = await supabase
       .from('jobs')
-      .update({ status: 'wrapped' })
+      .update({ status: 'wrapped', wrapped_at: nowIso })
       .eq('id', job.id)
     if (error) {
       setJobs(snapshot)
@@ -278,6 +335,7 @@ function AdminJobsInner() {
 
   return (
     <PageShell>
+      <style>{`@keyframes rs-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 12 }}>Jobs</h1>
 
       <div
@@ -290,7 +348,7 @@ function AdminJobsInner() {
           marginBottom: 16,
         }}
       >
-        {(['pending', 'active', 'completed'] as Segment[]).map((s) => {
+        {(['pending', 'active', 'completed', 'cancelled'] as Segment[]).map((s) => {
           const active = s === segment
           return (
             <button
@@ -335,6 +393,17 @@ function AdminJobsInner() {
           {actionError}
         </p>
       )}
+      {segment === 'cancelled' && !loading && (
+        <input
+          type="text"
+          value={cancelledQuery}
+          onChange={(e) => setCancelledQuery(e.target.value)}
+          placeholder="Search cancelled jobs by title or client…"
+          className="rs-input"
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
       {loading && <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>}
       {!loading && filtered.length === 0 && (
         <p style={{ fontSize: 13, color: TEXT_MUTED }}>No jobs in this view.</p>
@@ -372,6 +441,9 @@ function AdminJobsInner() {
             }
           />
         ))}
+
+      {segment === 'cancelled' &&
+        filtered.map((job) => <CancelledCard key={job.id} job={job} />)}
 
       {assignSheetJob && (
         <AssignTalentSheet
@@ -643,7 +715,26 @@ function ActiveCard({
             {clientName(job.profiles)}
           </p>
         </div>
-        <JobStatusBadge status={job.status} small />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {isLiveToday(job) && (
+            <span
+              style={{
+                background: '#22c55e',
+                color: '#fff',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                padding: '3px 7px',
+                borderRadius: 999,
+                animation: 'rs-pulse 1.8s ease-in-out infinite',
+                lineHeight: 1,
+              }}
+            >
+              LIVE
+            </span>
+          )}
+          <JobStatusBadge status={job.status} small />
+        </div>
       </div>
 
       <JobDetailLines job={job} />
@@ -782,6 +873,42 @@ function CompletedCard({
         </p>
       </div>
       <JobStatusBadge status={job.status} small />
+    </div>
+  )
+}
+
+function CancelledCard({ job }: { job: JobRow }) {
+  const cancelledOn = formatCancelledOn(job.cancelled_at)
+  return (
+    <div
+      style={{
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        borderRadius: 12,
+        padding: '12px 14px',
+        marginBottom: 8,
+        opacity: 0.85,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 10,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: TEXT_PRIMARY }}>
+            {job.title}
+          </p>
+          <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
+            {clientName(job.profiles)}
+            {cancelledOn && ` · Cancelled on ${cancelledOn}`}
+          </p>
+        </div>
+        <JobStatusBadge status={job.status} small />
+      </div>
     </div>
   )
 }
