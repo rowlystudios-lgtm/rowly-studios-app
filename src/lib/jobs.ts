@@ -82,7 +82,12 @@ export const CREW_TO_DEPARTMENT: Record<string, TalentDepartment> = {
 // imports from '@/lib/jobs' keep working.
 export { CREW_OPTIONS } from '@/lib/crew-taxonomy'
 
-export type BookingStatus = 'requested' | 'confirmed' | 'declined'
+export type BookingStatus =
+  | 'requested'
+  | 'admin_approved'
+  | 'confirmed'
+  | 'declined'
+  | 'cancelled'
 
 export type Booking = {
   id: string

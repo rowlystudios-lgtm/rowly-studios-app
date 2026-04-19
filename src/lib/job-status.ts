@@ -6,7 +6,12 @@ export type JobStatus =
   | 'wrapped'
   | 'cancelled'
 
-export type BookingStatus = 'requested' | 'confirmed' | 'declined'
+export type BookingStatus =
+  | 'requested'
+  | 'admin_approved'
+  | 'confirmed'
+  | 'declined'
+  | 'cancelled'
 
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   draft: 'Draft',
@@ -17,15 +22,21 @@ export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   cancelled: 'Cancelled',
 }
 
+// Default label set — used by the shared BookingStatusBadge. Talent and
+// client views can override copy where the same state reads differently.
 export const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
-  requested: 'Requested',
+  requested: 'Pending review',
+  admin_approved: 'Awaiting talent',
   confirmed: 'Confirmed',
   declined: 'Declined',
+  cancelled: 'Cancelled',
 }
 
 type Swatch = { bg: string; color: string; border?: string }
 
-function swatch(kind: 'submitted' | 'review' | 'confirmed' | 'wrapped' | 'cancelled'): Swatch {
+function swatch(
+  kind: 'submitted' | 'review' | 'awaiting' | 'confirmed' | 'wrapped' | 'cancelled'
+): Swatch {
   switch (kind) {
     case 'submitted':
       return {
@@ -38,6 +49,12 @@ function swatch(kind: 'submitted' | 'review' | 'confirmed' | 'wrapped' | 'cancel
         bg: 'rgba(212,149,10,0.2)',
         color: '#d4950a',
         border: 'rgba(212,149,10,0.35)',
+      }
+    case 'awaiting':
+      return {
+        bg: 'rgba(46,80,153,0.25)',
+        color: '#AABDE0',
+        border: 'rgba(46,80,153,0.5)',
       }
     case 'confirmed':
       return {
@@ -81,9 +98,13 @@ export function bookingStatusSwatch(status: BookingStatus): Swatch {
   switch (status) {
     case 'requested':
       return swatch('review')
+    case 'admin_approved':
+      return swatch('awaiting')
     case 'confirmed':
       return swatch('confirmed')
     case 'declined':
       return swatch('cancelled')
+    case 'cancelled':
+      return swatch('wrapped')
   }
 }

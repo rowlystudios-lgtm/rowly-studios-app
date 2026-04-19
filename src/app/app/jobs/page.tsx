@@ -190,9 +190,16 @@ function AdminJobsInner() {
     const list = (data ?? []) as JobRow[]
     setJobs(list)
 
-    // Fetch bookings for active jobs
+    // Fetch bookings for any job that could receive new requests (submitted,
+    // crewing, confirmed). We include 'submitted' because clients can now add
+    // talent directly, and those requests land here for admin review.
     const activeIds = list
-      .filter((j) => j.status === 'crewing' || j.status === 'confirmed')
+      .filter(
+        (j) =>
+          j.status === 'submitted' ||
+          j.status === 'crewing' ||
+          j.status === 'confirmed'
+      )
       .map((j) => j.id)
     if (activeIds.length) {
       const { data: bks } = await supabase
@@ -297,6 +304,75 @@ function AdminJobsInner() {
       .eq('id', job.id)
     if (error) {
       setJobs(snapshot)
+      setActionError(error.message)
+    }
+  }
+
+  /** Derived list of client-initiated crew requests awaiting admin review. */
+  const crewRequests = useMemo(() => {
+    const out: Array<{ job: JobRow; booking: BookingWithTalent }> = []
+    for (const job of jobs) {
+      const bs = bookings[job.id] ?? []
+      for (const b of bs) {
+        if (b.status === 'requested') out.push({ job, booking: b })
+      }
+    }
+    return out
+  }, [jobs, bookings])
+
+  async function approveCrewRequest(jobId: string, bookingId: string) {
+    setActionError('')
+    const snapshot = { jobs, bookings }
+    // Optimistic: bump booking → admin_approved; if job was 'submitted' → 'crewing'.
+    setBookings((prev) => {
+      const list = (prev[jobId] ?? []).map((b) =>
+        b.id === bookingId ? { ...b, status: 'admin_approved' as BookingStatus } : b
+      )
+      return { ...prev, [jobId]: list }
+    })
+    setJobs((js) =>
+      js.map((j) =>
+        j.id === jobId && j.status === 'submitted'
+          ? { ...j, status: 'crewing' as JobStatus }
+          : j
+      )
+    )
+
+    const { error: bErr } = await supabase
+      .from('job_bookings')
+      .update({ status: 'admin_approved' })
+      .eq('id', bookingId)
+    if (bErr) {
+      setJobs(snapshot.jobs)
+      setBookings(snapshot.bookings)
+      setActionError(bErr.message)
+      return
+    }
+
+    // Flip the job to crewing if it was still submitted — ignore errors here;
+    // the booking is already in flight and a later reload will reconcile.
+    await supabase
+      .from('jobs')
+      .update({ status: 'crewing' })
+      .eq('id', jobId)
+      .eq('status', 'submitted')
+  }
+
+  async function declineCrewRequest(jobId: string, bookingId: string) {
+    setActionError('')
+    const snapshot = bookings
+    setBookings((prev) => {
+      const list = (prev[jobId] ?? []).map((b) =>
+        b.id === bookingId ? { ...b, status: 'declined' as BookingStatus } : b
+      )
+      return { ...prev, [jobId]: list }
+    })
+    const { error } = await supabase
+      .from('job_bookings')
+      .update({ status: 'declined' })
+      .eq('id', bookingId)
+    if (error) {
+      setBookings(snapshot)
       setActionError(error.message)
     }
   }
@@ -418,6 +494,37 @@ function AdminJobsInner() {
             onApprove={(notes, n, adminId) => approve(job, notes, n, adminId)}
           />
         ))}
+
+      {segment === 'active' && crewRequests.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              background: 'rgba(212,149,10,0.15)',
+              border: '1px solid rgba(212,149,10,0.35)',
+              borderRadius: 12,
+              padding: '12px 14px',
+              color: '#d4950a',
+              fontSize: 13,
+              fontWeight: 600,
+              marginBottom: 10,
+            }}
+          >
+            ⚠ {crewRequests.length} crew request
+            {crewRequests.length === 1 ? '' : 's'} awaiting your approval
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {crewRequests.map(({ job, booking }) => (
+              <CrewRequestCard
+                key={booking.id}
+                job={job}
+                booking={booking}
+                onApprove={() => approveCrewRequest(job.id, booking.id)}
+                onDecline={() => declineCrewRequest(job.id, booking.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {segment === 'active' &&
         filtered.map((job) => (
@@ -873,6 +980,137 @@ function CompletedCard({
         </p>
       </div>
       <JobStatusBadge status={job.status} small />
+    </div>
+  )
+}
+
+function CrewRequestCard({
+  job,
+  booking,
+  onApprove,
+  onDecline,
+}: {
+  job: JobRow
+  booking: BookingWithTalent
+  onApprove: () => void | Promise<void>
+  onDecline: () => void | Promise<void>
+}) {
+  const [busy, setBusy] = useState<'approve' | 'decline' | null>(null)
+  const talent = unwrap(booking.profiles)
+  const name = talentName(booking.profiles)
+  const tp = talent ? unwrap(talent.talent_profiles) : null
+  const role = tp?.primary_role ?? (tp?.department ? DEPARTMENT_LABELS[tp.department] : null)
+
+  async function doApprove() {
+    if (busy) return
+    setBusy('approve')
+    await onApprove()
+    setBusy(null)
+  }
+  async function doDecline() {
+    if (busy) return
+    setBusy('decline')
+    await onDecline()
+    setBusy(null)
+  }
+
+  return (
+    <div
+      style={{
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        borderRadius: 12,
+        padding: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Avatar
+          url={talent && !Array.isArray(talent) ? talent.avatar_url : null}
+          name={name}
+          size={36}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: TEXT_PRIMARY,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {name}
+          </p>
+          <p
+            style={{
+              fontSize: 11,
+              color: TEXT_MUTED,
+              marginTop: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {[role, formatMoney(booking.confirmed_rate_cents ?? job.day_rate_cents)]
+              .filter(Boolean)
+              .join(' · ') || 'Talent'}
+          </p>
+        </div>
+      </div>
+      <p
+        style={{
+          fontSize: 11,
+          color: TEXT_MUTED,
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: `1px solid ${SOFT_BORDER}`,
+        }}
+      >
+        <span style={{ color: TEXT_PRIMARY, fontWeight: 600 }}>{job.title}</span>
+        {' · '}
+        {clientName(job.profiles)}
+      </p>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button
+          type="button"
+          onClick={doDecline}
+          disabled={busy !== null}
+          style={{
+            flex: 1,
+            padding: '9px 0',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.08)',
+            color: TEXT_MUTED,
+            border: '1px solid rgba(170,189,224,0.2)',
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: busy ? 'wait' : 'pointer',
+          }}
+        >
+          {busy === 'decline' ? 'Declining…' : '✗ Decline'}
+        </button>
+        <button
+          type="button"
+          onClick={doApprove}
+          disabled={busy !== null}
+          style={{
+            flex: 2,
+            padding: '9px 0',
+            borderRadius: 10,
+            background: '#fff',
+            color: BUTTON_PRIMARY,
+            border: 'none',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: busy ? 'wait' : 'pointer',
+            opacity: busy ? 0.7 : 1,
+          }}
+        >
+          {busy === 'approve' ? 'Approving…' : '✓ Approve — send to talent'}
+        </button>
+      </div>
     </div>
   )
 }

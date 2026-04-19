@@ -69,6 +69,8 @@ type ClientJob = {
   id: string
   title: string
   status: string
+  start_date: string | null
+  shoot_days: Array<{ date: string; call_time: string | null }> | null
 }
 
 type JobBookingRow = {
@@ -163,6 +165,9 @@ function RosterInner() {
   const [addingTalentId, setAddingTalentId] = useState<string | null>(null)
   const [addedTalentIds, setAddedTalentIds] = useState<Set<string>>(new Set())
   const [addError, setAddError] = useState('')
+  const [addSuccess, setAddSuccess] = useState('')
+  const [pickerTalent, setPickerTalent] = useState<Talent | null>(null)
+  const [pickerBusy, setPickerBusy] = useState(false)
 
   // Reset department when side changes and current dept isn't on the new side.
   useEffect(() => {
@@ -210,7 +215,7 @@ function RosterInner() {
     async function load() {
       const { data } = await supabase
         .from('jobs')
-        .select('id, title, status')
+        .select('id, title, status, start_date, shoot_days')
         .eq('client_id', uid)
         .order('created_at', { ascending: false })
       if (cancelled) return
@@ -302,22 +307,57 @@ function RosterInner() {
     return list
   }, [talent, side, dept, query])
 
-  async function addToTeam(t: Talent) {
-    if (!jobContext) return
-    if (addedTalentIds.has(t.id)) return
-    if (addingTalentId) return
-    setAddingTalentId(t.id)
+  /**
+   * Insert a booking with status='requested'. Shared by:
+   *   - direct add when ?jobId= is present (jobContext mode)
+   *   - "Add to job" picker when no jobId (opens a sheet first)
+   */
+  async function handleAddToJob(jobId: string, t: Talent): Promise<boolean> {
     setAddError('')
+    setAddSuccess('')
+
+    const { data: existing } = await supabase
+      .from('job_bookings')
+      .select('id, status')
+      .eq('job_id', jobId)
+      .eq('talent_id', t.id)
+      .maybeSingle()
+
+    if (existing) {
+      setAddError(`${t.name} is already on this job (${existing.status}).`)
+      return false
+    }
 
     const { error } = await supabase.from('job_bookings').insert({
-      job_id: jobContext.id,
+      job_id: jobId,
       talent_id: t.id,
       status: 'requested',
+      notes: null,
+      confirmed_rate_cents: null,
     })
 
     if (error) {
       setAddError(`Could not add ${t.name}: ${error.message}`)
-    } else {
+      return false
+    }
+
+    setAddSuccess(`${t.name} added — pending admin review`)
+    // Dismiss success after a few seconds.
+    setTimeout(() => setAddSuccess(''), 4000)
+    return true
+  }
+
+  async function addToTeam(t: Talent) {
+    if (!jobContext) {
+      // No ?jobId= in URL — open the job picker sheet.
+      setPickerTalent(t)
+      return
+    }
+    if (addedTalentIds.has(t.id)) return
+    if (addingTalentId) return
+    setAddingTalentId(t.id)
+    const ok = await handleAddToJob(jobContext.id, t)
+    if (ok) {
       setAddedTalentIds((prev) => {
         const next = new Set(prev)
         next.add(t.id)
@@ -327,7 +367,19 @@ function RosterInner() {
     setAddingTalentId(null)
   }
 
+  async function onPickerSelectJob(jobId: string) {
+    if (!pickerTalent) return
+    setPickerBusy(true)
+    const ok = await handleAddToJob(jobId, pickerTalent)
+    setPickerBusy(false)
+    if (ok) setPickerTalent(null)
+  }
+
   const hasJob = Boolean(jobContext)
+  const pickableJobs = useMemo(
+    () => clientJobs.filter((j) => j.status === 'submitted' || j.status === 'crewing'),
+    [clientJobs]
+  )
 
   return (
     <PageShell>
@@ -478,6 +530,21 @@ function RosterInner() {
           {addError}
         </p>
       )}
+      {addSuccess && (
+        <p
+          style={{
+            fontSize: 12,
+            color: '#4ade80',
+            background: 'rgba(74,222,128,0.12)',
+            border: '1px solid rgba(74,222,128,0.3)',
+            borderRadius: 10,
+            padding: '10px 12px',
+            marginBottom: 10,
+          }}
+        >
+          {addSuccess}
+        </p>
+      )}
 
       {loadingTalent && <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading talent…</p>}
       {!loadingTalent && talentError && (
@@ -497,13 +564,199 @@ function RosterInner() {
               setExpandedId((prev) => (prev === t.id ? null : t.id))
             }
             hasJob={hasJob}
+            canPickJob={pickableJobs.length > 0 || !user}
             added={addedTalentIds.has(t.id)}
             adding={addingTalentId === t.id}
             onAdd={() => addToTeam(t)}
           />
         ))}
       </div>
+
+      {pickerTalent && (
+        <JobPickerSheet
+          talent={pickerTalent}
+          jobs={pickableJobs}
+          busy={pickerBusy}
+          onSelect={onPickerSelectJob}
+          onClose={() => {
+            if (!pickerBusy) setPickerTalent(null)
+          }}
+        />
+      )}
     </PageShell>
+  )
+}
+
+function JobPickerSheet({
+  talent,
+  jobs,
+  busy,
+  onSelect,
+  onClose,
+}: {
+  talent: Talent
+  jobs: ClientJob[]
+  busy: boolean
+  onSelect: (jobId: string) => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 200,
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex',
+        alignItems: 'flex-end',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          background: '#1A3C6B',
+          borderRadius: '20px 20px 0 0',
+          maxHeight: '85dvh',
+          overflowY: 'auto',
+          paddingBottom: 'calc(40px + env(safe-area-inset-bottom))',
+          color: '#fff',
+        }}
+      >
+        <div style={{ padding: '12px 0 4px', display: 'flex', justifyContent: 'center' }}>
+          <div
+            style={{
+              width: 36,
+              height: 4,
+              borderRadius: 2,
+              background: 'rgba(170,189,224,0.3)',
+            }}
+          />
+        </div>
+        <div style={{ padding: '4px 16px 12px' }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Add {talent.name} to a job</h2>
+          <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 4 }}>
+            {jobs.length === 0
+              ? 'You don\u2019t have any active jobs yet.'
+              : 'Pick the job you want to request them for.'}
+          </p>
+
+          {jobs.length === 0 ? (
+            <Link
+              href="/app/post-job"
+              onClick={onClose}
+              style={{
+                display: 'inline-block',
+                marginTop: 16,
+                padding: '12px 18px',
+                borderRadius: 10,
+                background: '#fff',
+                color: BUTTON_PRIMARY,
+                fontSize: 12,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                textDecoration: 'none',
+              }}
+            >
+              Post a job →
+            </Link>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {jobs.map((j) => {
+                const firstDay =
+                  (Array.isArray(j.shoot_days) && j.shoot_days[0]?.date) ||
+                  j.start_date ||
+                  null
+                return (
+                  <button
+                    key={j.id}
+                    type="button"
+                    onClick={() => onSelect(j.id)}
+                    disabled={busy}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '12px 14px',
+                      background: CARD_BG,
+                      border: `1px solid ${CARD_BORDER}`,
+                      borderRadius: 12,
+                      textAlign: 'left',
+                      color: TEXT_PRIMARY,
+                      cursor: busy ? 'wait' : 'pointer',
+                      opacity: busy ? 0.6 : 1,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {j.title}
+                      </p>
+                      <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
+                        {firstDay ? firstDay : 'No date set'}
+                        {' \u00b7 '}
+                        {j.status}
+                      </p>
+                    </div>
+                    <span
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 999,
+                        background: '#fff',
+                        color: BUTTON_PRIMARY,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Select
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              display: 'block',
+              margin: '16px auto 0',
+              background: 'transparent',
+              border: 'none',
+              color: TEXT_MUTED,
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              textDecoration: 'underline',
+              cursor: busy ? 'wait' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -624,6 +877,7 @@ function TalentCard({
   expanded,
   onToggleExpand,
   hasJob,
+  canPickJob,
   added,
   adding,
   onAdd,
@@ -632,6 +886,7 @@ function TalentCard({
   expanded: boolean
   onToggleExpand: () => void
   hasJob: boolean
+  canPickJob: boolean
   added: boolean
   adding: boolean
   onAdd: () => void
@@ -640,7 +895,12 @@ function TalentCard({
   const clientRate = markedUpRate(talent.day_rate_cents)
   const deptLabel = talent.department ? DEPARTMENT_LABELS[talent.department] : null
 
-  let addButtonLabel = 'Add to team'
+  // With ?jobId= → direct add. Without → open picker (allowed as long as
+  // the client has at least one active job).
+  const canClickAdd = hasJob || canPickJob
+  const addLabel = hasJob ? 'Add to team' : 'Add to job'
+
+  let addButtonLabel = addLabel
   if (added) addButtonLabel = '✓ Added'
   else if (adding) addButtonLabel = 'Adding…'
 
@@ -726,8 +986,12 @@ function TalentCard({
         <button
           type="button"
           onClick={onAdd}
-          disabled={!hasJob || added || adding}
-          title={!hasJob ? 'Open one of your jobs first to add talent' : undefined}
+          disabled={!canClickAdd || added || adding}
+          title={
+            !canClickAdd
+              ? 'Post a job before adding talent'
+              : undefined
+          }
           style={{
             flex: 1,
             padding: '10px 12px',
@@ -739,8 +1003,8 @@ function TalentCard({
             fontWeight: 700,
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            cursor: !hasJob || added || adding ? 'not-allowed' : 'pointer',
-            opacity: !hasJob ? 0.55 : 1,
+            cursor: !canClickAdd || added || adding ? 'not-allowed' : 'pointer',
+            opacity: !canClickAdd ? 0.55 : 1,
           }}
         >
           {addButtonLabel}

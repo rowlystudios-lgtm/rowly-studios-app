@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
@@ -90,8 +91,31 @@ const TABS: Record<ViewMode, Tab[]> = {
 
 export function TabBar() {
   const pathname = usePathname()
-  const { viewMode } = useAuth()
+  const { viewMode, user, supabase } = useAuth()
   const tabs = TABS[viewMode] ?? TABS.talent
+
+  // Talent only: count pending job offers (admin_approved bookings) so we
+  // can surface an amber badge on the Overview tab.
+  const [offerCount, setOfferCount] = useState(0)
+  useEffect(() => {
+    if (viewMode !== 'talent' || !user?.id) {
+      setOfferCount(0)
+      return
+    }
+    let cancelled = false
+    async function load() {
+      const { count } = await supabase
+        .from('job_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('talent_id', user!.id)
+        .eq('status', 'admin_approved')
+      if (!cancelled) setOfferCount(count ?? 0)
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [viewMode, user?.id, supabase, pathname])
 
   return (
     <nav
@@ -104,6 +128,8 @@ export function TabBar() {
     >
       {tabs.map((tab) => {
         const active = tab.matches ? tab.matches(pathname) : pathname === tab.href
+        const showOfferBadge =
+          viewMode === 'talent' && tab.href === '/app' && offerCount > 0
         return (
           <Link
             key={tab.href}
@@ -111,9 +137,36 @@ export function TabBar() {
             className={`flex flex-col items-center gap-1 px-3 py-1.5 text-[10px] tracking-wider uppercase font-semibold ${
               active ? 'text-rs-blue-logo' : 'text-rs-blue-fusion/40'
             }`}
+            style={{ position: 'relative' }}
           >
             {tab.icon}
             <span>{tab.label}</span>
+            {showOfferBadge && (
+              <span
+                aria-label={`${offerCount} pending job offer${offerCount === 1 ? '' : 's'}`}
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 'calc(50% - 18px)',
+                  minWidth: 16,
+                  height: 16,
+                  padding: '0 4px',
+                  borderRadius: 999,
+                  background: '#d4950a',
+                  color: '#fff',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1,
+                  boxShadow: '0 0 0 2px var(--rs-cream, #FBF5E4)',
+                }}
+              >
+                {offerCount}
+              </span>
+            )}
           </Link>
         )
       })}

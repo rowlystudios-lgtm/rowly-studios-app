@@ -35,11 +35,52 @@ type BookingProfile = {
   talent_profiles: TalentProfileMini
 } | null
 
+type BookingStatus =
+  | 'requested'
+  | 'admin_approved'
+  | 'confirmed'
+  | 'declined'
+  | 'cancelled'
+
 type JobBooking = {
   id: string
-  status: 'requested' | 'confirmed' | 'declined'
+  status: BookingStatus
   confirmed_rate_cents: number | null
   profiles: BookingProfile | BookingProfile[] | null
+}
+
+// Client-facing booking-status copy + colours.
+const BOOKING_STATUS_META: Record<
+  BookingStatus,
+  { label: string; color: string }
+> = {
+  requested: { label: 'Pending review', color: '#d4950a' },
+  admin_approved: { label: 'Sent to talent', color: '#AABDE0' },
+  confirmed: { label: 'Confirmed', color: '#22c55e' },
+  declined: { label: 'Declined', color: '#ef4444' },
+  cancelled: { label: 'Cancelled', color: '#6b7280' },
+}
+
+function BookingStatusPill({ status }: { status: BookingStatus }) {
+  const m = BOOKING_STATUS_META[status] ?? BOOKING_STATUS_META.requested
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        padding: '3px 8px',
+        borderRadius: 999,
+        background: `${m.color}22`,
+        color: m.color,
+        border: `1px solid ${m.color}44`,
+        whiteSpace: 'nowrap',
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+      }}
+    >
+      {m.label}
+    </span>
+  )
 }
 
 type JobRow = {
@@ -146,6 +187,14 @@ type StatusDotKind = JobStatus | 'live'
 function getStatusDot(job: JobRow): StatusDotKind {
   if ((job.status === 'confirmed' || job.status === 'crewing') && isLiveToday(job)) {
     return 'live'
+  }
+  // While the job itself is still in 'crewing', surface the booking progression:
+  // any booking confirmed → green, otherwise keep the amber crewing dot.
+  if (job.status === 'crewing' && Array.isArray(job.job_bookings)) {
+    const active = job.job_bookings.filter(
+      (b) => b.status !== 'declined' && b.status !== 'cancelled'
+    )
+    if (active.some((b) => b.status === 'confirmed')) return 'confirmed'
   }
   return job.status
 }
@@ -504,7 +553,9 @@ function ClientJobRow({
 
   const locationSubtitle = collapsedLocation(job)
   const shootDays = resolveShootDays(job)
-  const bookings = (job.job_bookings ?? []).filter((b) => b.status !== 'declined')
+  const bookings = (job.job_bookings ?? []).filter(
+    (b) => b.status !== 'declined' && b.status !== 'cancelled'
+  )
 
   const onSet: JobBooking[] = []
   const post: JobBooking[] = []
@@ -891,22 +942,7 @@ function CrewGroup({ title, bookings }: { title: string; bookings: JobBooking[] 
                   </p>
                 )}
               </div>
-              <span
-                aria-hidden
-                title={b.status === 'confirmed' ? 'Confirmed' : 'Requested'}
-                style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: 999,
-                  background:
-                    b.status === 'confirmed' ? CONFIRMED_GREEN : REQUESTED_AMBER,
-                  boxShadow:
-                    b.status === 'confirmed'
-                      ? '0 0 0 3px rgba(74,222,128,0.2)'
-                      : '0 0 0 3px rgba(212,149,10,0.2)',
-                  flexShrink: 0,
-                }}
-              />
+              <BookingStatusPill status={b.status} />
             </div>
           )
         })}

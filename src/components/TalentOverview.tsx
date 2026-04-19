@@ -58,8 +58,9 @@ export function TalentOverview() {
            )`
         )
         .eq('talent_id', uid)
-        .neq('status', 'declined')
-        .order('created_at', { ascending: true })
+        // Talent only sees bookings once admin has approved them.
+        .in('status', ['admin_approved', 'confirmed'])
+        .order('created_at', { ascending: false })
 
       if (cancelled) return
       if (error) {
@@ -82,7 +83,7 @@ export function TalentOverview() {
   }, [user?.id, supabase])
 
   const upcoming = bookings.filter((b) => b.status === 'confirmed')
-  const requested = bookings.filter((b) => b.status === 'requested')
+  const offers = bookings.filter((b) => b.status === 'admin_approved')
 
   function setBookingError(id: string, msg: string) {
     setCardError((prev) => ({ ...prev, [id]: msg }))
@@ -225,15 +226,15 @@ export function TalentOverview() {
 
             <div style={{ height: 8 }} />
 
-            <SectionHeading>Requested jobs</SectionHeading>
-            {requested.length === 0 ? (
-              <EmptyCard>No requests right now.</EmptyCard>
+            <SectionHeading>Job offers</SectionHeading>
+            {offers.length === 0 ? (
+              <EmptyCard>No pending offers right now.</EmptyCard>
             ) : (
-              requested.map((b) => (
+              offers.map((b) => (
                 <JobCard
                   key={b.id}
                   booking={b}
-                  variant="requested"
+                  variant="offer"
                   errorMsg={cardError[b.id]}
                   onViewDetails={() => {
                     setSheetError('')
@@ -302,7 +303,7 @@ function EmptyCard({ children }: { children: React.ReactNode }) {
 
 type JobCardProps = {
   booking: Booking
-  variant: 'confirmed' | 'requested'
+  variant: 'confirmed' | 'offer'
   errorMsg?: string
   onViewDetails?: () => void
   onConfirm?: () => void
@@ -320,8 +321,9 @@ function JobCard({
   const job = booking.job
   const dateStr = summariseShootDays(job)
   const rateCents =
-    variant === 'confirmed' ? booking.confirmed_rate_cents : job.day_rate_cents
-  const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Offered rate'
+    variant === 'confirmed' ? booking.confirmed_rate_cents : booking.confirmed_rate_cents ?? job.day_rate_cents
+  const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Day rate'
+  const isOffer = variant === 'offer'
 
   function openMaps(e: React.MouseEvent) {
     e.preventDefault()
@@ -335,6 +337,7 @@ function JobCard({
       style={{
         background: CARD_BG,
         border: `1px solid ${CARD_BORDER}`,
+        borderLeft: isOffer ? '4px solid #d4950a' : `1px solid ${CARD_BORDER}`,
         borderRadius: 14,
         overflow: 'hidden',
         marginBottom: 12,
@@ -349,18 +352,37 @@ function JobCard({
           padding: '14px 16px 10px',
         }}
       >
-        <h3
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 16,
-            fontWeight: 600,
-            color: '#fff',
-            lineHeight: 1.25,
-          }}
-        >
-          {job.title}
-        </h3>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {isOffer && (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: 'rgba(212,149,10,0.2)',
+                color: '#d4950a',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                marginBottom: 6,
+                border: '1px solid rgba(212,149,10,0.35)',
+              }}
+            >
+              Job offer
+            </span>
+          )}
+          <h3
+            style={{
+              fontSize: 16,
+              fontWeight: 600,
+              color: '#fff',
+              lineHeight: 1.25,
+            }}
+          >
+            {job.title}
+          </h3>
+        </div>
         <AddToCalendar job={job} />
       </div>
 
@@ -465,8 +487,16 @@ function JobCard({
             {rateLabel}
           </p>
           <p style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginTop: 2 }}>
-            {formatMoney(rateCents)}
-            <span style={{ color: TEXT_MUTED, fontWeight: 400 }}> / day</span>
+            {rateCents
+              ? (
+                <>
+                  {formatMoney(rateCents)}
+                  <span style={{ color: TEXT_MUTED, fontWeight: 400 }}> / day</span>
+                </>
+              )
+              : (
+                <span style={{ color: TEXT_MUTED, fontWeight: 500 }}>Rate TBC</span>
+              )}
           </p>
         </div>
 
@@ -540,7 +570,7 @@ function JobCard({
                 cursor: 'pointer',
               }}
             >
-              Confirm
+              ✓ Accept
             </button>
           </div>
         )}
