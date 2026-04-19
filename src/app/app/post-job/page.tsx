@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { CREW_OPTIONS } from '@/lib/jobs'
+import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import {
   PAGE_BG,
   TEXT_PRIMARY,
@@ -316,14 +317,19 @@ function PostJobInner() {
 
         <Section title="Location">
           <Field label="Street address" required>
-            <input
-              type="text"
-              required
+            <AddressAutocomplete
               value={form.address_line}
-              onChange={(e) => update('address_line', e.target.value)}
+              onChange={(val) => update('address_line', val)}
+              onSelect={(result) => {
+                setForm((f) => ({
+                  ...f,
+                  address_line: result.address_line,
+                  address_city: result.address_city || f.address_city,
+                  address_state: result.address_state || f.address_state,
+                  address_zip: result.address_zip || f.address_zip,
+                }))
+              }}
               placeholder="123 Main Street, Suite 200"
-              className="rs-input"
-              autoComplete="address-line1"
             />
           </Field>
           <Field label="City" required>
