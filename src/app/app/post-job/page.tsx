@@ -437,63 +437,85 @@ function PostJobInner() {
                   )}
                 </div>
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                    gap: 8,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <label style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
+                <div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 0,
+                      marginBottom: 5,
+                    }}
+                  >
                     <span
                       style={{
-                        display: 'block',
                         fontSize: 11,
                         fontWeight: 600,
                         color: TEXT_MUTED,
-                        marginBottom: 5,
                       }}
                     >
                       Shoot date *
                     </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: TEXT_MUTED,
+                        paddingLeft: 12,
+                      }}
+                    >
+                      Call time
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                      overflow: 'hidden',
+                      borderRadius: 10,
+                      border: '1px solid rgba(255,255,255,0.2)',
+                    }}
+                  >
                     <input
                       type="date"
                       required
                       value={day.date}
                       onChange={(e) => updateShootDay(i, { date: e.target.value })}
-                      className="rs-input"
                       style={{
                         width: '100%',
                         minWidth: 0,
                         boxSizing: 'border-box',
                         fontSize: 13,
-                        borderRadius: 10,
+                        padding: '10px 12px',
+                        background: 'rgba(255,255,255,0.92)',
+                        border: 'none',
+                        borderRight: '1px solid rgba(170,189,224,0.3)',
+                        borderRadius: 0,
+                        color: '#1A3C6B',
+                        fontWeight: 500,
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
                       }}
                     />
-                  </label>
-
-                  <label style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: TEXT_MUTED,
-                        marginBottom: 5,
-                      }}
-                    >
-                      Call time
-                    </span>
                     <select
                       value={day.call_time}
                       onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
-                      className="rs-input"
                       style={{
                         width: '100%',
                         minWidth: 0,
                         boxSizing: 'border-box',
-                        borderRadius: 10,
+                        fontSize: 13,
+                        padding: '10px 12px',
+                        background: 'rgba(255,255,255,0.92)',
+                        border: 'none',
+                        borderRadius: 0,
+                        color: '#1A3C6B',
+                        fontWeight: 500,
+                        outline: 'none',
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        cursor: 'pointer',
                       }}
                     >
                       <option value="00:00">00:00</option>
@@ -545,7 +567,7 @@ function PostJobInner() {
                       <option value="23:00">23:00</option>
                       <option value="23:30">23:30</option>
                     </select>
-                  </label>
+                  </div>
                 </div>
               </div>
             ))}
