@@ -30,6 +30,33 @@ export const CREW_LABELS: Record<string, string> = {
   pa: 'Production Assistant',
 }
 
+/**
+ * Map crew_needed keys (job form) to talent_profiles.department values.
+ * Used to pre-seed the Roster department filter when a client browses
+ * talent for a specific job.
+ */
+export type TalentDepartment =
+  | 'camera'
+  | 'styling'
+  | 'glam'
+  | 'post'
+  | 'production'
+  | 'direction'
+  | 'other'
+
+export const CREW_TO_DEPARTMENT: Record<string, TalentDepartment> = {
+  photography: 'camera',
+  video: 'camera',
+  production: 'production',
+  styling: 'styling',
+  mua: 'glam',
+  art_direction: 'direction',
+  editing: 'post',
+  sound: 'post',
+  gaffer: 'camera',
+  pa: 'production',
+}
+
 export const CREW_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'photography', label: CREW_LABELS.photography },
   { key: 'video', label: CREW_LABELS.video },

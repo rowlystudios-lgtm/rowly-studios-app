@@ -200,6 +200,14 @@ function PostJobInner() {
     setSubmitted(true)
   }
 
+  useEffect(() => {
+    if (!submitted) return
+    const id = setTimeout(() => {
+      router.push('/app')
+    }, 1200)
+    return () => clearTimeout(id)
+  }, [submitted, router])
+
   if (submitted) {
     return (
       <Shell>
@@ -247,27 +255,8 @@ function PostJobInner() {
               lineHeight: 1.5,
             }}
           >
-            We&apos;ll review your request and get back to you within 24 hours.
+            Taking you to My Jobs…
           </p>
-          <button
-            type="button"
-            onClick={() => router.push('/app')}
-            style={{
-              marginTop: 28,
-              padding: '12px 22px',
-              borderRadius: 12,
-              background: '#fff',
-              color: BUTTON_PRIMARY,
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              cursor: 'pointer',
-            }}
-          >
-            View my jobs →
-          </button>
         </div>
       </Shell>
     )

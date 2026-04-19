@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
+import { CREW_TO_DEPARTMENT } from '@/lib/jobs'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 const CARD_BG = '#2E5099'
@@ -76,10 +78,7 @@ function formatRate(cents: number | null): string {
   return `$${(cents / 100).toLocaleString()} / day`
 }
 
-type Filter = 'all' | Department
-
-const FILTER_ORDER: Filter[] = [
-  'all',
+const FILTER_ORDER: Department[] = [
   'camera',
   'production',
   'styling',
@@ -89,12 +88,36 @@ const FILTER_ORDER: Filter[] = [
   'other',
 ]
 
+type JobContext = {
+  id: string
+  title: string
+  crew_needed: string[]
+} | null
+
 export default function RosterPage() {
+  return (
+    <Suspense
+      fallback={
+        <PageShell>
+          <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>
+        </PageShell>
+      }
+    >
+      <RosterInner />
+    </Suspense>
+  )
+}
+
+function RosterInner() {
   const { supabase } = useAuth()
+  const searchParams = useSearchParams()
+  const jobId = searchParams.get('jobId')
+
   const [talent, setTalent] = useState<Talent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
+  const [activeFilters, setActiveFilters] = useState<Set<Department>>(new Set())
+  const [jobContext, setJobContext] = useState<JobContext>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -123,10 +146,64 @@ export default function RosterPage() {
     }
   }, [supabase])
 
+  // Fetch the referenced job (if jobId present) and pre-seed filters.
+  useEffect(() => {
+    if (!jobId) {
+      setJobContext(null)
+      setActiveFilters(new Set())
+      return
+    }
+    let cancelled = false
+    async function loadJob() {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('id, title, crew_needed')
+        .eq('id', jobId)
+        .maybeSingle()
+      if (cancelled) return
+      if (error || !data) {
+        setJobContext(null)
+        setActiveFilters(new Set())
+        return
+      }
+      const crew = Array.isArray(data.crew_needed) ? (data.crew_needed as string[]) : []
+      setJobContext({ id: data.id, title: data.title, crew_needed: crew })
+      const deptsFromCrew = crew
+        .map((key) => CREW_TO_DEPARTMENT[key])
+        .filter((d): d is Department => Boolean(d))
+      setActiveFilters(new Set(deptsFromCrew))
+    }
+    loadJob()
+    return () => {
+      cancelled = true
+    }
+  }, [jobId, supabase])
+
+  function toggleFilter(dept: Department) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(dept)) next.delete(dept)
+      else next.add(dept)
+      return next
+    })
+  }
+
+  function clearFilters() {
+    setActiveFilters(new Set())
+  }
+
   const filtered = useMemo(() => {
-    if (filter === 'all') return talent
-    return talent.filter((t) => t.department === filter)
-  }, [talent, filter])
+    if (activeFilters.size === 0) return talent
+    return talent.filter((t) => t.department && activeFilters.has(t.department))
+  }, [talent, activeFilters])
+
+  const crewLabelsForBanner =
+    jobContext?.crew_needed
+      .map((key) => {
+        const dept = CREW_TO_DEPARTMENT[key]
+        return dept ? DEPARTMENT_LABELS[dept] : null
+      })
+      .filter((v): v is string => Boolean(v)) ?? []
 
   return (
     <PageShell>
@@ -134,6 +211,53 @@ export default function RosterPage() {
       <p style={{ fontSize: 12, color: TEXT_MUTED, marginBottom: 16 }}>
         Browse verified talent across departments.
       </p>
+
+      {jobContext && (
+        <div
+          style={{
+            position: 'relative',
+            background: 'rgba(212,149,10,0.15)',
+            border: '1px solid rgba(212,149,10,0.35)',
+            borderRadius: 12,
+            padding: '12px 14px',
+            marginBottom: 14,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: '#d4950a',
+            }}
+          >
+            Browsing for
+          </p>
+          <p style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY, marginTop: 2 }}>
+            {jobContext.title}
+          </p>
+          {crewLabelsForBanner.length > 0 && (
+            <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 4 }}>
+              Showing crew types: {Array.from(new Set(crewLabelsForBanner)).join(', ')}
+            </p>
+          )}
+          <Link
+            href="/app/roster"
+            onClick={clearFilters}
+            style={{
+              display: 'inline-block',
+              marginTop: 8,
+              fontSize: 11,
+              fontWeight: 600,
+              color: TEXT_MUTED,
+              textDecoration: 'underline',
+            }}
+          >
+            × Browse all
+          </Link>
+        </div>
+      )}
 
       <div
         style={{
@@ -145,26 +269,18 @@ export default function RosterPage() {
           scrollbarWidth: 'none',
         }}
       >
-        {FILTER_ORDER.map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => setFilter(f)}
-            style={{
-              flexShrink: 0,
-              padding: '7px 14px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 600,
-              background: filter === f ? '#fff' : 'rgba(255,255,255,0.08)',
-              color: filter === f ? '#1A3C6B' : TEXT_MUTED,
-              border: filter === f ? 'none' : '1px solid rgba(170,189,224,0.2)',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {f === 'all' ? 'All' : DEPARTMENT_LABELS[f]}
-          </button>
+        <FilterChip
+          label="All"
+          active={activeFilters.size === 0}
+          onClick={clearFilters}
+        />
+        {FILTER_ORDER.map((d) => (
+          <FilterChip
+            key={d}
+            label={DEPARTMENT_LABELS[d]}
+            active={activeFilters.has(d)}
+            onClick={() => toggleFilter(d)}
+          />
         ))}
       </div>
 
@@ -243,5 +359,37 @@ export default function RosterPage() {
         ))}
       </div>
     </PageShell>
+  )
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        flexShrink: 0,
+        padding: '7px 14px',
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 600,
+        background: active ? '#fff' : 'rgba(255,255,255,0.08)',
+        color: active ? '#1A3C6B' : TEXT_MUTED,
+        border: active ? 'none' : '1px solid rgba(170,189,224,0.2)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
   )
 }

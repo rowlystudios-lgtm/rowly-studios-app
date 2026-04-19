@@ -75,9 +75,9 @@ const TABS: Record<ViewMode, Tab[]> = {
     { href: '/app/history', label: 'History', icon: ClockIcon },
   ],
   client: [
+    { href: '/app/post-job', label: 'Post Job', icon: PlusCircleIcon },
     { href: '/app', label: 'My Jobs', icon: BriefcaseIcon, matches: (p) => p === '/app' },
     { href: '/app/roster', label: 'Roster', icon: PeopleIcon, matches: (p) => p.startsWith('/app/roster') },
-    { href: '/app/post-job', label: 'Post Job', icon: PlusCircleIcon },
     { href: '/app/account', label: 'Account', icon: ProfileIcon },
   ],
   admin: [

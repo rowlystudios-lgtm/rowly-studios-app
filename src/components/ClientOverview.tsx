@@ -3,49 +3,157 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
-import { JobStatusBadge } from '@/components/StatusBadge'
+import { Avatar } from '@/components/Avatar'
 import {
-  formatLongDate,
-  greeting,
-  summariseShootDays,
+  formatCallTime,
+  getMapsUrl,
+  resolveShootDays,
   type ShootDay,
 } from '@/lib/jobs'
 import type { JobStatus } from '@/lib/job-status'
+import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
+const SOFT_BORDER = 'rgba(170,189,224,0.1)'
 const TEXT_PRIMARY = '#FFFFFF'
 const TEXT_MUTED = '#AABDE0'
+const LINK_COLOR = '#AABDE0'
+const CONFIRMED_GREEN = '#4ade80'
+const REQUESTED_AMBER = '#d4950a'
 
-type JobSummary = {
-  id: string
-  title: string
-  start_date: string | null
-  end_date: string | null
-  location: string | null
-  status: JobStatus
-  num_talent: number | null
-  shoot_days: ShootDay[] | null
-  call_time: string | null
+const STATUS_STYLES: Record<
+  JobStatus,
+  { bg: string; color: string; label: string }
+> = {
+  submitted: { bg: '#AABDE0', color: '#1A3C6B', label: 'Submitted' },
+  crewing: { bg: '#d4950a', color: '#ffffff', label: 'In review' },
+  confirmed: { bg: '#166534', color: '#ffffff', label: 'Confirmed' },
+  wrapped: { bg: 'rgba(170,189,224,0.15)', color: '#AABDE0', label: 'Completed' },
+  cancelled: { bg: '#7f1d1d', color: '#fca5a5', label: 'Cancelled' },
+  draft: { bg: '#AABDE0', color: '#1A3C6B', label: 'Draft' },
 }
 
-type ClientRow = {
-  company_name: string | null
-  bio: string | null
+function ClientStatusBadge({ status }: { status: JobStatus }) {
+  const s = STATUS_STYLES[status] ?? STATUS_STYLES.submitted
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '4px 10px',
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        background: s.bg,
+        color: s.color,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+    >
+      {s.label}
+    </span>
+  )
+}
+
+type TalentProfileMini =
+  | { department: Department | null; primary_role: string | null }
+  | { department: Department | null; primary_role: string | null }[]
+  | null
+
+type BookingProfile = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  avatar_url: string | null
+  talent_profiles: TalentProfileMini
+} | null
+
+type JobBooking = {
+  id: string
+  status: 'requested' | 'confirmed' | 'declined'
+  confirmed_rate_cents: number | null
+  profiles: BookingProfile | BookingProfile[] | null
+}
+
+type JobRow = {
+  id: string
+  title: string
+  status: JobStatus
+  location: string | null
+  client_notes: string | null
+  description: string | null
+  address_line: string | null
+  address_city: string | null
+  address_state: string | null
+  address_zip: string | null
+  shoot_days: ShootDay[] | null
+  start_date: string | null
+  end_date: string | null
+  call_time: string | null
+  crew_needed: string[] | null
+  created_at: string
+  job_bookings: JobBooking[] | null
+}
+
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
+function unwrap<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null
+  return Array.isArray(v) ? v[0] ?? null : v
+}
+
+function parseLocalDate(iso: string): Date | null {
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null
+  return new Date(parts[0], parts[1] - 1, parts[2])
+}
+
+function formatShootDay(date: string, call: string | null): string {
+  const d = parseLocalDate(date)
+  const datePart = d
+    ? `${DAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`
+    : date
+  const callPart = formatCallTime(call)
+  return callPart ? `${datePart}  ·  Call ${callPart}` : datePart
+}
+
+function collapsedLocation(job: JobRow): string {
+  const parts = [job.address_city, job.address_state].filter(Boolean) as string[]
+  return parts.join(', ') || job.location || ''
+}
+
+function fullName(p: BookingProfile): string {
+  if (!p) return 'Someone'
+  return [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Someone'
+}
+
+function fullMapsQuery(job: JobRow): string {
+  const line = [
+    job.address_line,
+    [
+      job.address_city,
+      [job.address_state, job.address_zip].filter(Boolean).join(' '),
+    ]
+      .filter(Boolean)
+      .join(', '),
+  ]
+    .filter(Boolean)
+    .join(', ')
+  return line || job.location || ''
 }
 
 export function ClientOverview() {
-  const { user, profile, supabase } = useAuth()
-  const [jobs, setJobs] = useState<JobSummary[]>([])
+  const { user, supabase } = useAuth()
+  const [jobs, setJobs] = useState<JobRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [clientProfile, setClientProfile] = useState<ClientRow | null>(null)
-  const [clientLoading, setClientLoading] = useState(true)
-  const [setupDismissed, setSetupDismissed] = useState(false)
-
-  const firstName =
-    profile?.first_name ?? profile?.full_name?.split(' ')[0] ?? 'there'
-  const today = formatLongDate(new Date())
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
 
   useEffect(() => {
     const uid = user?.id
@@ -53,193 +161,74 @@ export function ClientOverview() {
     let cancelled = false
 
     async function load() {
-      const [jobsRes, clientRes] = await Promise.all([
-        supabase
-          .from('jobs')
-          .select(
-            'id, title, start_date, end_date, location, status, num_talent, shoot_days, call_time'
-          )
-          .eq('client_id', uid)
-          .order('start_date', { ascending: false })
-          .limit(10),
-        supabase
-          .from('client_profiles')
-          .select('company_name, bio')
-          .eq('id', uid)
-          .maybeSingle(),
-      ])
+      const { data, error } = await supabase
+        .from('jobs')
+        .select(
+          `id, title, status, location, client_notes, description,
+           address_line, address_city, address_state, address_zip,
+           shoot_days, start_date, end_date, call_time,
+           crew_needed, created_at,
+           job_bookings (
+             id, status, confirmed_rate_cents,
+             profiles (
+               id, first_name, last_name, avatar_url,
+               talent_profiles (department, primary_role)
+             )
+           )`
+        )
+        .eq('client_id', uid)
+        .order('created_at', { ascending: false })
 
       if (cancelled) return
-      if (jobsRes.error) {
-        setError(jobsRes.error.message)
-      } else {
-        setJobs((jobsRes.data ?? []) as JobSummary[])
+      if (error) {
+        setError(error.message)
+        setLoading(false)
+        return
       }
-      setClientProfile((clientRes.data as ClientRow | null) ?? { company_name: null, bio: null })
-      setClientLoading(false)
+      setJobs((data ?? []) as JobRow[])
       setLoading(false)
     }
-
     load()
     return () => {
       cancelled = true
     }
   }, [user?.id, supabase])
 
-  const missing: string[] = []
-  if (!clientProfile?.company_name) missing.push('Company name')
-  if (!clientProfile?.bio) missing.push('About / bio')
-  const showSetup = !clientLoading && !setupDismissed && missing.length > 0
+  async function deleteJob(job: JobRow): Promise<boolean> {
+    const snapshot = jobs
+    setJobs((js) => js.filter((j) => j.id !== job.id))
+    if (expandedJobId === job.id) setExpandedJobId(null)
+
+    const { error } = await supabase.from('jobs').delete().eq('id', job.id)
+    if (error) {
+      setJobs(snapshot)
+      return false
+    }
+    return true
+  }
+
+  function toggleExpanded(id: string) {
+    setExpandedJobId((prev) => (prev === id ? null : id))
+  }
 
   return (
     <>
-      <header
+      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 2 }}>My Jobs</h1>
+      <p
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.2 }}>
-            {greeting()}, {firstName}
-          </p>
-          <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 2 }}>{today}</p>
-        </div>
-      </header>
-
-      {showSetup && (
-        <div
-          style={{
-            position: 'relative',
-            background: CARD_BG,
-            border: `1px solid rgba(170,189,224,0.2)`,
-            borderRadius: 14,
-            padding: '14px 16px',
-            marginBottom: 16,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setSetupDismissed(true)}
-            aria-label="Dismiss"
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              width: 24,
-              height: 24,
-              borderRadius: 999,
-              background: 'transparent',
-              border: 'none',
-              color: TEXT_MUTED,
-              fontSize: 16,
-              lineHeight: 1,
-              cursor: 'pointer',
-            }}
-          >
-            ×
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <span
-              aria-hidden
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 999,
-                background: 'rgba(170,189,224,0.15)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                color: '#fff',
-              }}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <rect x="3" y="6" width="18" height="14" rx="2" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            </span>
-            <p style={{ fontSize: 14, fontWeight: 600, color: TEXT_PRIMARY }}>
-              Complete your profile
-            </p>
-          </div>
-          <p style={{ fontSize: 12, color: TEXT_MUTED, lineHeight: 1.5, marginBottom: 8 }}>
-            Add your company info so talent know who you are when you post a job.
-          </p>
-          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {missing.map((m) => (
-              <li
-                key={m}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 12,
-                  color: TEXT_MUTED,
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: '#AABDE0',
-                    flexShrink: 0,
-                  }}
-                />
-                {m}
-              </li>
-            ))}
-          </ul>
-          <Link
-            href="/app/account"
-            style={{
-              display: 'inline-block',
-              padding: '9px 14px',
-              borderRadius: 10,
-              background: '#fff',
-              color: '#1A3C6B',
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              textDecoration: 'none',
-            }}
-          >
-            Set up profile →
-          </Link>
-        </div>
-      )}
-
-      <h2
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
+          fontSize: 12,
           color: TEXT_MUTED,
-          marginTop: 8,
-          marginBottom: 10,
+          marginBottom: 16,
         }}
       >
-        My jobs
-      </h2>
+        {loading
+          ? 'Loading…'
+          : `${jobs.length} job${jobs.length === 1 ? '' : 's'}`}
+      </p>
 
-      {loading && <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>}
-      {error && <p style={{ fontSize: 13, color: '#fca5a5' }}>{error}</p>}
+      {error && (
+        <p style={{ fontSize: 13, color: '#fca5a5', marginBottom: 10 }}>{error}</p>
+      )}
 
       {!loading && !error && jobs.length === 0 && (
         <div
@@ -249,12 +238,9 @@ export function ClientOverview() {
             borderRadius: 14,
             padding: '22px 20px',
             textAlign: 'center',
-            marginBottom: 12,
           }}
         >
-          <p style={{ fontSize: 14, marginBottom: 12 }}>
-            You haven&apos;t posted any jobs yet.
-          </p>
+          <p style={{ fontSize: 14, marginBottom: 12 }}>No jobs posted yet.</p>
           <Link
             href="/app/post-job"
             style={{
@@ -277,57 +263,524 @@ export function ClientOverview() {
 
       {!loading &&
         !error &&
-        jobs.map((job) => <JobRow key={job.id} job={job} />)}
+        jobs.map((job) => (
+          <ClientJobRow
+            key={job.id}
+            job={job}
+            expanded={expandedJobId === job.id}
+            onToggle={() => toggleExpanded(job.id)}
+            onDelete={() => deleteJob(job)}
+          />
+        ))}
     </>
   )
 }
 
-function JobRow({ job }: { job: JobSummary }) {
-  const date = summariseShootDays(job)
+function ClientJobRow({
+  job,
+  expanded,
+  onToggle,
+  onDelete,
+}: {
+  job: JobRow
+  expanded: boolean
+  onToggle: () => void
+  onDelete: () => Promise<boolean>
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  useEffect(() => {
+    if (!expanded) {
+      setConfirming(false)
+      setDeleteError('')
+    }
+  }, [expanded])
+
+  const locationSubtitle = collapsedLocation(job)
+  const shootDays = resolveShootDays(job)
+  const bookings = (job.job_bookings ?? []).filter((b) => b.status !== 'declined')
+
+  const onSet: JobBooking[] = []
+  const post: JobBooking[] = []
+  for (const b of bookings) {
+    const p = unwrap(b.profiles)
+    const tp = unwrap(p?.talent_profiles)
+    if (tp?.department === 'post') post.push(b)
+    else onSet.push(b)
+  }
+
+  async function handleDeleteConfirmed() {
+    if (deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    const ok = await onDelete()
+    if (!ok) {
+      setDeleteError('Could not delete job.')
+      setDeleting(false)
+      setConfirming(false)
+    }
+  }
+
   return (
-    <div
+    <article
       style={{
         background: CARD_BG,
         border: `1px solid ${CARD_BORDER}`,
-        borderRadius: 14,
-        padding: '14px 16px',
+        borderRadius: 12,
         marginBottom: 10,
+        overflow: 'hidden',
       }}
     >
-      <div
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
         style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-          justifyContent: 'space-between',
+          display: 'block',
+          width: '100%',
+          textAlign: 'left',
+          padding: '14px 16px',
+          background: 'transparent',
+          border: 'none',
+          color: TEXT_PRIMARY,
+          cursor: 'pointer',
         }}
       >
-        <h3
+        <div
           style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 15,
-            fontWeight: 600,
-            color: TEXT_PRIMARY,
-            lineHeight: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            justifyContent: 'space-between',
           }}
         >
-          {job.title}
-        </h3>
-        <JobStatusBadge status={job.status} small />
-      </div>
-      {(date || job.location) && (
-        <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 6 }}>
-          {date}
-          {date && job.location && ' · '}
-          {job.location}
-        </p>
+          <ClientStatusBadge status={job.status} />
+          <h3
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 15,
+              fontWeight: 600,
+              color: TEXT_PRIMARY,
+              lineHeight: 1.25,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {job.title}
+          </h3>
+          <ChevronIcon expanded={expanded} />
+        </div>
+        {locationSubtitle && (
+          <p
+            style={{
+              fontSize: 12,
+              color: TEXT_MUTED,
+              marginTop: 6,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {locationSubtitle}
+          </p>
+        )}
+      </button>
+
+      {expanded && (
+        <div
+          style={{
+            padding: '4px 16px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          {shootDays.length > 0 && (
+            <ExpandedSection label="Date & time" divider>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {shootDays.map((d, i) => (
+                  <div
+                    key={`${d.date}-${i}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}
+                  >
+                    <CalendarGlyph />
+                    <span>{formatShootDay(d.date, d.call_time)}</span>
+                  </div>
+                ))}
+              </div>
+            </ExpandedSection>
+          )}
+
+          <ExpandedSection label="Full address" divider>
+            <AddressBlock job={job} />
+          </ExpandedSection>
+
+          <ExpandedSection label="Assigned crew" divider>
+            {bookings.length === 0 ? (
+              <p style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+                Crew being assigned by Rowly Studios
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {onSet.length > 0 && (
+                  <CrewGroup title="On-set crew" bookings={onSet} />
+                )}
+                {post.length > 0 && (
+                  <CrewGroup title="Post-production" bookings={post} />
+                )}
+              </div>
+            )}
+          </ExpandedSection>
+
+          {job.client_notes && (
+            <ExpandedSection label="Notes" divider>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: TEXT_PRIMARY,
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {job.client_notes}
+              </p>
+            </ExpandedSection>
+          )}
+
+          <div
+            style={{
+              borderTop: `1px solid ${SOFT_BORDER}`,
+              paddingTop: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            {deleteError && (
+              <p style={{ fontSize: 12, color: '#fca5a5' }}>{deleteError}</p>
+            )}
+            {confirming ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={deleting}
+                  style={{
+                    flex: 1,
+                    padding: '10px 0',
+                    borderRadius: 10,
+                    background: 'rgba(255,255,255,0.08)',
+                    color: TEXT_MUTED,
+                    border: `1px solid ${CARD_BORDER}`,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: deleting ? 'wait' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteConfirmed}
+                  disabled={deleting}
+                  style={{
+                    flex: 1,
+                    padding: '10px 0',
+                    borderRadius: 10,
+                    background: '#b91c1c',
+                    color: '#fff',
+                    border: 'none',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: deleting ? 'wait' : 'pointer',
+                    opacity: deleting ? 0.7 : 1,
+                  }}
+                >
+                  {deleting ? 'Deleting…' : 'Yes, delete this job'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Link
+                  href={`/app/roster?jobId=${job.id}`}
+                  style={{
+                    flex: '1 1 55%',
+                    minWidth: 180,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: '#fff',
+                    color: '#1A3C6B',
+                    textAlign: 'center',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Edit crew in Roster →
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirming(true)
+                    setDeleteError('')
+                  }}
+                  style={{
+                    flex: '1 1 35%',
+                    minWidth: 120,
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: 'transparent',
+                    color: '#fca5a5',
+                    border: `1px solid rgba(252,165,165,0.3)`,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Delete job
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
-      {typeof job.num_talent === 'number' && job.num_talent > 0 && (
-        <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
-          Talent needed: {job.num_talent}
-        </p>
-      )}
+    </article>
+  )
+}
+
+function ExpandedSection({
+  label,
+  children,
+  divider,
+}: {
+  label: string
+  children: React.ReactNode
+  divider?: boolean
+}) {
+  return (
+    <div
+      style={{
+        borderTop: divider ? `1px solid ${SOFT_BORDER}` : undefined,
+        paddingTop: divider ? 12 : 0,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: TEXT_MUTED,
+          marginBottom: 8,
+        }}
+      >
+        {label}
+      </p>
+      {children}
     </div>
   )
 }
+
+function CrewGroup({ title, bookings }: { title: string; bookings: JobBooking[] }) {
+  return (
+    <div>
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: TEXT_MUTED,
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bookings.map((b) => {
+          const p = unwrap(b.profiles)
+          const tp = unwrap(p?.talent_profiles)
+          const name = fullName(p)
+          const role = tp?.primary_role ?? (tp?.department ? DEPARTMENT_LABELS[tp.department as Department] : '')
+          return (
+            <div
+              key={b.id}
+              style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+            >
+              <Avatar url={p?.avatar_url ?? null} name={name} size={32} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: TEXT_PRIMARY,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {name}
+                </p>
+                {role && (
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: TEXT_MUTED,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {role}
+                  </p>
+                )}
+              </div>
+              <span
+                aria-hidden
+                title={b.status === 'confirmed' ? 'Confirmed' : 'Requested'}
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: 999,
+                  background:
+                    b.status === 'confirmed' ? CONFIRMED_GREEN : REQUESTED_AMBER,
+                  boxShadow:
+                    b.status === 'confirmed'
+                      ? '0 0 0 3px rgba(74,222,128,0.2)'
+                      : '0 0 0 3px rgba(212,149,10,0.2)',
+                  flexShrink: 0,
+                }}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function AddressBlock({ job }: { job: JobRow }) {
+  const query = fullMapsQuery(job)
+  const line = job.address_line ?? job.location ?? ''
+  const cityLine = [
+    job.address_city,
+    [job.address_state, job.address_zip].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  function openMaps() {
+    if (!query) return
+    window.open(getMapsUrl(query), '_blank', 'noopener,noreferrer')
+  }
+
+  if (!line && !cityLine) {
+    return <p style={{ fontSize: 13, color: TEXT_MUTED }}>No address set</p>
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        openMaps()
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 8,
+        padding: 0,
+        background: 'transparent',
+        border: 'none',
+        textAlign: 'left',
+        color: TEXT_PRIMARY,
+        cursor: query ? 'pointer' : 'default',
+        textDecoration: query ? 'underline' : 'none',
+        textUnderlineOffset: 3,
+      }}
+      disabled={!query}
+    >
+      <PinIcon />
+      <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+        {line && <span style={{ display: 'block' }}>{line}</span>}
+        {cityLine && (
+          <span style={{ display: 'block', color: TEXT_MUTED }}>{cityLine}</span>
+        )}
+        {query && (
+          <span style={{ display: 'inline-block', color: LINK_COLOR, marginTop: 2 }}>
+            Open in Maps ↗
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        color: TEXT_MUTED,
+        flexShrink: 0,
+        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform 150ms ease',
+      }}
+      aria-hidden
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  )
+}
+
+function CalendarGlyph() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: TEXT_MUTED, flexShrink: 0 }}
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
+  )
+}
+
+function PinIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: TEXT_MUTED, flexShrink: 0, marginTop: 2 }}
+      aria-hidden
+    >
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  )
+}
+
