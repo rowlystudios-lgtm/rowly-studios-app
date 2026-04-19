@@ -12,11 +12,7 @@ export default function AppLayout({
 }: {
   children: React.ReactNode
 }) {
-  return (
-    <AuthGate>
-      <LayoutInner>{children}</LayoutInner>
-    </AuthGate>
-  )
+  return <LayoutInner>{children}</LayoutInner>
 }
 
 function LayoutInner({ children }: { children: React.ReactNode }) {
@@ -24,19 +20,41 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isAdmin = profile?.role === 'admin'
 
   return (
-    <div className="min-h-[100dvh] bg-rs-blue-fusion">
-      <Toast />
-      <AppHeader />
-      {isAdmin && <ModeSwitcher />}
+    <AuthGate>
       <div
-        className="bg-rs-cream min-h-[calc(100dvh-64px)] rounded-t-rs-lg"
         style={{
-          paddingBottom: 'calc(72px + env(safe-area-inset-bottom))',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: 'var(--rs-blue-fusion)',
         }}
       >
-        {children}
+        <Toast />
+        <AppHeader />
+        {isAdmin && <ModeSwitcher />}
+
+        {/* Scrollable content area — this scrolls, nothing else */}
+        <div
+          className="bg-rs-cream rounded-t-rs-lg"
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+            // Padding so content doesn't hide behind tab bar
+            paddingBottom: 'calc(72px + env(safe-area-inset-bottom))',
+          }}
+        >
+          {children}
+        </div>
+
+        <TabBar />
       </div>
-      <TabBar />
-    </div>
+    </AuthGate>
   )
 }

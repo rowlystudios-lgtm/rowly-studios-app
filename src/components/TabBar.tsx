@@ -97,15 +97,9 @@ export function TabBar() {
     <nav
       className="flex justify-around border-t border-rs-blue-fusion/10 px-3 pt-2"
       style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 100,
         background: 'var(--rs-cream, #FBF5E4)',
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
-        transform: 'translateZ(0)',
-        WebkitTransform: 'translateZ(0)',
+        flexShrink: 0,
       }}
     >
       {tabs.map((tab) => {
