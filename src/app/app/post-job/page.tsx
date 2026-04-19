@@ -148,14 +148,19 @@ function PostJobInner() {
       return
     }
 
-    if (!form.address_line.trim() || !form.address_city.trim() || !form.address_state.trim() || !form.address_zip.trim()) {
-      setError('Please fill in the full street address.')
+    if (!form.title.trim()) {
+      setError('Please enter a job title.')
       return
     }
 
     const validDays = form.shoot_days.filter((d) => d.date)
     if (validDays.length === 0) {
-      setError('Please add at least one shoot day with a date.')
+      setError('Please add at least one shoot date.')
+      return
+    }
+
+    if (!form.address_line.trim() || !form.address_city.trim() || !form.address_state.trim() || !form.address_zip.trim()) {
+      setError('Please fill in the full street address.')
       return
     }
 
@@ -262,7 +267,8 @@ function PostJobInner() {
     )
   }
 
-  const multiDay = form.shoot_days.length > 1
+  const canSubmit =
+    form.title.trim().length > 0 && form.shoot_days.some((d) => d.date)
 
   return (
     <Shell>
@@ -376,45 +382,108 @@ function PostJobInner() {
               <div
                 key={i}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: multiDay ? '1fr 120px 32px' : '1fr 120px',
-                  gap: 8,
-                  alignItems: 'center',
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(170,189,224,0.2)',
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
                 }}
               >
-                <input
-                  type="date"
-                  required
-                  value={day.date}
-                  onChange={(e) => updateShootDay(i, { date: e.target.value })}
-                  className="rs-input"
-                />
-                <input
-                  type="time"
-                  value={day.call_time}
-                  onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
-                  className="rs-input"
-                />
-                {multiDay && (
-                  <button
-                    type="button"
-                    onClick={() => removeShootDay(i)}
-                    aria-label={`Remove day ${i + 1}`}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <span
                     style={{
-                      width: 32,
-                      height: 36,
-                      borderRadius: 10,
-                      border: `1px solid ${CHIP_INACTIVE_BORDER}`,
-                      background: CHIP_INACTIVE_BG,
+                      fontSize: 11,
+                      fontWeight: 600,
                       color: TEXT_MUTED,
-                      fontSize: 16,
-                      lineHeight: 1,
-                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
                     }}
                   >
-                    ×
-                  </button>
-                )}
+                    Day {i + 1}
+                  </span>
+                  {form.shoot_days.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeShootDay(i)}
+                      aria-label={`Remove day ${i + 1}`}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: TEXT_MUTED,
+                        fontSize: 18,
+                        cursor: 'pointer',
+                        padding: '0 4px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                <label style={{ display: 'block' }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: TEXT_MUTED,
+                      display: 'block',
+                      marginBottom: 5,
+                    }}
+                  >
+                    Shoot date *
+                  </span>
+                  <input
+                    type="date"
+                    required
+                    value={day.date}
+                    onChange={(e) => updateShootDay(i, { date: e.target.value })}
+                    className="rs-input"
+                    style={{ width: '100%' }}
+                  />
+                </label>
+
+                <label style={{ display: 'block' }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: TEXT_MUTED,
+                      display: 'block',
+                      marginBottom: 5,
+                    }}
+                  >
+                    Call time
+                  </span>
+                  <select
+                    value={day.call_time}
+                    onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
+                    className="rs-input"
+                  >
+                    <option value="06:00">6:00 AM</option>
+                    <option value="06:30">6:30 AM</option>
+                    <option value="07:00">7:00 AM</option>
+                    <option value="07:30">7:30 AM</option>
+                    <option value="08:00">8:00 AM</option>
+                    <option value="08:30">8:30 AM</option>
+                    <option value="09:00">9:00 AM</option>
+                    <option value="09:30">9:30 AM</option>
+                    <option value="10:00">10:00 AM</option>
+                    <option value="10:30">10:30 AM</option>
+                    <option value="11:00">11:00 AM</option>
+                    <option value="12:00">12:00 PM</option>
+                    <option value="13:00">1:00 PM</option>
+                    <option value="14:00">2:00 PM</option>
+                  </select>
+                </label>
               </div>
             ))}
           </div>
@@ -423,8 +492,8 @@ function PostJobInner() {
             type="button"
             onClick={addShootDay}
             style={{
-              alignSelf: 'flex-start',
-              padding: '8px 12px',
+              width: '100%',
+              padding: '10px 12px',
               borderRadius: 10,
               background: 'transparent',
               color: LINK_COLOR,
@@ -524,7 +593,7 @@ function PostJobInner() {
             </Link>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !canSubmit}
               style={{
                 flex: 1,
                 padding: '14px 0',
@@ -534,8 +603,8 @@ function PostJobInner() {
                 border: 'none',
                 fontSize: 13,
                 fontWeight: 600,
-                cursor: saving ? 'wait' : 'pointer',
-                opacity: saving ? 0.6 : 1,
+                cursor: saving || !canSubmit ? 'not-allowed' : 'pointer',
+                opacity: saving || !canSubmit ? 0.5 : 1,
               }}
             >
               {saving ? 'Submitting…' : 'Submit job request'}
