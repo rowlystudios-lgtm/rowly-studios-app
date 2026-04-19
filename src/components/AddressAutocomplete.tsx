@@ -1,8 +1,12 @@
 'use client'
 
-// Uses OpenStreetMap Nominatim API (free, no API key required)
-// Rate limit: max 1 request/second — the 350ms debounce handles this
+// Uses OpenStreetMap Nominatim API (free, no API key required).
+// Rate limit: max 1 request/second — the 400ms debounce handles this,
+// plus reverse-geocode fallback only fires when the primary search has
+// no street-level hit.
 // Usage policy: https://operations.osmfoundation.org/policies/nominatim/
+//
+// Map preview via Leaflet, loaded once from CDN (no npm install needed).
 
 import { useEffect, useRef, useState } from 'react'
 
@@ -12,6 +16,8 @@ export type AddressResult = {
   address_city: string
   address_state: string
   address_zip: string
+  lat?: string
+  lon?: string
 }
 
 type Props = {
@@ -22,10 +28,12 @@ type Props = {
 }
 
 const STORAGE_KEY = 'rs-recent-addresses'
-const MIN_QUERY_LEN = 4
+const MIN_QUERY_LEN = 3
 const MAX_RECENT = 5
-const DEBOUNCE_MS = 350
+const DEBOUNCE_MS = 400
 const BLUR_CLOSE_MS = 150
+
+/* ─────────── recents ─────────── */
 
 function loadRecent(): AddressResult[] {
   if (typeof window === 'undefined') return []
@@ -49,74 +57,231 @@ function saveRecent(result: AddressResult) {
     const updated = [result, ...filtered].slice(0, MAX_RECENT)
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
   } catch {
-    // localStorage blocked / quota — ignore
+    // ignore
   }
 }
 
-type NominatimAddress = {
-  house_number?: string
-  road?: string
-  pedestrian?: string
-  footway?: string
-  city?: string
-  town?: string
-  village?: string
-  county?: string
-  state_code?: string
-  state?: string
-  postcode?: string
-  ISO3166_2_lvl4?: string
+/* ─────────── Leaflet loader ─────────── */
+
+let leafletLoaded = false
+let leafletLoadingPromise: Promise<void> | null = null
+
+function ensureLeaflet(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve()
+  const w = window as unknown as { L?: unknown }
+  if (leafletLoaded || w.L) {
+    leafletLoaded = true
+    return Promise.resolve()
+  }
+  if (leafletLoadingPromise) return leafletLoadingPromise
+  leafletLoadingPromise = new Promise<void>((resolve) => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+
+    const script = document.createElement('script')
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+    script.async = true
+    script.onload = () => {
+      leafletLoaded = true
+      resolve()
+    }
+    script.onerror = () => {
+      leafletLoadingPromise = null
+      resolve()
+    }
+    document.head.appendChild(script)
+  })
+  return leafletLoadingPromise
 }
 
-type NominatimItem = {
-  display_name?: string
-  address?: NominatimAddress
+/* ─────────── Nominatim ─────────── */
+
+type NominatimResult = {
+  place_id: number
+  display_name: string
+  lat: string
+  lon: string
+  address?: Record<string, string>
+  type?: string
+  class?: string
 }
 
-async function searchAddress(query: string, signal?: AbortSignal): Promise<AddressResult[]> {
-  if (query.length < MIN_QUERY_LEN) return []
-
+async function searchNominatim(
+  query: string,
+  signal?: AbortSignal
+): Promise<NominatimResult[]> {
   const params = new URLSearchParams({
     q: query,
     format: 'json',
     addressdetails: '1',
     countrycodes: 'us',
-    limit: '5',
+    limit: '8',
+    // Spec-requested landmark/POI toggle.
+    featuretype: 'settlement',
   })
-
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-    headers: {
-      'Accept-Language': 'en',
-    },
-    signal,
-  })
-
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?${params}`,
+    {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'RowlyStudiosApp/1.0',
+      },
+      signal,
+    }
+  )
   if (!res.ok) return []
-  const data = (await res.json()) as NominatimItem[]
+  return (await res.json()) as NominatimResult[]
+}
 
-  const results: AddressResult[] = []
-  for (const item of data) {
-    const a = item.address ?? {}
-    const houseNumber = a.house_number ?? ''
-    const road = a.road ?? a.pedestrian ?? a.footway ?? ''
-    const streetLine = [houseNumber, road].filter(Boolean).join(' ').trim()
-    if (!streetLine) continue
+/** When a landmark hit has no street-level match, fetch the nearest
+ *  address + a few neighbours inside a ~100m box. */
+async function reverseGeocode(
+  lat: string,
+  lon: string,
+  signal?: AbortSignal
+): Promise<NominatimResult[]> {
+  const reverseParams = new URLSearchParams({
+    lat,
+    lon,
+    format: 'json',
+    addressdetails: '1',
+    zoom: '18',
+  })
+  const reverseRes = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?${reverseParams}`,
+    {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'RowlyStudiosApp/1.0',
+      },
+      signal,
+    }
+  )
+  const reverseItem: NominatimResult | null = reverseRes.ok
+    ? ((await reverseRes.json()) as NominatimResult)
+    : null
 
-    const stateRaw = a.state_code ?? a.ISO3166_2_lvl4 ?? a.state ?? ''
-    const state = stateRaw.replace(/^US-/, '').toUpperCase().slice(0, 2)
+  const delta = 0.001 // ~100m in degrees
+  const nearbyParams = new URLSearchParams({
+    format: 'json',
+    addressdetails: '1',
+    countrycodes: 'us',
+    limit: '5',
+    viewbox: `${+lon - delta},${+lat + delta},${+lon + delta},${+lat - delta}`,
+    bounded: '1',
+    q: 'street',
+  })
+  const nearbyRes = await fetch(
+    `https://nominatim.openstreetmap.org/search?${nearbyParams}`,
+    {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'RowlyStudiosApp/1.0',
+      },
+      signal,
+    }
+  )
+  const nearbyData: NominatimResult[] = nearbyRes.ok
+    ? ((await nearbyRes.json()) as NominatimResult[])
+    : []
 
-    const city = a.city ?? a.town ?? a.village ?? a.county ?? ''
-    const zip = a.postcode ?? ''
+  const combined: NominatimResult[] = []
+  if (reverseItem && reverseItem.place_id) combined.push(reverseItem)
+  combined.push(...nearbyData)
 
-    results.push({
-      display: item.display_name ?? streetLine,
-      address_line: streetLine,
-      address_city: city,
-      address_state: state,
-      address_zip: zip,
-    })
+  const seen = new Set<number>()
+  return combined.filter((r) => {
+    if (!r.place_id) return false
+    if (seen.has(r.place_id)) return false
+    seen.add(r.place_id)
+    return true
+  })
+}
+
+function parseResult(item: NominatimResult): AddressResult | null {
+  const a = item.address ?? {}
+  const houseNumber = a.house_number ?? ''
+  const road =
+    a.road ?? a.pedestrian ?? a.footway ?? a.path ?? a.cycleway ?? ''
+  const streetLine = [houseNumber, road].filter(Boolean).join(' ').trim()
+  const stateRaw = a.state_code ?? a.ISO3166_2_lvl4 ?? a.state ?? ''
+  const state = stateRaw.replace(/^US-/, '').toUpperCase().slice(0, 2)
+  const city =
+    a.city ?? a.town ?? a.village ?? a.suburb ?? a.county ?? ''
+  const zip = a.postcode ?? ''
+
+  // For landmarks without a street address, keep the display name's
+  // first segment so the user sees something meaningful.
+  const addressLine =
+    streetLine || (item.display_name?.split(',')[0]?.trim() ?? '')
+
+  if (!addressLine) return null
+
+  return {
+    display: item.display_name ?? addressLine,
+    address_line: addressLine,
+    address_city: city,
+    address_state: state,
+    address_zip: zip,
+    lat: item.lat,
+    lon: item.lon,
   }
-  return results
+}
+
+async function searchAddress(
+  query: string,
+  signal?: AbortSignal
+): Promise<AddressResult[]> {
+  if (query.length < MIN_QUERY_LEN) return []
+
+  const raw = await searchNominatim(query, signal)
+  const primary = raw
+    .map(parseResult)
+    .filter((r): r is AddressResult => r !== null)
+
+  const hasStreetLevel = primary.some((r) => /^\d/.test(r.address_line))
+
+  if (!hasStreetLevel && raw.length > 0) {
+    const { lat, lon } = raw[0]
+    const nearby = await reverseGeocode(lat, lon, signal)
+    const nearbyParsed = nearby
+      .map(parseResult)
+      .filter((r): r is AddressResult => r !== null)
+
+    const seen = new Set<string>()
+    const merged: AddressResult[] = []
+    for (const r of [...primary, ...nearbyParsed]) {
+      const key = r.address_line.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(r)
+    }
+    return merged
+  }
+
+  return primary
+}
+
+/* ─────────── component ─────────── */
+
+type LeafletLike = {
+  map: (
+    el: HTMLElement,
+    opts: Record<string, unknown>
+  ) => {
+    remove: () => void
+  }
+  tileLayer: (
+    url: string,
+    opts: Record<string, unknown>
+  ) => { addTo: (m: unknown) => unknown }
+  divIcon: (opts: Record<string, unknown>) => unknown
+  marker: (
+    latlng: [number, number],
+    opts: Record<string, unknown>
+  ) => { addTo: (m: unknown) => unknown }
 }
 
 export function AddressAutocomplete({
@@ -131,18 +296,21 @@ export function AddressAutocomplete({
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const [previewResult, setPreviewResult] = useState<AddressResult | null>(null)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const blurRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const requestId = useRef(0)
 
-  // Keep local query synced with external value changes (e.g. form reset).
+  const mapRef = useRef<HTMLDivElement | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leafletMapRef = useRef<any>(null)
+
   useEffect(() => {
     setQuery(value)
   }, [value])
 
-  // Load recents on mount (refreshed again on focus).
   useEffect(() => {
     setRecent(loadRecent())
   }, [])
@@ -152,6 +320,10 @@ export function AddressAutocomplete({
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (blurRef.current) clearTimeout(blurRef.current)
       abortRef.current?.abort()
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove()
+        leafletMapRef.current = null
+      }
     }
   }, [])
 
@@ -198,7 +370,11 @@ export function AddressAutocomplete({
 
   function handleBlur() {
     if (blurRef.current) clearTimeout(blurRef.current)
-    blurRef.current = setTimeout(() => setOpen(false), BLUR_CLOSE_MS)
+    blurRef.current = setTimeout(() => {
+      setOpen(false)
+      setPreviewResult(null)
+      setHoverIndex(null)
+    }, BLUR_CLOSE_MS)
   }
 
   function handleSelect(result: AddressResult) {
@@ -209,15 +385,80 @@ export function AddressAutocomplete({
     setRecent(loadRecent())
     setSuggestions([])
     setOpen(false)
+    setPreviewResult(null)
+    setHoverIndex(null)
   }
 
   const trimmed = query.trim()
-  const showRecent =
-    open && trimmed.length < MIN_QUERY_LEN && recent.length > 0
+  const showRecent = open && trimmed.length < MIN_QUERY_LEN && recent.length > 0
   const showSuggestions = open && trimmed.length >= MIN_QUERY_LEN
   const showNoResults =
     showSuggestions && !loading && suggestions.length === 0
   const dropdownVisible = showRecent || showSuggestions
+
+  /* ─── Map preview lifecycle ─── */
+  useEffect(() => {
+    if (!previewResult?.lat || !previewResult?.lon || !mapRef.current) {
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove()
+        leafletMapRef.current = null
+      }
+      return
+    }
+
+    const lat = parseFloat(previewResult.lat)
+    const lon = parseFloat(previewResult.lon)
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return
+
+    let cancelled = false
+    ensureLeaflet().then(() => {
+      if (cancelled) return
+      const w = window as unknown as { L?: LeafletLike }
+      const L = w.L
+      if (!L || !mapRef.current) return
+
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove()
+        leafletMapRef.current = null
+      }
+
+      const map = L.map(mapRef.current, {
+        center: [lat, lon],
+        zoom: 17,
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+      })
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(map)
+
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width:14px;height:14px;
+          background:#1A3C6B;
+          border:2px solid #fff;
+          border-radius:50%;
+          box-shadow:0 1px 4px rgba(0,0,0,0.4)
+        "></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      })
+      L.marker([lat, lon], { icon }).addTo(map)
+
+      leafletMapRef.current = map
+    })
+
+    return () => {
+      cancelled = true
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove()
+        leafletMapRef.current = null
+      }
+    }
+  }, [previewResult])
 
   return (
     <div style={{ position: 'relative' }}>
@@ -237,6 +478,10 @@ export function AddressAutocomplete({
 
       {dropdownVisible && (
         <div
+          onMouseLeave={() => {
+            setPreviewResult(null)
+            setHoverIndex(null)
+          }}
           style={{
             position: 'absolute',
             top: '100%',
@@ -259,8 +504,10 @@ export function AddressAutocomplete({
                   key={`recent-${i}`}
                   result={r}
                   hover={hoverIndex === i}
-                  onHover={() => setHoverIndex(i)}
-                  onLeave={() => setHoverIndex(null)}
+                  onHover={() => {
+                    setHoverIndex(i)
+                    if (r.lat && r.lon) setPreviewResult(r)
+                  }}
                   onSelect={() => handleSelect(r)}
                 />
               ))}
@@ -269,16 +516,35 @@ export function AddressAutocomplete({
 
           {showSuggestions && (
             <>
-              {showRecent && <div style={{ height: 1, background: 'rgba(170,189,224,0.2)' }} />}
+              {showRecent && (
+                <div style={{ height: 1, background: 'rgba(170,189,224,0.2)' }} />
+              )}
               <SectionLabel>Suggestions</SectionLabel>
               {loading && (
                 <div
                   style={{
                     padding: '10px 14px',
-                    fontSize: 13,
+                    fontSize: 12,
                     color: '#AABDE0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    className="animate-spin"
+                    aria-hidden
+                  >
+                    <circle cx="12" cy="12" r="9" strokeOpacity=".25" />
+                    <path d="M21 12a9 9 0 0 0-9-9" />
+                  </svg>
                   Searching…
                 </div>
               )}
@@ -290,8 +556,10 @@ export function AddressAutocomplete({
                       key={`sug-${i}`}
                       result={r}
                       hover={hoverIndex === hoverKey}
-                      onHover={() => setHoverIndex(hoverKey)}
-                      onLeave={() => setHoverIndex(null)}
+                      onHover={() => {
+                        setHoverIndex(hoverKey)
+                        if (r.lat && r.lon) setPreviewResult(r)
+                      }}
                       onSelect={() => handleSelect(r)}
                     />
                   )
@@ -309,6 +577,19 @@ export function AddressAutocomplete({
                 </div>
               )}
             </>
+          )}
+
+          {previewResult?.lat && previewResult?.lon && (
+            <div
+              ref={mapRef}
+              style={{
+                height: 140,
+                borderTop: '1px solid rgba(170,189,224,0.15)',
+                borderRadius: '0 0 10px 10px',
+                overflow: 'hidden',
+                position: 'relative',
+              }}
+            />
           )}
         </div>
       )}
@@ -337,13 +618,11 @@ function ResultRow({
   result,
   hover,
   onHover,
-  onLeave,
   onSelect,
 }: {
   result: AddressResult
   hover: boolean
   onHover: () => void
-  onLeave: () => void
   onSelect: () => void
 }) {
   const subline = [
@@ -353,6 +632,8 @@ function ResultRow({
     .filter(Boolean)
     .join(', ')
 
+  const isLandmark = !/^\d/.test(result.address_line)
+
   return (
     <button
       type="button"
@@ -361,7 +642,7 @@ function ResultRow({
         onSelect()
       }}
       onMouseEnter={onHover}
-      onMouseLeave={onLeave}
+      onFocus={onHover}
       style={{
         display: 'block',
         width: '100%',
@@ -376,7 +657,7 @@ function ResultRow({
         borderTop: '1px solid rgba(170,189,224,0.1)',
       }}
     >
-      <span style={{ display: 'block', fontWeight: 500 }}>
+      <span style={{ display: 'block', fontWeight: 500, fontSize: 13 }}>
         {result.address_line}
       </span>
       {subline && (
@@ -389,6 +670,19 @@ function ResultRow({
           }}
         >
           {subline}
+        </span>
+      )}
+      {isLandmark && (
+        <span
+          style={{
+            display: 'block',
+            fontSize: 10,
+            color: 'rgba(170,189,224,0.5)',
+            marginTop: 2,
+            fontStyle: 'italic',
+          }}
+        >
+          Nearest address to this location
         </span>
       )}
     </button>
