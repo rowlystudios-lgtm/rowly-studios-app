@@ -437,66 +437,76 @@ function PostJobInner() {
                   )}
                 </div>
 
-                <label style={{ display: 'block' }}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: TEXT_MUTED,
-                      marginBottom: 5,
-                    }}
-                  >
-                    Shoot date *
-                  </span>
-                  <input
-                    type="date"
-                    required
-                    value={day.date}
-                    onChange={(e) => updateShootDay(i, { date: e.target.value })}
-                    className="rs-input"
-                    style={{
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      minWidth: 0,
-                    }}
-                  />
-                </label>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                    gap: 8,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <label style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: TEXT_MUTED,
+                        marginBottom: 5,
+                      }}
+                    >
+                      Shoot date *
+                    </span>
+                    <input
+                      type="date"
+                      required
+                      value={day.date}
+                      onChange={(e) => updateShootDay(i, { date: e.target.value })}
+                      className="rs-input"
+                      style={{
+                        width: '100%',
+                        minWidth: 0,
+                        boxSizing: 'border-box',
+                        fontSize: 13,
+                      }}
+                    />
+                  </label>
 
-                <label style={{ display: 'block' }}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: TEXT_MUTED,
-                      marginBottom: 5,
-                    }}
-                  >
-                    Call time
-                  </span>
-                  <select
-                    value={day.call_time}
-                    onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
-                    className="rs-input"
-                    style={{ width: '100%' }}
-                  >
-                    <option value="06:00">6:00 AM</option>
-                    <option value="06:30">6:30 AM</option>
-                    <option value="07:00">7:00 AM</option>
-                    <option value="07:30">7:30 AM</option>
-                    <option value="08:00">8:00 AM</option>
-                    <option value="08:30">8:30 AM</option>
-                    <option value="09:00">9:00 AM</option>
-                    <option value="09:30">9:30 AM</option>
-                    <option value="10:00">10:00 AM</option>
-                    <option value="10:30">10:30 AM</option>
-                    <option value="11:00">11:00 AM</option>
-                    <option value="12:00">12:00 PM</option>
-                    <option value="13:00">1:00 PM</option>
-                    <option value="14:00">2:00 PM</option>
-                  </select>
-                </label>
+                  <label style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: TEXT_MUTED,
+                        marginBottom: 5,
+                      }}
+                    >
+                      Call time
+                    </span>
+                    <select
+                      value={day.call_time}
+                      onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
+                      className="rs-input"
+                      style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                    >
+                      <option value="06:00">6:00 AM</option>
+                      <option value="06:30">6:30 AM</option>
+                      <option value="07:00">7:00 AM</option>
+                      <option value="07:30">7:30 AM</option>
+                      <option value="08:00">8:00 AM</option>
+                      <option value="08:30">8:30 AM</option>
+                      <option value="09:00">9:00 AM</option>
+                      <option value="09:30">9:30 AM</option>
+                      <option value="10:00">10:00 AM</option>
+                      <option value="10:30">10:30 AM</option>
+                      <option value="11:00">11:00 AM</option>
+                      <option value="12:00">12:00 PM</option>
+                      <option value="13:00">1:00 PM</option>
+                      <option value="14:00">2:00 PM</option>
+                    </select>
+                  </label>
+                </div>
               </div>
             ))}
           </div>
