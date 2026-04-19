@@ -1,5 +1,13 @@
 export type UserRole = 'talent' | 'client' | 'admin'
-export type Department = 'camera' | 'styling' | 'glam' | 'post' | 'production' | 'direction' | 'other'
+export type Department =
+  | 'camera'
+  | 'photography'
+  | 'styling'
+  | 'glam'
+  | 'post'
+  | 'production'
+  | 'direction'
+  | 'other'
 export type AvailabilityStatus = 'available' | 'hold' | 'unavailable'
 export type BookingStatus = 'requested' | 'accepted' | 'declined' | 'cancelled' | 'completed'
 export type JobStatus = 'draft' | 'submitted' | 'crewing' | 'confirmed' | 'wrapped' | 'cancelled'
@@ -66,6 +74,7 @@ export type Availability = {
 
 export const DEPARTMENT_LABELS: Record<Department, string> = {
   camera: 'Camera',
+  photography: 'Photography',
   styling: 'Styling',
   glam: 'Glam',
   post: 'Post',

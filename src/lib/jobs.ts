@@ -37,6 +37,7 @@ export const CREW_LABELS: Record<string, string> = {
  */
 export type TalentDepartment =
   | 'camera'
+  | 'photography'
   | 'styling'
   | 'glam'
   | 'post'

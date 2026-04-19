@@ -22,6 +22,24 @@ const DEPTS_BY_SIDE: Record<Side, Department[]> = {
   post: ['post'],
 }
 
+// 'camera' and 'photography' are treated as the same chip in the UI.
+const DEPT_ALIASES: Partial<Record<Department, Department[]>> = {
+  camera: ['camera', 'photography'],
+}
+
+function deptMatches(talentDept: Department | null, filterDept: Department): boolean {
+  if (!talentDept) return false
+  if (talentDept === filterDept) return true
+  const aliases = DEPT_ALIASES[filterDept]
+  if (aliases && aliases.includes(talentDept)) return true
+  return false
+}
+
+// Override label in the roster dropdown so 'camera' reads as the merged chip.
+const ROSTER_DEPT_LABEL: Partial<Record<Department, string>> = {
+  camera: 'Camera / Photography',
+}
+
 type TalentProfileLite = {
   department: Department | null
   primary_role: string | null
@@ -172,6 +190,7 @@ function RosterInner() {
         .from('profiles')
         .select(
           `id, first_name, last_name, full_name, avatar_url, city, available,
+           verified, role,
            talent_profiles (department, primary_role, day_rate_cents,
              showreel_url, bio, equipment)`
         )
@@ -180,6 +199,8 @@ function RosterInner() {
         .order('first_name')
       if (cancelled) return
       if (error) {
+        // eslint-disable-next-line no-console
+        console.error('[roster] verified talent fetch failed', error)
         setTalentError(error.message)
         setLoadingTalent(false)
         return
@@ -288,7 +309,7 @@ function RosterInner() {
       if (side === 'production') return t.department !== 'post'
       return t.department === 'post'
     })
-    if (dept !== 'all') list = list.filter((t) => t.department === dept)
+    if (dept !== 'all') list = list.filter((t) => deptMatches(t.department, dept))
     if (query) list = list.filter((t) => t.name.toLowerCase().includes(query))
     return list
   }, [talent, side, dept, query])
@@ -367,7 +388,7 @@ function RosterInner() {
           </option>
           {DEPTS_BY_SIDE[side].map((d) => (
             <option key={d} value={d}>
-              {DEPARTMENT_LABELS[d]}
+              {ROSTER_DEPT_LABEL[d] ?? DEPARTMENT_LABELS[d]}
             </option>
           ))}
         </select>
