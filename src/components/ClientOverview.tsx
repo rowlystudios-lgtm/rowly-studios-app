@@ -128,6 +128,20 @@ function collapsedLocation(job: JobRow): string {
   return parts.join(', ') || job.location || ''
 }
 
+function collapsedDateLine(days: ShootDay[]): string {
+  if (days.length === 0) return ''
+  const first = days[0]
+  const d = parseLocalDate(first.date)
+  if (!d) return ''
+  const dateStr = `${DAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`
+  if (days.length === 1) {
+    const call = formatCallTime(first.call_time)
+    return call ? `${dateStr} · Call ${call}` : dateStr
+  }
+  const extra = days.length - 1
+  return `${dateStr} + ${extra} more day${extra === 1 ? '' : 's'}`
+}
+
 function fullName(p: BookingProfile): string {
   if (!p) return 'Someone'
   return [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Someone'
@@ -386,6 +400,33 @@ function ClientJobRow({
             }}
           >
             {locationSubtitle}
+          </p>
+        )}
+        {shootDays.length > 0 && (
+          <p
+            style={{
+              fontSize: 12,
+              color: TEXT_MUTED,
+              marginTop: 3,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M3 10h18M8 3v4M16 3v4" />
+            </svg>
+            {collapsedDateLine(shootDays)}
           </p>
         )}
       </button>
