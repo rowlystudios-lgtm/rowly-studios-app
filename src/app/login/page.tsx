@@ -86,8 +86,7 @@ function LoginInner() {
   const [lastName, setLastName] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [showTalentPending, setShowTalentPending] = useState(false)
-  const [pendingEmail, setPendingEmail] = useState('')
+  const [showWebsiteRedirect, setShowWebsiteRedirect] = useState(false)
 
   const [showAdminForm, setShowAdminForm] = useState(false)
   const [adminStep, setAdminStep] = useState<AdminStep>('password')
@@ -270,7 +269,28 @@ function LoginInner() {
       return
     }
 
-    // 4. Populate the profile row created by the handle_new_user trigger.
+    // 4. For talent, check whether this email has a pre-approval invite.
+    //    Pre-approved talent (invited) → verified immediately, straight to /app.
+    //    Uninvited talent → not verified, shown the website redirect screen.
+    let isInvited = false
+    if (selectedRole === 'talent') {
+      try {
+        const inviteRes = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=check-invite`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: cleanEmail.toLowerCase() }),
+          }
+        )
+        const inviteData = await inviteRes.json().catch(() => ({}))
+        isInvited = inviteData?.invited === true
+      } catch {
+        // Non-fatal — fall through as uninvited.
+      }
+    }
+
+    // 5. Populate the profile row created by the handle_new_user trigger.
     const fullName = `${first} ${last}`
     const profileUpdate = await supabase
       .from('profiles')
@@ -279,7 +299,10 @@ function LoginInner() {
         last_name: last,
         full_name: fullName,
         role: selectedRole,
-        verified: selectedRole === 'client',
+        // Client → verified immediately.
+        // Talent with invite → verified immediately.
+        // Talent without invite → unverified, sent to website.
+        verified: selectedRole === 'client' ? true : isInvited,
       })
       .eq('id', userId)
 
@@ -289,7 +312,7 @@ function LoginInner() {
       return
     }
 
-    // 5. Clients: make sure client_profiles has a row with the company name.
+    // 6. Clients: make sure client_profiles has a row with the company name.
     if (selectedRole === 'client') {
       const clientUpsert = await supabase
         .from('client_profiles')
@@ -301,19 +324,39 @@ function LoginInner() {
       }
     }
 
-    // 6. Route based on role.
-    if (selectedRole === 'talent') {
-      // Sign the talent out so they can't reach /app before admin approval.
-      await supabase.auth.signOut()
-      setPendingEmail(cleanEmail)
-      resetSignupFields()
-      setShowTalentPending(true)
+    // 7. If invited talent, mark the invite as signed up so admin sees it.
+    if (selectedRole === 'talent' && isInvited) {
+      try {
+        await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=mark-signed-up`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: cleanEmail.toLowerCase(),
+              profileId: userId,
+            }),
+          }
+        )
+      } catch {
+        // Non-fatal — admin can reconcile manually.
+      }
+    }
+
+    // 8. Route based on role / invite status.
+    if (selectedRole === 'client' || isInvited) {
+      setStatus('idle')
+      router.replace('/app')
+      router.refresh()
       return
     }
 
-    setStatus('idle')
-    router.replace('/app')
-    router.refresh()
+    // Uninvited talent → sign out, show website redirect screen.
+    // Their auth user remains in Supabase; once admin adds an invite they
+    // can sign in and they'll pass the unverified-but-invited check.
+    await supabase.auth.signOut()
+    resetSignupFields()
+    setShowWebsiteRedirect(true)
   }
 
   async function handleSignIn(e: React.FormEvent) {
@@ -342,7 +385,7 @@ function LoginInner() {
 
     const { data: profileRow } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, verified')
       .eq('id', userId)
       .maybeSingle()
 
@@ -366,6 +409,39 @@ function LoginInner() {
       await supabase.auth.signOut()
       setStatus('error')
       setErrorMsg("This is a client account. Please select 'Client' to sign in.")
+      return
+    }
+
+    // Unverified talent: allow in only if they have an invite (admin is still
+    // finishing profile review). Otherwise redirect them back to the website.
+    if (actualRole === 'talent' && profileRow?.verified === false) {
+      let invited = false
+      try {
+        const inviteRes = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=check-invite`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.toLowerCase().trim() }),
+          }
+        )
+        const inviteData = await inviteRes.json().catch(() => ({}))
+        invited = inviteData?.invited === true
+      } catch {
+        // Treat as uninvited on failure — safer default.
+      }
+
+      if (invited) {
+        router.replace('/app')
+        router.refresh()
+        return
+      }
+
+      await supabase.auth.signOut()
+      setStatus('error')
+      setErrorMsg(
+        "Your application hasn't been approved yet. Please apply at rowlystudios.com first, or check your email for an invite from Rowly Studios."
+      )
       return
     }
 
@@ -553,7 +629,7 @@ function LoginInner() {
           </span>
         </Link>
 
-        {status !== 'reset-sent' && !showReset && !showTalentPending && (
+        {status !== 'reset-sent' && !showReset && !showWebsiteRedirect && (
           <div className="w-full max-w-sm">
             <p
               style={{
@@ -724,39 +800,45 @@ function LoginInner() {
         )}
 
         <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
-          {showTalentPending ? (
-            <div className="text-center space-y-3" style={{ padding: '8px 2px' }}>
-              <p
-                className="text-sm font-semibold uppercase tracking-wide"
-                style={{ color: '#1A3C6B' }}
-              >
-                You&apos;re on the list
+          {showWebsiteRedirect ? (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
+                <RSLogo size={48} />
+              </div>
+              <p style={{ fontSize: 22, fontWeight: 700, color: '#1A3C6B', marginBottom: 10 }}>
+                Apply on our website first
               </p>
-              <p
-                className="text-[13px] leading-relaxed"
-                style={{ color: '#2E5099' }}
-              >
-                Your talent profile is being reviewed by the Rowly Studios team.
-                We&apos;ll email you at <strong>{pendingEmail}</strong> when your
-                account is approved. This usually takes 1–2 business days.
+              <p style={{ fontSize: 14, color: '#2E5099', lineHeight: 1.6, marginBottom: 28 }}>
+                To join the Rowly Studios talent roster, you need to complete your application
+                on our website and agree to our terms before signing up.
               </p>
-              <p
-                className="text-[11px] leading-relaxed pt-2"
-                style={{ color: 'rgba(46,80,153,0.7)' }}
+              <a
+                href="https://rowlystudios-lgtm.github.io/rowlystudios/join.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'block',
+                  background: '#1A3C6B',
+                  color: '#fff',
+                  padding: '16px 24px',
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                  marginBottom: 16,
+                }}
               >
-                Questions? Contact{' '}
-                <a
-                  href="mailto:rowlystudios@gmail.com"
-                  style={{ color: '#1A3C6B', textDecoration: 'underline' }}
-                >
-                  rowlystudios@gmail.com
-                </a>
+                Apply to join Rowly Studios →
+              </a>
+              <p style={{ fontSize: 12, color: '#2E5099', lineHeight: 1.5, marginBottom: 20 }}>
+                Already applied? We&apos;ll send you an invite email once your application has
+                been reviewed. This usually takes 1–2 business days.
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setShowTalentPending(false)
-                  setPendingEmail('')
+                onClick={async () => {
+                  await supabase.auth.signOut()
+                  setShowWebsiteRedirect(false)
                   setMode('signin')
                   setEmail('')
                   setPassword('')
@@ -767,8 +849,14 @@ function LoginInner() {
                   setErrorMsg('')
                   setStatus('idle')
                 }}
-                className="text-[11px] uppercase tracking-wider underline mt-4"
-                style={{ color: '#2E5099' }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#2E5099',
+                  fontSize: 12,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                }}
               >
                 ← Back to sign in
               </button>
