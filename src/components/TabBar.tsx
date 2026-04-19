@@ -104,6 +104,8 @@ export function TabBar() {
         zIndex: 100,
         background: 'var(--rs-cream, #FBF5E4)',
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
+        transform: 'translateZ(0)',
+        WebkitTransform: 'translateZ(0)',
       }}
     >
       {tabs.map((tab) => {

@@ -61,41 +61,6 @@ function saveRecent(result: AddressResult) {
   }
 }
 
-/* ─────────── Leaflet loader ─────────── */
-
-let leafletLoaded = false
-let leafletLoadingPromise: Promise<void> | null = null
-
-function ensureLeaflet(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.resolve()
-  const w = window as unknown as { L?: unknown }
-  if (leafletLoaded || w.L) {
-    leafletLoaded = true
-    return Promise.resolve()
-  }
-  if (leafletLoadingPromise) return leafletLoadingPromise
-  leafletLoadingPromise = new Promise<void>((resolve) => {
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-    document.head.appendChild(link)
-
-    const script = document.createElement('script')
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.async = true
-    script.onload = () => {
-      leafletLoaded = true
-      resolve()
-    }
-    script.onerror = () => {
-      leafletLoadingPromise = null
-      resolve()
-    }
-    document.head.appendChild(script)
-  })
-  return leafletLoadingPromise
-}
-
 /* ─────────── Nominatim ─────────── */
 
 type NominatimResult = {
@@ -269,24 +234,6 @@ async function searchAddress(
 
 /* ─────────── component ─────────── */
 
-type LeafletLike = {
-  map: (
-    el: HTMLElement,
-    opts: Record<string, unknown>
-  ) => {
-    remove: () => void
-  }
-  tileLayer: (
-    url: string,
-    opts: Record<string, unknown>
-  ) => { addTo: (m: unknown) => unknown }
-  divIcon: (opts: Record<string, unknown>) => unknown
-  marker: (
-    latlng: [number, number],
-    opts: Record<string, unknown>
-  ) => { addTo: (m: unknown) => unknown }
-}
-
 export function AddressAutocomplete({
   value,
   onChange,
@@ -306,10 +253,6 @@ export function AddressAutocomplete({
   const abortRef = useRef<AbortController | null>(null)
   const requestId = useRef(0)
 
-  const mapRef = useRef<HTMLDivElement | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const leafletMapRef = useRef<any>(null)
-
   useEffect(() => {
     setQuery(value)
   }, [value])
@@ -323,10 +266,6 @@ export function AddressAutocomplete({
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (blurRef.current) clearTimeout(blurRef.current)
       abortRef.current?.abort()
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove()
-        leafletMapRef.current = null
-      }
     }
   }, [])
 
@@ -408,69 +347,8 @@ export function AddressAutocomplete({
     showSuggestions && !loading && suggestions.length === 0
   const dropdownVisible = showRecent || showSuggestions
 
-  /* ─── Map preview lifecycle ─── */
-  useEffect(() => {
-    if (!previewResult?.lat || !previewResult?.lon || !mapRef.current) {
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove()
-        leafletMapRef.current = null
-      }
-      return
-    }
-
-    const lat = parseFloat(previewResult.lat)
-    const lon = parseFloat(previewResult.lon)
-    if (Number.isNaN(lat) || Number.isNaN(lon)) return
-
-    let cancelled = false
-    ensureLeaflet().then(() => {
-      if (cancelled) return
-      const w = window as unknown as { L?: LeafletLike }
-      const L = w.L
-      if (!L || !mapRef.current) return
-
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove()
-        leafletMapRef.current = null
-      }
-
-      const map = L.map(mapRef.current, {
-        center: [lat, lon],
-        zoom: 17,
-        zoomControl: false,
-        attributionControl: false,
-        dragging: false,
-        scrollWheelZoom: false,
-      })
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-      }).addTo(map)
-
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="
-          width:14px;height:14px;
-          background:#1A3C6B;
-          border:2px solid #fff;
-          border-radius:50%;
-          box-shadow:0 1px 4px rgba(0,0,0,0.4)
-        "></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
-      })
-      L.marker([lat, lon], { icon }).addTo(map)
-
-      leafletMapRef.current = map
-    })
-
-    return () => {
-      cancelled = true
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove()
-        leafletMapRef.current = null
-      }
-    }
-  }, [previewResult])
+  /* Map preview is a static OSM tile image — renders instantly, no
+     runtime library. See StaticMap below. */
 
   return (
     <div style={{ position: 'relative' }}>
@@ -592,15 +470,9 @@ export function AddressAutocomplete({
           )}
 
           {previewResult?.lat && previewResult?.lon && (
-            <div
-              ref={mapRef}
-              style={{
-                height: 160,
-                borderTop: '1px solid rgba(170,189,224,0.15)',
-                borderRadius: '0 0 10px 10px',
-                overflow: 'hidden',
-                position: 'relative',
-              }}
+            <StaticMap
+              lat={parseFloat(previewResult.lat)}
+              lon={parseFloat(previewResult.lon)}
             />
           )}
         </div>
@@ -698,5 +570,95 @@ function ResultRow({
         </span>
       )}
     </button>
+  )
+}
+
+function StaticMap({ lat, lon }: { lat: number; lon: number }) {
+  // Project lat/lon to OSM tile coordinates at zoom 16.
+  const zoom = 16
+  const tileX = Math.floor(((lon + 180) / 360) * Math.pow(2, zoom))
+  const tileY = Math.floor(
+    ((1 -
+      Math.log(
+        Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)
+      ) /
+        Math.PI) /
+      2) *
+      Math.pow(2, zoom)
+  )
+
+  const tileUrl = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`
+
+  // Pixel offset of the pin within the fetched tile.
+  const tileCount = Math.pow(2, zoom)
+  const xFraction = ((lon + 180) / 360) * tileCount - tileX
+  const yFraction =
+    ((1 -
+      Math.log(
+        Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)
+      ) /
+        Math.PI) /
+      2) *
+      tileCount -
+    tileY
+  const pinX = Math.round(xFraction * 256)
+  const pinY = Math.round(yFraction * 256)
+
+  return (
+    <div
+      style={{
+        height: 130,
+        borderTop: '1px solid rgba(170,189,224,0.15)',
+        borderRadius: '0 0 10px 10px',
+        overflow: 'hidden',
+        position: 'relative',
+        background: '#1A3C6B',
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={tileUrl}
+        alt="Map preview"
+        width={256}
+        height={256}
+        style={{
+          position: 'absolute',
+          left: `calc(50% - ${pinX}px)`,
+          top: `calc(50% - ${pinY}px)`,
+          display: 'block',
+          imageRendering: 'crisp-edges',
+        }}
+        loading="eager"
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -100%) rotate(-45deg)',
+          width: 16,
+          height: 16,
+          background: '#1A3C6B',
+          border: '2.5px solid #fff',
+          borderRadius: '50% 50% 50% 0',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+          pointerEvents: 'none',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 2,
+          right: 4,
+          fontSize: 8,
+          color: 'rgba(0,0,0,0.5)',
+          background: 'rgba(255,255,255,0.7)',
+          padding: '1px 3px',
+          borderRadius: 2,
+        }}
+      >
+        © OpenStreetMap
+      </div>
+    </div>
   )
 }

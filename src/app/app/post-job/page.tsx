@@ -395,6 +395,8 @@ function PostJobInner() {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 10,
+                  overflow: 'hidden',
+                  minWidth: 0,
                 }}
               >
                 <div
@@ -453,7 +455,11 @@ function PostJobInner() {
                     value={day.date}
                     onChange={(e) => updateShootDay(i, { date: e.target.value })}
                     className="rs-input"
-                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      minWidth: 0,
+                    }}
                   />
                 </label>
 
@@ -669,6 +675,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
           border: `1px solid ${CARD_BORDER}`,
           borderRadius: 12,
           padding: 14,
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           gap: 12,

@@ -25,13 +25,11 @@ export const metadata: Metadata = {
   },
 }
 
+// Viewport is emitted manually in <head> below so we can add
+// `interactive-widget=resizes-content` (not yet in Next's Viewport type).
+// Only themeColor goes through Next's helper.
 export const viewport: Viewport = {
   themeColor: '#1A3C6B',
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  viewportFit: 'cover',
 }
 
 export default function RootLayout({
@@ -42,6 +40,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={montserrat.variable}>
       <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+        />
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
