@@ -50,16 +50,17 @@ type FormState = {
 const MIN_BUDGET_DOLLARS = 300
 
 // Pre-computed 00:00 → 23:30 half-hour slots for both call/end selects.
+// Labels keep the 24hr value + an AM/PM suffix so the native picker still
+// scans naturally — e.g. "08:00 AM", "16:30 PM".
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   const opts: { value: string; label: string }[] = []
   for (let h = 0; h < 24; h++) {
     for (const m of [0, 30]) {
       const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h
       const suffix = h < 12 ? 'AM' : 'PM'
       opts.push({
         value: v,
-        label: `${String(hour12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${suffix}`,
+        label: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${suffix}`,
       })
     }
   }
@@ -342,6 +343,10 @@ function PostJobInner() {
       client_notes: form.client_notes.trim() || null,
       // The working budget IS what talent will be offered — no fee rollup.
       client_budget_cents: avgBudget,
+      // Canonical per-shoot-day total used by the client job-detail view +
+      // the roster rate-offer flow. Mirrors client_budget_cents today but
+      // the two are kept separate so we can diverge them later if needed.
+      total_budget_cents: avgBudget,
       day_rate_cents: isShortShoot ? null : avgBudget,
       shoot_duration_hours: shortestHours,
       is_half_day: false,
@@ -895,13 +900,13 @@ function ShootDayFields({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Date / call / end — date gets more room (iOS renders
-          "Apr 19, 2026" which is wider than "08:00 AM"). */}
+      {/* Date / call / end — date still gets a little extra room for
+          "Apr 19, 2026" but Call/End need width for "16:30 PM" at 16px. */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns:
-            'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr)',
+            'minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)',
           gap: 6,
         }}
       >
@@ -933,16 +938,18 @@ function ShootDayFields({
               // 16px keeps iOS from auto-zooming on focus; padding still
               // controls the visual height of the field.
               fontSize: 16,
-              padding: '10px 8px',
+              padding: '8px 6px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: 8,
               color: '#1A3C6B',
               fontWeight: 500,
               outline: 'none',
-              appearance: 'none',
-              WebkitAppearance: 'none',
               minWidth: 0,
+              width: '100%',
+              boxSizing: 'border-box',
+              // NO appearance:none — let iOS render its native date chrome
+              // so the field reads as a populated date before it's tapped.
             }}
           />
         </label>
@@ -965,17 +972,19 @@ function ShootDayFields({
             onChange={(e) => setCallTime(e.target.value)}
             style={{
               fontSize: 16,
-              padding: '10px 8px',
+              padding: '8px 4px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: 8,
               color: '#1A3C6B',
               fontWeight: 500,
               outline: 'none',
-              appearance: 'none',
-              WebkitAppearance: 'none',
               cursor: 'pointer',
               minWidth: 0,
+              width: '100%',
+              boxSizing: 'border-box',
+              // NO appearance:none — the native chevron + picker handle
+              // "16:30 PM" labels better than a custom styled select.
             }}
           >
             {TIME_OPTIONS.map((o) => (
@@ -1004,17 +1013,18 @@ function ShootDayFields({
             onChange={(e) => setEndTime(e.target.value)}
             style={{
               fontSize: 16,
-              padding: '10px 8px',
+              padding: '8px 4px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: 8,
               color: '#1A3C6B',
               fontWeight: 500,
               outline: 'none',
-              appearance: 'none',
-              WebkitAppearance: 'none',
               cursor: 'pointer',
               minWidth: 0,
+              width: '100%',
+              boxSizing: 'border-box',
+              // NO appearance:none — see Call select above.
             }}
           >
             <option value="">—</option>
@@ -1152,7 +1162,7 @@ function ShootDayFields({
         )}
       </div>
 
-      {/* Per-day working budget. Minimum is $300; no fee language. */}
+      {/* Per-day total budget. Minimum is $300; no fee language. */}
       <label style={{ display: 'block' }}>
         <span
           style={{
@@ -1165,7 +1175,7 @@ function ShootDayFields({
             marginBottom: 4,
           }}
         >
-          Budget
+          Total budget
         </span>
         <div style={{ position: 'relative' }}>
           <span
@@ -1188,7 +1198,7 @@ function ShootDayFields({
             step={5}
             value={day.budget}
             onChange={(e) => onChange({ budget: e.target.value })}
-            placeholder="e.g. 1500"
+            placeholder="e.g. 5000"
             className="rs-input"
             style={{
               paddingLeft: 24,
@@ -1207,8 +1217,8 @@ function ShootDayFields({
           }}
         >
           {budgetBelowMin
-            ? `Minimum budget is $${MIN_BUDGET_DOLLARS}`
-            : 'This can be adjusted later.'}
+            ? `Minimum total budget is $${MIN_BUDGET_DOLLARS}.`
+            : 'Total budget for this shoot day. Can be adjusted later.'}
         </p>
       </label>
     </div>

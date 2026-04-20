@@ -105,6 +105,7 @@ type JobRow = {
   crew_needed: string[] | null
   num_talent: number | null
   client_budget_cents: number | null
+  total_budget_cents: number | null
   shoot_duration_hours: number | null
   created_at: string
   cancelled_at: string | null
@@ -298,7 +299,8 @@ export function ClientOverview() {
         `id, title, status, job_code, location, client_notes, description,
          address_line, address_city, address_state, address_zip,
          shoot_days, start_date, end_date, call_time,
-         crew_needed, num_talent, client_budget_cents, shoot_duration_hours,
+         crew_needed, num_talent, client_budget_cents, total_budget_cents,
+         shoot_duration_hours,
          created_at,
          cancelled_at, wrapped_at,
          job_bookings (
@@ -776,6 +778,21 @@ function ClientJobRow({
                   </div>
                 ))}
               </div>
+            </ExpandedSection>
+          )}
+
+          {/* Read-only total budget — the snapshot written at job creation.
+              Edits still happen via the Working budget section below. */}
+          {job.total_budget_cents != null && (
+            <ExpandedSection label="Budget" divider>
+              <p
+                style={{ fontSize: 16, fontWeight: 700, color: TEXT_PRIMARY }}
+              >
+                ${(job.total_budget_cents / 100).toLocaleString()}
+              </p>
+              <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
+                Total budget per shoot day
+              </p>
             </ExpandedSection>
           )}
 

@@ -71,6 +71,7 @@ type ClientJob = {
   status: string
   start_date: string | null
   shoot_days: Array<{ date: string; call_time: string | null }> | null
+  total_budget_cents: number | null
 }
 
 type JobBookingRow = {
@@ -215,7 +216,9 @@ function RosterInner() {
     async function load() {
       const { data } = await supabase
         .from('jobs')
-        .select('id, title, status, start_date, shoot_days')
+        .select(
+          'id, title, status, start_date, shoot_days, total_budget_cents'
+        )
         .eq('client_id', uid)
         .order('created_at', { ascending: false })
       if (cancelled) return
@@ -309,10 +312,16 @@ function RosterInner() {
 
   /**
    * Insert a booking with status='requested'. Shared by:
-   *   - direct add when ?jobId= is present (jobContext mode)
-   *   - "Add to job" picker when no jobId (opens a sheet first)
+   *   - direct add when ?jobId= is present (jobContext mode) — uses the
+   *     talent's day_rate_cents as the opening offer.
+   *   - "Add to job" picker when no jobId (opens a sheet first, then a
+   *     rate-choice step that passes an explicit rateCents here).
    */
-  async function handleAddToJob(jobId: string, t: Talent): Promise<boolean> {
+  async function handleAddToJob(
+    jobId: string,
+    t: Talent,
+    rateCents: number | null
+  ): Promise<boolean> {
     setAddError('')
     setAddSuccess('')
 
@@ -328,11 +337,14 @@ function RosterInner() {
       return false
     }
 
+    // offered_rate_cents captures the opening number; confirmed_rate_cents
+    // stays null until admin/talent lock it in.
     const { error } = await supabase.from('job_bookings').insert({
       job_id: jobId,
       talent_id: t.id,
       status: 'requested',
       notes: null,
+      offered_rate_cents: rateCents ?? null,
       confirmed_rate_cents: null,
     })
 
@@ -356,7 +368,13 @@ function RosterInner() {
     if (addedTalentIds.has(t.id)) return
     if (addingTalentId) return
     setAddingTalentId(t.id)
-    const ok = await handleAddToJob(jobContext.id, t)
+    // With a jobContext URL we skip the picker's rate step and default
+    // to the talent's own day rate as the opening offer.
+    const ok = await handleAddToJob(
+      jobContext.id,
+      t,
+      t.day_rate_cents ?? null
+    )
     if (ok) {
       setAddedTalentIds((prev) => {
         const next = new Set(prev)
@@ -367,10 +385,10 @@ function RosterInner() {
     setAddingTalentId(null)
   }
 
-  async function onPickerSelectJob(jobId: string) {
+  async function onPickerConfirm(jobId: string, rateCents: number | null) {
     if (!pickerTalent) return
     setPickerBusy(true)
-    const ok = await handleAddToJob(jobId, pickerTalent)
+    const ok = await handleAddToJob(jobId, pickerTalent, rateCents)
     setPickerBusy(false)
     if (ok) setPickerTalent(null)
   }
@@ -577,7 +595,7 @@ function RosterInner() {
           talent={pickerTalent}
           jobs={pickableJobs}
           busy={pickerBusy}
-          onSelect={onPickerSelectJob}
+          onConfirm={onPickerConfirm}
           onClose={() => {
             if (!pickerBusy) setPickerTalent(null)
           }}
@@ -587,19 +605,31 @@ function RosterInner() {
   )
 }
 
+/**
+ * Two-step "Add to job" sheet:
+ *   Step 1 — pick the job.
+ *   Step 2 — choose a rate (accept the talent's day rate or make a
+ *            custom offer), then confirm the add.
+ *
+ * Closing the sheet at any point resets back to step 1.
+ */
 function JobPickerSheet({
   talent,
   jobs,
   busy,
-  onSelect,
+  onConfirm,
   onClose,
 }: {
   talent: Talent
   jobs: ClientJob[]
   busy: boolean
-  onSelect: (jobId: string) => void
+  onConfirm: (jobId: string, rateCents: number | null) => void
   onClose: () => void
 }) {
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
+  const [rateMode, setRateMode] = useState<'day_rate' | 'offer'>('day_rate')
+  const [offerAmount, setOfferAmount] = useState('')
+
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -607,6 +637,38 @@ function JobPickerSheet({
       document.body.style.overflow = prev
     }
   }, [])
+
+  // Reset rate state whenever a new job is picked so one client's "offer"
+  // never leaks into the next one's confirmation.
+  function pickJob(id: string) {
+    setSelectedJobId(id)
+    setRateMode('day_rate')
+    setOfferAmount('')
+  }
+
+  function backToJobs() {
+    if (busy) return
+    setSelectedJobId(null)
+    setOfferAmount('')
+  }
+
+  const selectedJob = jobs.find((j) => j.id === selectedJobId) ?? null
+  const talentDayRateCents = talent.day_rate_cents ?? null
+  const selectedJobBudget = selectedJob?.total_budget_cents ?? null
+  const offerNumeric = parseFloat(offerAmount)
+  const offerValid = Number.isFinite(offerNumeric) && offerNumeric > 0
+
+  function submit() {
+    if (!selectedJobId) return
+    const rateCents =
+      rateMode === 'day_rate'
+        ? talentDayRateCents
+        : offerValid
+        ? Math.round(offerNumeric * 100)
+        : null
+    if (rateMode === 'offer' && !offerValid) return
+    onConfirm(selectedJobId, rateCents)
+  }
 
   return (
     <div
@@ -643,117 +705,371 @@ function JobPickerSheet({
           />
         </div>
         <div style={{ padding: '4px 16px 12px' }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Add {talent.name} to a job</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>
+            Add {talent.name} to a job
+          </h2>
           <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 4 }}>
-            {jobs.length === 0
+            {selectedJob
+              ? `Set a rate for ${selectedJob.title}`
+              : jobs.length === 0
               ? 'You don\u2019t have any active jobs yet.'
               : 'Pick the job you want to request them for.'}
           </p>
 
-          {jobs.length === 0 ? (
-            <Link
-              href="/app/post-job"
-              onClick={onClose}
-              style={{
-                display: 'inline-block',
-                marginTop: 16,
-                padding: '12px 18px',
-                borderRadius: 10,
-                background: '#fff',
-                color: BUTTON_PRIMARY,
-                fontSize: 12,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                textDecoration: 'none',
-              }}
-            >
-              Post a job →
-            </Link>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-              {jobs.map((j) => {
-                const firstDay =
-                  (Array.isArray(j.shoot_days) && j.shoot_days[0]?.date) ||
-                  j.start_date ||
-                  null
-                return (
-                  <button
-                    key={j.id}
-                    type="button"
-                    onClick={() => onSelect(j.id)}
-                    disabled={busy}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '12px 14px',
-                      background: CARD_BG,
-                      border: `1px solid ${CARD_BORDER}`,
-                      borderRadius: 12,
-                      textAlign: 'left',
-                      color: TEXT_PRIMARY,
-                      cursor: busy ? 'wait' : 'pointer',
-                      opacity: busy ? 0.6 : 1,
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p
+          {/* Step 1 — job selection */}
+          {!selectedJob && (
+            <>
+              {jobs.length === 0 ? (
+                <Link
+                  href="/app/post-job"
+                  onClick={onClose}
+                  style={{
+                    display: 'inline-block',
+                    marginTop: 16,
+                    padding: '12px 18px',
+                    borderRadius: 10,
+                    background: '#fff',
+                    color: BUTTON_PRIMARY,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    textDecoration: 'none',
+                  }}
+                >
+                  Post a job →
+                </Link>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  {jobs.map((j) => {
+                    const firstDay =
+                      (Array.isArray(j.shoot_days) && j.shoot_days[0]?.date) ||
+                      j.start_date ||
+                      null
+                    return (
+                      <button
+                        key={j.id}
+                        type="button"
+                        onClick={() => pickJob(j.id)}
+                        disabled={busy}
                         style={{
-                          fontSize: 14,
-                          fontWeight: 600,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '12px 14px',
+                          background: CARD_BG,
+                          border: `1px solid ${CARD_BORDER}`,
+                          borderRadius: 12,
+                          textAlign: 'left',
+                          color: TEXT_PRIMARY,
+                          cursor: busy ? 'wait' : 'pointer',
+                          opacity: busy ? 0.6 : 1,
                         }}
                       >
-                        {j.title}
-                      </p>
-                      <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
-                        {firstDay ? firstDay : 'No date set'}
-                        {' \u00b7 '}
-                        {j.status}
-                      </p>
-                    </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {j.title}
+                          </p>
+                          <p
+                            style={{
+                              fontSize: 11,
+                              color: TEXT_MUTED,
+                              marginTop: 2,
+                            }}
+                          >
+                            {firstDay ? firstDay : 'No date set'}
+                            {' \u00b7 '}
+                            {j.status}
+                          </p>
+                        </div>
+                        <span
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 999,
+                            background: '#fff',
+                            color: BUTTON_PRIMARY,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          Select
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Step 2 — rate selection */}
+          {selectedJob && (
+            <div style={{ padding: '16px 0' }}>
+              <p
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: TEXT_PRIMARY,
+                  marginBottom: 12,
+                }}
+              >
+                Set a rate for this booking
+              </p>
+
+              {/* Talent's day rate */}
+              {talentDayRateCents != null && (
+                <div
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(170,189,224,0.15)',
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    marginBottom: 12,
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: TEXT_MUTED,
+                      marginBottom: 2,
+                    }}
+                  >
+                    {talent.name}&rsquo;s day rate
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: TEXT_PRIMARY,
+                    }}
+                  >
+                    ${(talentDayRateCents / 100).toLocaleString()}
                     <span
                       style={{
-                        padding: '6px 12px',
-                        borderRadius: 999,
-                        background: '#fff',
-                        color: BUTTON_PRIMARY,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
+                        fontSize: 12,
+                        fontWeight: 400,
+                        color: TEXT_MUTED,
                       }}
                     >
-                      Select
+                      {' '}
+                      /day
                     </span>
-                  </button>
-                )
-              })}
+                  </p>
+                </div>
+              )}
+
+              {/* Budget context */}
+              {selectedJobBudget != null && (
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: TEXT_MUTED,
+                    marginBottom: 10,
+                  }}
+                >
+                  Your job budget:{' '}
+                  ${(selectedJobBudget / 100).toLocaleString()} per day
+                </p>
+              )}
+
+              {/* Rate choice — two-up toggle */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 8,
+                  marginBottom: 12,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setRateMode('day_rate')}
+                  disabled={talentDayRateCents == null}
+                  style={{
+                    padding: '12px 8px',
+                    borderRadius: 10,
+                    textAlign: 'center',
+                    border: `1px solid ${
+                      rateMode === 'day_rate' ? '#fff' : 'rgba(170,189,224,0.2)'
+                    }`,
+                    background:
+                      rateMode === 'day_rate'
+                        ? '#fff'
+                        : 'rgba(255,255,255,0.06)',
+                    color:
+                      rateMode === 'day_rate' ? '#1A3C6B' : TEXT_MUTED,
+                    fontSize: 12,
+                    fontWeight: rateMode === 'day_rate' ? 600 : 500,
+                    cursor:
+                      talentDayRateCents == null ? 'not-allowed' : 'pointer',
+                    opacity: talentDayRateCents == null ? 0.5 : 1,
+                  }}
+                >
+                  Accept day rate
+                  <br />
+                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>
+                    {talentDayRateCents != null
+                      ? `$${(talentDayRateCents / 100).toLocaleString()}`
+                      : '—'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRateMode('offer')}
+                  style={{
+                    padding: '12px 8px',
+                    borderRadius: 10,
+                    textAlign: 'center',
+                    border: `1px solid ${
+                      rateMode === 'offer' ? '#fff' : 'rgba(170,189,224,0.2)'
+                    }`,
+                    background:
+                      rateMode === 'offer' ? '#fff' : 'rgba(255,255,255,0.06)',
+                    color: rateMode === 'offer' ? '#1A3C6B' : TEXT_MUTED,
+                    fontSize: 12,
+                    fontWeight: rateMode === 'offer' ? 600 : 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Make an offer
+                </button>
+              </div>
+
+              {rateMode === 'offer' && (
+                <div
+                  style={{
+                    position: 'relative',
+                    marginBottom: 12,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: 12,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#888',
+                      fontSize: 14,
+                    }}
+                  >
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={100}
+                    step={50}
+                    value={offerAmount}
+                    onChange={(e) => setOfferAmount(e.target.value)}
+                    placeholder="Your offer per day"
+                    className="rs-input"
+                    style={{ paddingLeft: 24, fontSize: 16 }}
+                  />
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={submit}
+                disabled={
+                  busy ||
+                  (rateMode === 'offer' && !offerValid) ||
+                  (rateMode === 'day_rate' && talentDayRateCents == null)
+                }
+                style={{
+                  width: '100%',
+                  padding: '14px 0',
+                  borderRadius: 12,
+                  background: '#fff',
+                  color: '#1A3C6B',
+                  border: 'none',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor:
+                    busy ||
+                    (rateMode === 'offer' && !offerValid) ||
+                    (rateMode === 'day_rate' && talentDayRateCents == null)
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity:
+                    busy ||
+                    (rateMode === 'offer' && !offerValid) ||
+                    (rateMode === 'day_rate' && talentDayRateCents == null)
+                      ? 0.55
+                      : 1,
+                }}
+              >
+                {busy
+                  ? 'Adding…'
+                  : rateMode === 'day_rate'
+                  ? talentDayRateCents != null
+                    ? `Add at $${(talentDayRateCents / 100).toLocaleString()}/day`
+                    : 'No day rate on file'
+                  : offerValid
+                  ? `Offer $${offerAmount}/day`
+                  : 'Enter an offer'}
+              </button>
+
+              <button
+                type="button"
+                onClick={backToJobs}
+                disabled={busy}
+                style={{
+                  display: 'block',
+                  margin: '12px auto 0',
+                  background: 'transparent',
+                  border: 'none',
+                  color: TEXT_MUTED,
+                  fontSize: 11,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  textDecoration: 'underline',
+                  cursor: busy ? 'wait' : 'pointer',
+                }}
+              >
+                ← Choose different job
+              </button>
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            style={{
-              display: 'block',
-              margin: '16px auto 0',
-              background: 'transparent',
-              border: 'none',
-              color: TEXT_MUTED,
-              fontSize: 11,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              textDecoration: 'underline',
-              cursor: busy ? 'wait' : 'pointer',
-            }}
-          >
-            Cancel
-          </button>
+          {!selectedJob && (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              style={{
+                display: 'block',
+                margin: '16px auto 0',
+                background: 'transparent',
+                border: 'none',
+                color: TEXT_MUTED,
+                fontSize: 11,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                textDecoration: 'underline',
+                cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          )}
         </div>
       </div>
     </div>
