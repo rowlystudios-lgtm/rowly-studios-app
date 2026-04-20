@@ -145,7 +145,13 @@ function LoginInner() {
         return
       }
 
-      router.replace('/app')
+      // Role-based redirect for pre-authenticated visitors.
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+      router.replace(profileRow?.role === 'admin' ? '/admin' : '/app')
     }
     check()
   }, [router, supabase, searchParams])
@@ -521,9 +527,10 @@ function LoginInner() {
     if (valid === true) {
       setPinStatus('idle')
       // Re-fetch the profile so pin_verified_at is fresh in AuthContext
-      // before AdminGuard checks it on /app.
+      // before any guard checks. Admins land in /admin; all other roles
+      // that happen to have a PIN land in /app.
       await refresh()
-      router.push('/app')
+      router.push('/admin')
       return
     }
 
