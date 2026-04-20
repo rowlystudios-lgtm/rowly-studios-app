@@ -1,4 +1,9 @@
+'use client'
+
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { createClient } from '@/lib/supabase-browser'
 
 type Props = {
   displayName: string | null
@@ -12,6 +17,18 @@ function initials(name: string | null): string {
 }
 
 export function AdminHeader({ displayName, avatarUrl }: Props) {
+  const router = useRouter()
+  const [signingOut, setSigningOut] = useState(false)
+
+  async function handleSignOut() {
+    if (signingOut) return
+    setSigningOut(true)
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
+
   return (
     <header
       style={{
@@ -109,6 +126,26 @@ export function AdminHeader({ displayName, avatarUrl }: Props) {
             <span>{initials(displayName)}</span>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'rgba(255,255,255,0.5)',
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            cursor: signingOut ? 'wait' : 'pointer',
+            padding: '4px 2px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {signingOut ? '…' : 'Sign out'}
+        </button>
       </div>
     </header>
   )
