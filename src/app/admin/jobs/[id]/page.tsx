@@ -1,46 +1,154 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import {
+  confirmBooking,
+  declineBooking,
+  markBookingPaid,
+  markBookingCompleted,
+  generateInvoice,
+} from '../actions'
+import { StatusActionButtons } from './StatusActionButtons'
 
 export const dynamic = 'force-dynamic'
 
-type ClientProfileRow = {
-  first_name: string | null
-  last_name: string | null
-  full_name: string | null
-  client_profiles:
-    | { company_name: string | null }
-    | { company_name: string | null }[]
+function formatRange(start: string | null, end: string | null): string {
+  if (!start) return '—'
+  if (!end || end === start) return formatDate(start)
+  return `${formatDate(start)} – ${formatDate(end)}`
+}
+
+function formatCall(time: string | null): string | null {
+  if (!time) return null
+  return time.slice(0, 5)
+}
+
+function unwrap<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null
+  return Array.isArray(v) ? v[0] ?? null : v
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2)
+  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
+}
+
+type Job = {
+  id: string
+  title: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  call_time: string | null
+  day_rate_cents: number | null
+  num_talent: number | null
+  location: string | null
+  address_line: string | null
+  address_city: string | null
+  address_state: string | null
+  address_zip: string | null
+  client_id: string | null
+  description: string | null
+  client_notes: string | null
+  admin_notes: string | null
+  profiles:
+    | {
+        full_name: string | null
+        email: string | null
+        phone: string | null
+        client_profiles:
+          | {
+              company_name: string | null
+              logo_url: string | null
+              billing_email: string | null
+              website: string | null
+            }
+          | {
+              company_name: string | null
+              logo_url: string | null
+              billing_email: string | null
+              website: string | null
+            }[]
+          | null
+      }
+    | {
+        full_name: string | null
+        email: string | null
+        phone: string | null
+        client_profiles:
+          | {
+              company_name: string | null
+              logo_url: string | null
+              billing_email: string | null
+              website: string | null
+            }
+          | {
+              company_name: string | null
+              logo_url: string | null
+              billing_email: string | null
+              website: string | null
+            }[]
+          | null
+      }[]
     | null
 }
 
-function clientDisplay(raw: ClientProfileRow | ClientProfileRow[] | null): string {
-  const p = Array.isArray(raw) ? raw[0] : raw
-  if (!p) return 'Unknown client'
-  const cp = Array.isArray(p.client_profiles) ? p.client_profiles[0] : p.client_profiles
-  return (
-    cp?.company_name ||
-    [p.first_name, p.last_name].filter(Boolean).join(' ') ||
-    p.full_name ||
-    'Unknown client'
-  )
+type Booking = {
+  id: string
+  status: string
+  confirmed_rate_cents: number | null
+  paid: boolean | null
+  paid_at: string | null
+  created_at: string | null
+  profiles:
+    | {
+        id: string
+        full_name: string | null
+        avatar_url: string | null
+        email: string | null
+        phone: string | null
+        talent_profiles:
+          | {
+              department: string | null
+              primary_role: string | null
+              day_rate_cents: number | null
+            }
+          | {
+              department: string | null
+              primary_role: string | null
+              day_rate_cents: number | null
+            }[]
+          | null
+      }
+    | {
+        id: string
+        full_name: string | null
+        avatar_url: string | null
+        email: string | null
+        phone: string | null
+        talent_profiles:
+          | {
+              department: string | null
+              primary_role: string | null
+              day_rate_cents: number | null
+            }
+          | {
+              department: string | null
+              primary_role: string | null
+              day_rate_cents: number | null
+            }[]
+          | null
+      }[]
+    | null
 }
 
-type TalentRow = {
-  first_name: string | null
-  last_name: string | null
-  full_name: string | null
-}
-
-function talentDisplay(raw: TalentRow | TalentRow[] | null): string {
-  const p = Array.isArray(raw) ? raw[0] : raw
-  if (!p) return 'Someone'
-  return (
-    [p.first_name, p.last_name].filter(Boolean).join(' ') ||
-    p.full_name ||
-    'Someone'
-  )
+type Invoice = {
+  id: string
+  invoice_number: string | null
+  status: string
+  total_cents: number | null
+  due_date: string | null
+  sent_at: string | null
 }
 
 export default async function AdminJobDetailPage({
@@ -48,492 +156,632 @@ export default async function AdminJobDetailPage({
 }: {
   params: { id: string }
 }) {
-  const { supabase, user } = await requireAdmin()
+  const { supabase } = await requireAdmin()
 
   const [jobRes, bookingsRes, invoiceRes] = await Promise.all([
     supabase
       .from('jobs')
       .select(
         `*,
-         profiles!jobs_client_id_fkey (id, first_name, last_name, full_name,
-           client_profiles (company_name))`
+         profiles!jobs_client_id_fkey (full_name, email, phone,
+           client_profiles (company_name, logo_url, billing_email, website))`
       )
       .eq('id', params.id)
       .maybeSingle(),
     supabase
       .from('job_bookings')
       .select(
-        `id, status, confirmed_rate_cents, paid, notes,
-         profiles!job_bookings_talent_id_fkey (id, first_name, last_name, full_name,
-           avatar_url, talent_profiles (department, primary_role))`
+        `id, status, confirmed_rate_cents, paid, paid_at, created_at,
+         profiles!job_bookings_talent_id_fkey (id, full_name, avatar_url, email, phone,
+           talent_profiles (department, primary_role, day_rate_cents))`
       )
       .eq('job_id', params.id)
       .order('created_at', { ascending: true }),
     supabase
       .from('invoices')
-      .select('id, invoice_number, status, total_cents, due_date')
+      .select('id, invoice_number, status, total_cents, due_date, sent_at')
       .eq('job_id', params.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
   ])
 
-  const job = jobRes.data as unknown as
-    | (Record<string, unknown> & {
-        id: string
-        title: string
-        status: string
-        description: string | null
-        admin_notes: string | null
-        client_notes: string | null
-        location: string | null
-        address_line: string | null
-        address_city: string | null
-        address_state: string | null
-        start_date: string | null
-        end_date: string | null
-        day_rate_cents: number | null
-        num_talent: number | null
-        shoot_days: Array<{ date: string; call_time: string | null }> | null
-        client_id: string | null
-        profiles: Parameters<typeof clientDisplay>[0]
-      })
-    | null
-
+  const job = jobRes.data as unknown as Job | null
   if (!job) {
     return (
-      <div style={{ padding: 20 }}>
-        <p style={{ color: '#AABDE0' }}>Job not found.</p>
-        <Link href="/admin/jobs" style={{ color: '#F0A500' }}>
-          ← Back to jobs
+      <div className="px-5 pt-5">
+        <Link href="/admin/jobs" style={{ color: '#7A90AA', fontSize: 13 }}>
+          ← Jobs
         </Link>
+        <p
+          className="mt-3"
+          style={{ fontSize: 14, color: '#AABDE0', fontStyle: 'italic' }}
+        >
+          Job not found.
+        </p>
       </div>
     )
   }
 
-  const bookings = (bookingsRes.data ?? []) as unknown as Array<{
-    id: string
-    status: string
-    confirmed_rate_cents: number | null
-    paid: boolean | null
-    notes: string | null
-    profiles:
-      | {
-          id: string
-          first_name: string | null
-          last_name: string | null
-          full_name: string | null
-          avatar_url: string | null
-          talent_profiles:
-            | { department: string | null; primary_role: string | null }
-            | { department: string | null; primary_role: string | null }[]
-            | null
-        }
-      | {
-          id: string
-          first_name: string | null
-          last_name: string | null
-          full_name: string | null
-          avatar_url: string | null
-          talent_profiles:
-            | { department: string | null; primary_role: string | null }
-            | { department: string | null; primary_role: string | null }[]
-            | null
-        }[]
-      | null
-  }>
+  const bookings = (bookingsRes.data ?? []) as unknown as Booking[]
+  const invoice = invoiceRes.data as unknown as Invoice | null
 
-  const invoice = invoiceRes.data as unknown as {
-    id: string
-    invoice_number: string | null
-    status: string
-    total_cents: number | null
-    due_date: string | null
-  } | null
+  const clientRow = unwrap(job.profiles)
+  const clientProfile = clientRow ? unwrap(clientRow.client_profiles) : null
+  const clientName =
+    clientProfile?.company_name ||
+    clientRow?.full_name ||
+    'Unknown client'
 
-  const range =
-    job.start_date && job.end_date && job.end_date !== job.start_date
-      ? `${formatDate(job.start_date)} – ${formatDate(job.end_date)}`
-      : formatDate(job.start_date)
   const loc =
     [job.address_city, job.address_state].filter(Boolean).join(', ') ||
     job.location ||
     ''
+  const range = formatRange(job.start_date, job.end_date)
+  const fullAddressParts = [
+    job.address_line,
+    [job.address_city, job.address_state, job.address_zip]
+      .filter(Boolean)
+      .join(' '),
+  ].filter(Boolean) as string[]
+  const fullAddress = fullAddressParts.join(', ')
+  const mapsUrl = fullAddress
+    ? `https://maps.apple.com/?q=${encodeURIComponent(fullAddress)}`
+    : null
 
-  async function generateInvoice(formData: FormData) {
-    'use server'
-    const { supabase: sb, user: u } = await requireAdmin()
-    const jobId = formData.get('jobId') as string
-    if (!jobId) return
-
-    // Generate a simple sequential invoice number.
-    const { count } = await sb
-      .from('invoices')
-      .select('id', { count: 'exact', head: true })
-    const next = (count ?? 0) + 1
-    const invoiceNumber = `RS-INV-${String(next).padStart(4, '0')}`
-
-    // Due date: 14 days from today.
-    const due = new Date()
-    due.setDate(due.getDate() + 14)
-    const dueIso = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(
-      2,
-      '0'
-    )}-${String(due.getDate()).padStart(2, '0')}`
-
-    const { data: jobRow } = await sb
-      .from('jobs')
-      .select('client_id')
-      .eq('id', jobId)
-      .maybeSingle()
-
-    const { data: inv, error } = await sb
-      .from('invoices')
-      .insert({
-        job_id: jobId,
-        client_id: jobRow?.client_id ?? null,
-        invoice_number: invoiceNumber,
-        status: 'draft',
-        total_cents: 0,
-        due_date: dueIso,
-        created_by: u.id,
-      })
-      .select('id')
-      .single()
-
-    if (error || !inv) return
-    redirect(`/admin/finance/${inv.id}`)
-  }
+  const isTerminal = job.status === 'wrapped' || job.status === 'cancelled'
 
   return (
-    <div style={{ padding: '18px 18px', maxWidth: 640, margin: '0 auto' }}>
-      <Link
-        href="/admin/jobs"
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: '#AABDE0',
-          textDecoration: 'none',
-        }}
-      >
+    <div
+      className="mx-auto"
+      style={{ maxWidth: 720, padding: '20px 18px 28px' }}
+    >
+      <Link href="/admin/jobs" style={{ color: '#7A90AA', fontSize: 13 }}>
         ← Jobs
       </Link>
 
-      {/* Header */}
-      <div
-        style={{
-          marginTop: 10,
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 10,
-        }}
+      {/* ─── Job header card ─── */}
+      <section
+        className="mt-3 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 20 }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#fff' }}>{job.title}</h1>
-          <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 4 }}>
-            {clientDisplay(job.profiles)}
-            {range && range !== '—' && ` · ${range}`}
-            {loc && ` · ${loc}`}
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <h1
+            className="text-white"
+            style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}
+          >
+            {job.title}
+          </h1>
+          <StatusBadge status={job.status} />
         </div>
-        <StatusBadge status={job.status} />
-      </div>
-
-      {/* Talent booked */}
-      <section style={{ marginTop: 18 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 10,
-          }}
+        <p
+          className="mt-1"
+          style={{ fontSize: 14, color: '#AABDE0' }}
         >
-          <SectionLabel>Talent booked</SectionLabel>
-          <Link
-            href="/admin/talent"
+          {clientName}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5" style={{ fontSize: 12, color: '#C5D3E8' }}>
+          {range && range !== '—' && <InfoLine icon="📅" text={range} />}
+          {formatCall(job.call_time) && (
+            <InfoLine icon="🕐" text={`Call: ${formatCall(job.call_time)}`} />
+          )}
+          {loc && <InfoLine icon="📍" text={loc} />}
+          {job.day_rate_cents != null && (
+            <InfoLine icon="💰" text={`${centsToUsd(job.day_rate_cents)}/day`} />
+          )}
+          {job.num_talent != null && job.num_talent > 0 && (
+            <InfoLine
+              icon="👥"
+              text={`${job.num_talent} talent needed`}
+            />
+          )}
+        </div>
+
+        {!isTerminal && (
+          <StatusActionButtons jobId={job.id} currentStatus={job.status} />
+        )}
+      </section>
+
+      {/* ─── Talent section ─── */}
+      <section className="mt-4">
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <p
             style={{
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
-              color: '#F0A500',
-              textDecoration: 'none',
-              letterSpacing: '0.04em',
+              letterSpacing: '0.14em',
               textTransform: 'uppercase',
+              color: '#7A90AA',
             }}
           >
-            + Add
+            Talent booked
+          </p>
+          <Link
+            href={`/admin/jobs/${job.id}/add-talent`}
+            className="text-amber-400 hover:text-amber-300"
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textDecoration: 'none',
+            }}
+          >
+            + Add talent
           </Link>
         </div>
+
         {bookings.length === 0 ? (
-          <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
-            No talent assigned yet
-          </p>
+          <div
+            className="rounded-xl bg-[#1A2E4A] border border-white/5 text-center"
+            style={{ padding: '22px 18px' }}
+          >
+            <p style={{ fontSize: 13, color: '#7A90AA' }}>
+              No talent booked yet
+            </p>
+            <Link
+              href={`/admin/jobs/${job.id}/add-talent`}
+              className="inline-block mt-3 rounded-lg bg-[#1E3A6B] hover:bg-[#253D8A] text-white transition-colors"
+              style={{
+                padding: '8px 16px',
+                fontSize: 12,
+                fontWeight: 600,
+                textDecoration: 'none',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Add talent
+            </Link>
+          </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="flex flex-col gap-2.5">
             {bookings.map((b) => {
-              const talent = Array.isArray(b.profiles) ? b.profiles[0] : b.profiles
-              const tp = Array.isArray(talent?.talent_profiles)
-                ? talent?.talent_profiles[0]
-                : talent?.talent_profiles
-              const role = tp?.primary_role ?? tp?.department ?? null
+              const t = unwrap(b.profiles)
+              const tp = t ? unwrap(t.talent_profiles) : null
+              const name = t?.full_name || 'Unnamed'
+              const meta =
+                [tp?.department, tp?.primary_role].filter(Boolean).join(' · ') ||
+                'Talent'
               return (
-                <div
+                <article
                   key={b.id}
+                  className="rounded-xl"
                   style={{
-                    background: '#1A2E4A',
-                    border: '1px solid rgba(170,189,224,0.15)',
-                    borderRadius: 12,
-                    padding: '10px 12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
+                    background: '#253D5E',
+                    padding: 16,
+                    border: '1px solid rgba(255,255,255,0.05)',
                   }}
                 >
-                  <div
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 999,
-                      background: '#1E3A6B',
-                      color: '#fff',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {talent?.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={talent.avatar_url}
-                        alt=""
+                  <div className="flex items-start gap-3">
+                    <div
+                      className="flex items-center justify-center rounded-full overflow-hidden"
+                      style={{
+                        width: 48,
+                        height: 48,
+                        background: '#1E3A6B',
+                        color: '#fff',
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {t?.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={t.avatar_url}
+                          alt=""
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                          }}
+                        />
+                      ) : (
+                        initials(name)
+                      )}
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        className="text-white"
                         style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                        }}
-                      />
-                    ) : (
-                      talentDisplay(talent ?? null).slice(0, 1).toUpperCase()
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>
-                      {talentDisplay(talent ?? null)}
-                    </p>
-                    <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
-                      {role ?? 'Talent'}
-                      {b.confirmed_rate_cents != null &&
-                        ` · ${centsToUsd(b.confirmed_rate_cents)}/day`}
-                    </p>
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4,
-                      alignItems: 'flex-end',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <StatusBadge status={b.status} size="sm" />
-                    {b.paid && (
-                      <span
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          letterSpacing: '0.08em',
-                          textTransform: 'uppercase',
-                          color: '#4ADE80',
+                          fontSize: 14,
+                          fontWeight: 500,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        Paid
-                      </span>
-                    )}
+                        {name}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: '#AABDE0',
+                          marginTop: 2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {meta}
+                      </p>
+                      {t?.email && (
+                        <a
+                          href={`mailto:${t.email}`}
+                          style={{
+                            display: 'block',
+                            fontSize: 11,
+                            color: '#7A90AA',
+                            marginTop: 1,
+                            textDecoration: 'underline',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {t.email}
+                        </a>
+                      )}
+                    </div>
+
+                    <div
+                      className="flex flex-col items-end gap-1"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <StatusBadge status={b.status} size="sm" />
+                      {b.confirmed_rate_cents != null && (
+                        <span style={{ fontSize: 12, color: '#AABDE0' }}>
+                          {centsToUsd(b.confirmed_rate_cents)}/day
+                        </span>
+                      )}
+                      {b.paid && (
+                        <span
+                          className="rounded-full"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            background: 'rgba(16,185,129,0.2)',
+                            color: '#10B981',
+                            border: '1px solid rgba(16,185,129,0.3)',
+                          }}
+                        >
+                          Paid
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
+
+                  {!isTerminal && (
+                    <BookingActions booking={b} jobId={job.id} />
+                  )}
+                </article>
               )
             })}
           </div>
         )}
       </section>
 
-      {/* Job details */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Job details</SectionLabel>
-        <div
+      {/* ─── Notes ─── */}
+      {(job.client_notes || job.admin_notes) && (
+        <section
+          className="mt-4 grid gap-3"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}
+        >
+          <NotesCard label="Client notes" text={job.client_notes} />
+          <NotesCard label="Admin notes" text={job.admin_notes} />
+        </section>
+      )}
+
+      {/* ─── Address ─── */}
+      {(fullAddress || job.location) && (
+        <section className="mt-4">
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+              marginBottom: 8,
+            }}
+          >
+            Location
+          </p>
+          <div
+            className="rounded-xl bg-[#1A2E4A] border border-white/5"
+            style={{ padding: 16 }}
+          >
+            {job.location && (
+              <p
+                className="text-white"
+                style={{ fontSize: 14, fontWeight: 500 }}
+              >
+                {job.location}
+              </p>
+            )}
+            {fullAddress && (
+              <p
+                style={{
+                  fontSize: 13,
+                  color: '#C5D3E8',
+                  marginTop: job.location ? 4 : 0,
+                  lineHeight: 1.5,
+                }}
+              >
+                {fullAddress}
+              </p>
+            )}
+            {mapsUrl && (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-2 text-amber-400 hover:text-amber-300"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  textDecoration: 'none',
+                }}
+              >
+                Open in Maps ↗
+              </a>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ─── Invoice ─── */}
+      <section className="mt-4">
+        <p
           style={{
-            background: '#1A2E4A',
-            border: '1px solid rgba(170,189,224,0.15)',
-            borderRadius: 12,
-            padding: 14,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 8,
           }}
         >
-          <DetailRow label="Day rate" value={centsToUsd(job.day_rate_cents)} />
-          <DetailRow
-            label="Num talent"
-            value={
-              job.num_talent != null && job.num_talent > 0 ? String(job.num_talent) : '—'
-            }
-          />
-          <DetailRow
-            label="Shoot days"
-            value={
-              Array.isArray(job.shoot_days) && job.shoot_days.length > 0
-                ? job.shoot_days.map((d) => d.date).join(', ')
-                : '—'
-            }
-          />
-          {job.description && (
-            <DetailRow label="Description" value={job.description} multiline />
-          )}
-          {job.client_notes && (
-            <DetailRow label="Client notes" value={job.client_notes} multiline />
-          )}
-          {job.admin_notes && (
-            <DetailRow label="Admin notes" value={job.admin_notes} multiline />
-          )}
-        </div>
-      </section>
-
-      {/* Invoice */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Invoice</SectionLabel>
+          Invoice
+        </p>
         {invoice ? (
           <Link
             href={`/admin/finance/${invoice.id}`}
-            style={{
-              background: '#1A2E4A',
-              border: '1px solid rgba(170,189,224,0.15)',
-              borderRadius: 12,
-              padding: '12px 14px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-              textDecoration: 'none',
-              color: '#fff',
-            }}
+            className="block rounded-xl bg-[#1A2E4A] border border-white/5 hover:border-white/10"
+            style={{ padding: 16, textDecoration: 'none' }}
           >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 13, fontWeight: 700 }}>{invoice.invoice_number}</p>
-              <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
-                {centsToUsd(invoice.total_cents)}
-                {invoice.due_date && ` · due ${formatDate(invoice.due_date)}`}
-              </p>
+            <div className="flex items-center justify-between gap-3">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p className="text-white" style={{ fontSize: 14, fontWeight: 700 }}>
+                  {invoice.invoice_number}
+                </p>
+                <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 2 }}>
+                  {centsToUsd(invoice.total_cents)}
+                  {invoice.due_date && ` · due ${formatDate(invoice.due_date)}`}
+                </p>
+              </div>
+              <StatusBadge status={invoice.status} size="sm" />
             </div>
-            <StatusBadge status={invoice.status} size="sm" />
+            <p
+              className="mt-2 text-amber-400"
+              style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }}
+            >
+              View invoice →
+            </p>
           </Link>
         ) : (
           <form action={generateInvoice}>
             <input type="hidden" name="jobId" value={job.id} />
             <div
-              style={{
-                background: '#1A2E4A',
-                border: '1px solid rgba(170,189,224,0.15)',
-                borderRadius: 12,
-                padding: 14,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 10,
-              }}
+              className="rounded-xl bg-[#1A2E4A] border border-white/5"
+              style={{ padding: 16 }}
             >
-              <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
-              <button
-                type="submit"
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 10,
-                  background: '#F0A500',
-                  color: '#0F1B2E',
-                  border: 'none',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                }}
-              >
-                Generate
-              </button>
+              <div className="flex items-center justify-between gap-3">
+                <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[#F0A500] hover:bg-[#F5B733] text-[#0F1B2E] transition-colors"
+                  style={{
+                    padding: '8px 14px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Generate invoice
+                </button>
+              </div>
             </div>
           </form>
         )}
       </section>
+
+      {/* ─── Edit link ─── */}
+      <div className="mt-6 text-center">
+        <Link
+          href={`/admin/jobs/${job.id}/edit`}
+          style={{
+            fontSize: 12,
+            color: '#7A90AA',
+            textDecoration: 'underline',
+          }}
+        >
+          Edit job details →
+        </Link>
+      </div>
     </div>
   )
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function InfoLine({ icon, text }: { icon: string; text: string }) {
   return (
-    <p
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: '#7A90AA',
-        marginBottom: 10,
-      }}
-    >
-      {children}
-    </p>
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden style={{ fontSize: 12 }}>
+        {icon}
+      </span>
+      <span style={{ fontSize: 12, color: '#C5D3E8' }}>{text}</span>
+    </span>
   )
 }
 
-function DetailRow({
+function NotesCard({
   label,
-  value,
-  multiline,
+  text,
 }: {
   label: string
-  value: string
-  multiline?: boolean
+  text: string | null
 }) {
   return (
     <div
-      style={{
-        display: 'flex',
-        flexDirection: multiline ? 'column' : 'row',
-        gap: multiline ? 4 : 10,
-        alignItems: multiline ? 'flex-start' : 'flex-start',
-        justifyContent: 'space-between',
-      }}
+      className="rounded-xl bg-[#1A2E4A] border border-white/5"
+      style={{ padding: 16 }}
     >
-      <span
+      <p
         style={{
           fontSize: 10,
           fontWeight: 700,
-          letterSpacing: '0.08em',
+          letterSpacing: '0.14em',
           textTransform: 'uppercase',
-          color: '#AABDE0',
-          flexShrink: 0,
+          color: '#7A90AA',
+          marginBottom: 8,
         }}
       >
         {label}
-      </span>
-      <span
-        style={{
-          fontSize: 13,
-          color: '#fff',
-          textAlign: multiline ? 'left' : 'right',
-          whiteSpace: multiline ? 'pre-wrap' : 'normal',
-          wordBreak: 'break-word',
-        }}
-      >
-        {value}
-      </span>
+      </p>
+      {text ? (
+        <p
+          style={{
+            fontSize: 14,
+            color: '#C5D3E8',
+            lineHeight: 1.55,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {text}
+        </p>
+      ) : (
+        <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
+          None
+        </p>
+      )}
     </div>
   )
 }
 
+function BookingActions({
+  booking,
+  jobId,
+}: {
+  booking: Booking
+  jobId: string
+}) {
+  const status = booking.status
+  if (status === 'requested') {
+    return (
+      <div className="mt-3 flex gap-2">
+        <form action={declineBooking} style={{ flex: 1 }}>
+          <input type="hidden" name="bookingId" value={booking.id} />
+          <input type="hidden" name="jobId" value={jobId} />
+          <button
+            type="submit"
+            className="w-full rounded-lg transition-colors"
+            style={{
+              padding: '9px 0',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              background: 'rgba(239,68,68,0.15)',
+              color: '#F87171',
+              border: '1px solid rgba(239,68,68,0.35)',
+              cursor: 'pointer',
+            }}
+          >
+            ✗ Decline
+          </button>
+        </form>
+        <form action={confirmBooking} style={{ flex: 2 }}>
+          <input type="hidden" name="bookingId" value={booking.id} />
+          <input type="hidden" name="jobId" value={jobId} />
+          <button
+            type="submit"
+            className="w-full rounded-lg bg-[#F0A500] hover:bg-[#F5B733] text-[#0F1B2E] transition-colors"
+            style={{
+              padding: '9px 0',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            ✓ Confirm booking
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  if (status === 'confirmed') {
+    return (
+      <div className="mt-3 flex gap-2 flex-wrap">
+        {!booking.paid && (
+          <form action={markBookingPaid} style={{ flex: 1, minWidth: 140 }}>
+            <input type="hidden" name="bookingId" value={booking.id} />
+            <input type="hidden" name="jobId" value={jobId} />
+            <button
+              type="submit"
+              className="w-full rounded-lg transition-colors"
+              style={{
+                padding: '9px 0',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                background: 'rgba(16,185,129,0.15)',
+                color: '#10B981',
+                border: '1px solid rgba(16,185,129,0.35)',
+                cursor: 'pointer',
+              }}
+            >
+              Mark paid
+            </button>
+          </form>
+        )}
+        <form action={markBookingCompleted} style={{ flex: 1, minWidth: 140 }}>
+          <input type="hidden" name="bookingId" value={booking.id} />
+          <input type="hidden" name="jobId" value={jobId} />
+          <button
+            type="submit"
+            className="w-full rounded-lg transition-colors"
+            style={{
+              padding: '9px 0',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              background: 'rgba(168,85,247,0.15)',
+              color: '#C084FC',
+              border: '1px solid rgba(168,85,247,0.35)',
+              cursor: 'pointer',
+            }}
+          >
+            Mark completed
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  return null
+}
