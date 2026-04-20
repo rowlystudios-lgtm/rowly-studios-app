@@ -34,6 +34,9 @@ export function TalentOverview() {
 
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
+  // Talent's own day rate — pulled once so booking cards can show
+  // contextual "Your full day rate is $X" copy on short shoots.
+  const [ownDayRateCents, setOwnDayRateCents] = useState<number | null>(null)
   const [cardError, setCardError] = useState<Record<string, string>>({})
   const [sheetBooking, setSheetBooking] = useState<Booking | null>(null)
   const [sheetBusy, setSheetBusy] = useState<SheetBusy>(null)
@@ -52,6 +55,13 @@ export function TalentOverview() {
     let cancelled = false
 
     async function load() {
+      // Fire both queries in parallel — the own-rate lookup is one row
+      // and doesn't depend on bookings.
+      const rateRes = supabase
+        .from('talent_profiles')
+        .select('day_rate_cents')
+        .eq('id', uid)
+        .maybeSingle()
       const { data, error } = await supabase
         .from('job_bookings')
         .select(
@@ -87,6 +97,12 @@ export function TalentOverview() {
         .map(normalizeBooking)
         .filter((b): b is Booking => b !== null)
       setBookings(normalized)
+      try {
+        const { data: rateRow } = await rateRes
+        if (!cancelled) setOwnDayRateCents(rateRow?.day_rate_cents ?? null)
+      } catch {
+        // non-fatal — short-shoot cards just won't show the comparison note
+      }
       setLoading(false)
     }
 
@@ -277,6 +293,7 @@ export function TalentOverview() {
                   booking={b}
                   variant="confirmed"
                   errorMsg={cardError[b.id]}
+                  ownDayRateCents={ownDayRateCents}
                 />
               ))
             )}
@@ -293,6 +310,7 @@ export function TalentOverview() {
                   booking={b}
                   variant="offer"
                   errorMsg={cardError[b.id]}
+                  ownDayRateCents={ownDayRateCents}
                   onViewDetails={() => {
                     setSheetError('')
                     setSheetBooking(b)
@@ -363,6 +381,8 @@ type JobCardProps = {
   booking: Booking
   variant: 'confirmed' | 'offer'
   errorMsg?: string
+  /** Talent's own day rate, for contextual short-shoot copy. */
+  ownDayRateCents?: number | null
   onViewDetails?: () => void
   onConfirm?: () => void
   onDecline?: () => void
@@ -373,6 +393,7 @@ function JobCard({
   booking,
   variant,
   errorMsg,
+  ownDayRateCents,
   onViewDetails,
   onConfirm,
   onDecline,
@@ -408,11 +429,8 @@ function JobCard({
     : variant === 'confirmed'
     ? 'Confirmed rate'
     : 'Offered rate'
-  // Talent's own day rate, for the contextual "instead of your $X/day" note.
-  const talentDayRateCents =
-    (booking as unknown as {
-      talent_day_rate_cents?: number | null
-    }).talent_day_rate_cents ?? null
+  // Talent's own day rate, for the contextual "Your full day rate is $X" note.
+  const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
   const [counterOpen, setCounterOpen] = useState(false)
   const [counterDollars, setCounterDollars] = useState(
@@ -484,7 +502,7 @@ function JobCard({
                 border: '1px solid rgba(240,165,0,0.4)',
               }}
             >
-              ⚡ Short shoot — under 4 hours
+              Short shoot — under 4 hours
             </span>
           )}
           <h3
@@ -603,20 +621,35 @@ function JobCard({
           </p>
           <p style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginTop: 2 }}>
             {rateCents ? (
-              <>
-                {formatMoney(rateCents)}
-                {!isShortShoot && (
+              isShortShoot ? (
+                <>
+                  <span
+                    style={{
+                      color: '#F0A500',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.08em',
+                      marginRight: 4,
+                    }}
+                  >
+                    FLAT FEE:
+                  </span>
+                  {formatMoney(rateCents)}
+                </>
+              ) : (
+                <>
+                  {formatMoney(rateCents)}
                   <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>
                     {' '}
-                    / day
+                    per day
                   </span>
-                )}
-              </>
+                </>
+              )
             ) : (
               <span style={{ color: '#F0A500', fontWeight: 600 }}>Rate TBD</span>
             )}
           </p>
-          {isShortShoot && (
+          {isShortShoot && talentDayRateCents && (
             <p
               style={{
                 fontSize: 11,
@@ -625,11 +658,22 @@ function JobCard({
                 lineHeight: 1.45,
               }}
             >
-              Sub-{durationHrs ?? 4}hr engagement — flat fee applies
-              {talentDayRateCents
-                ? `, not your standard ${formatMoney(talentDayRateCents)}/day`
-                : ''}
-              .
+              Your full day rate is {formatMoney(talentDayRateCents)}. Short
+              shoots are offered as a flat fee
+              {durationHrs ? ` (this one is ${durationHrs} hrs)` : ''}.
+            </p>
+          )}
+          {isShortShoot && !talentDayRateCents && (
+            <p
+              style={{
+                fontSize: 11,
+                color: TEXT_MUTED,
+                marginTop: 4,
+                lineHeight: 1.45,
+              }}
+            >
+              Short shoots are offered as a flat fee
+              {durationHrs ? ` (this one is ${durationHrs} hrs)` : ''}.
             </p>
           )}
         </div>

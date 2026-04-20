@@ -19,15 +19,18 @@ const CARD_BORDER = 'rgba(170,189,224,0.15)'
 const CHIP_INACTIVE_BG = 'rgba(255,255,255,0.06)'
 const CHIP_INACTIVE_BORDER = 'rgba(170,189,224,0.2)'
 
-type ShootDayDuration = 'full' | 'half' | 'custom'
+type DurationType = 'full_day' | 'custom'
 
 type ShootDayInput = {
   date: string
   call_time: string
-  // 'full' = billed as a day rate, 'half' = 4h, 'custom' = number of hours
-  duration: ShootDayDuration
-  // Only meaningful when duration === 'custom'
-  custom_hours: string
+  end_time: string
+  duration_type: DurationType
+  // Only populated when duration_type === 'custom' and the user has set
+  // or auto-derived a value. Stored as a decimal string for the input.
+  duration_hours: string
+  // Per-shoot-day working budget (dollar string to keep input controlled).
+  budget: string
 }
 
 type FormState = {
@@ -40,14 +43,28 @@ type FormState = {
   shoot_days: ShootDayInput[]
   crew_needed: string[]
   client_notes: string
-  // Dollar amount as string so the input stays controlled.
-  budget: string
 }
 
-// $345 = $300 talent floor × 1.15 Rowly Studios production fee.
-const CLIENT_MIN_BUDGET_DOLLARS = 345
-// Short-shoot flat-fee minimum (admin can override during add-talent).
-const SHORT_SHOOT_MIN_DOLLARS = 150
+// Platform-wide minimum working budget per person. Kept as a single
+// constant so any future change touches one line.
+const MIN_BUDGET_DOLLARS = 300
+
+// Pre-computed 00:00 → 23:30 half-hour slots for both call/end selects.
+const TIME_OPTIONS: { value: string; label: string }[] = (() => {
+  const opts: { value: string; label: string }[] = []
+  for (let h = 0; h < 24; h++) {
+    for (const m of [0, 30]) {
+      const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+      const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+      const suffix = h < 12 ? 'AM' : 'PM'
+      opts.push({
+        value: v,
+        label: `${String(hour12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${suffix}`,
+      })
+    }
+  }
+  return opts
+})()
 
 const INITIAL: FormState = {
   title: '',
@@ -57,22 +74,74 @@ const INITIAL: FormState = {
   address_state: 'CA',
   address_zip: '',
   shoot_days: [
-    { date: '', call_time: '08:00', duration: 'full', custom_hours: '' },
+    {
+      date: '',
+      call_time: '08:00',
+      end_time: '',
+      duration_type: 'full_day',
+      duration_hours: '',
+      budget: '',
+    },
   ],
   crew_needed: [],
   client_notes: '',
-  budget: '',
 }
 
 /**
- * Resolve a day-level `ShootDayInput` to its duration in hours (or null for
- * a full-day booking). Keeps the "short shoot" logic in one place.
+ * Minutes-since-midnight for an HH:MM string. Returns null for empty /
+ * malformed input so the caller can decide how to handle it.
+ */
+function minutesOfDay(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim())
+  if (!m) return null
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return null
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null
+  return h * 60 + mm
+}
+
+/** HH:MM formatter from minutes-since-midnight. */
+function formatHHMM(totalMinutes: number): string {
+  const wrapped = ((totalMinutes % 1440) + 1440) % 1440
+  const h = Math.floor(wrapped / 60)
+  const m = wrapped % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/**
+ * Hours between call_time and end_time, handling overnight shoots by
+ * wrapping past midnight. Returns null if either time is missing.
+ */
+function hoursBetween(callTime: string, endTime: string): number | null {
+  const a = minutesOfDay(callTime)
+  const b = minutesOfDay(endTime)
+  if (a == null || b == null) return null
+  let diff = b - a
+  if (diff <= 0) diff += 24 * 60
+  return Math.round((diff / 60) * 100) / 100
+}
+
+/**
+ * Resolve a day's effective duration in hours (or null if full day).
+ * Priority: explicit custom_hours > computed from end_time − call_time.
  */
 function shootDayHours(day: ShootDayInput): number | null {
-  if (day.duration === 'full') return null
-  if (day.duration === 'half') return 4
-  const n = parseFloat(day.custom_hours)
-  return Number.isFinite(n) && n > 0 ? n : null
+  if (day.duration_type === 'full_day') return null
+  const typed = parseFloat(day.duration_hours)
+  if (Number.isFinite(typed) && typed > 0) return typed
+  const computed = hoursBetween(day.call_time, day.end_time)
+  return computed ?? null
+}
+
+/**
+ * Parse a per-day budget dollar string into cents. Returns null for an
+ * empty / zero input so the submit guard can catch it.
+ */
+function budgetCents(day: ShootDayInput): number | null {
+  const n = parseFloat(day.budget)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.round(n * 100)
 }
 
 function formatAddress(form: FormState): string {
@@ -142,18 +211,24 @@ function PostJobInner() {
   }
 
   function addShootDay() {
-    setForm((f) => ({
-      ...f,
-      shoot_days: [
-        ...f.shoot_days,
-        {
-          date: '',
-          call_time: f.shoot_days[f.shoot_days.length - 1]?.call_time ?? '08:00',
-          duration: 'full',
-          custom_hours: '',
-        },
-      ],
-    }))
+    setForm((f) => {
+      const prev = f.shoot_days[f.shoot_days.length - 1]
+      return {
+        ...f,
+        shoot_days: [
+          ...f.shoot_days,
+          {
+            date: '',
+            call_time: prev?.call_time ?? '08:00',
+            end_time: prev?.end_time ?? '',
+            duration_type: prev?.duration_type ?? 'full_day',
+            duration_hours: '',
+            // Prefill with the previous day's budget so adding a day is cheap.
+            budget: prev?.budget ?? '',
+          },
+        ],
+      }
+    })
   }
 
   function removeShootDay(index: number) {
@@ -202,37 +277,19 @@ function PostJobInner() {
       return
     }
 
-    // Budget validation — a job can't be posted without at minimum a
-    // full-day floor budget (full-day) or a flat fee (short shoot).
-    const budgetNum = parseFloat(form.budget)
-    if (!Number.isFinite(budgetNum) || budgetNum <= 0) {
-      setError('Please enter your budget for this job.')
-      return
-    }
-    const budgetCents = Math.round(budgetNum * 100)
-
-    // Any day under 4 hours flips the whole job into short-shoot (flat fee) mode.
-    const dayHours = validDays.map((d) => shootDayHours(d))
-    const shortestHours = dayHours.reduce<number | null>((min, h) => {
-      if (h == null) return min
-      if (min == null) return h
-      return h < min ? h : min
-    }, null)
-    const isShortShoot = shortestHours != null && shortestHours < 4
-    const anyHalfDay = validDays.some((d) => d.duration === 'half')
-
-    if (isShortShoot) {
-      if (budgetCents < SHORT_SHOOT_MIN_DOLLARS * 100) {
-        setError(
-          `Short-shoot flat fees start at $${SHORT_SHOOT_MIN_DOLLARS}. Adjust your budget or extend the shoot.`
-        )
+    // Every shoot day must have a budget above the platform minimum.
+    const perDayBudgets: number[] = []
+    for (const d of validDays) {
+      const cents = budgetCents(d)
+      if (cents == null) {
+        setError('Enter a working budget for every shoot day.')
         return
       }
-    } else if (budgetCents < CLIENT_MIN_BUDGET_DOLLARS * 100) {
-      setError(
-        `Minimum day rate is $${CLIENT_MIN_BUDGET_DOLLARS}/day. This covers the $300 talent rate floor plus Rowly Studios' 15% production fee.`
-      )
-      return
+      if (cents < MIN_BUDGET_DOLLARS * 100) {
+        setError(`Minimum budget is $${MIN_BUDGET_DOLLARS} per person.`)
+        return
+      }
+      perDayBudgets.push(cents)
     }
 
     setSaving(true)
@@ -240,13 +297,23 @@ function PostJobInner() {
     const sortedDays = [...validDays].sort((a, b) => a.date.localeCompare(b.date))
     const addressString = formatAddress(form)
 
-    // Compute talent-facing day rate from the client budget: client sees the
-    // gross including the 15% RS fee, talent rate = budget ÷ 1.15. For short
-    // shoots, day_rate_cents is null — the flat fee lives on
-    // client_budget_cents and the admin will set offered_rate on add-talent.
-    const talentDayRateCents = isShortShoot
-      ? null
-      : Math.round(budgetCents / 1.15)
+    // Compute the job-level summary budget. If every day shares one amount
+    // it's that exact amount; otherwise the average (rounded to cents).
+    const allSame = perDayBudgets.every((c) => c === perDayBudgets[0])
+    const avgBudget = allSame
+      ? perDayBudgets[0]
+      : Math.round(
+          perDayBudgets.reduce((s, c) => s + c, 0) / perDayBudgets.length
+        )
+
+    // Any day under 4 hours flips the whole job into short-shoot mode.
+    const dayHoursList = validDays.map((d) => shootDayHours(d))
+    const shortestHours = dayHoursList.reduce<number | null>((min, h) => {
+      if (h == null) return min
+      if (min == null) return h
+      return h < min ? h : min
+    }, null)
+    const isShortShoot = shortestHours != null && shortestHours < 4
 
     const { error: insertError } = await supabase.from('jobs').insert({
       client_id: user.id,
@@ -257,20 +324,27 @@ function PostJobInner() {
       address_state: form.address_state.trim().toUpperCase() || null,
       address_zip: form.address_zip.trim() || null,
       location: addressString || null,
-      shoot_days: sortedDays.map((d) => ({
-        date: d.date,
-        call_time: d.call_time || null,
-        duration_hours: shootDayHours(d),
-      })),
+      shoot_days: sortedDays.map((d) => {
+        const hours = shootDayHours(d)
+        return {
+          date: d.date,
+          call_time: d.call_time || null,
+          end_time: d.end_time || null,
+          duration_type: d.duration_type,
+          duration_hours: hours,
+          budget_cents: budgetCents(d) ?? 0,
+        }
+      }),
       start_date: sortedDays[0].date,
       end_date: sortedDays[sortedDays.length - 1].date,
       call_time: sortedDays[0].call_time || null,
       crew_needed: form.crew_needed,
       client_notes: form.client_notes.trim() || null,
-      client_budget_cents: budgetCents,
-      day_rate_cents: talentDayRateCents,
+      // The working budget IS what talent will be offered — no fee rollup.
+      client_budget_cents: avgBudget,
+      day_rate_cents: isShortShoot ? null : avgBudget,
       shoot_duration_hours: shortestHours,
-      is_half_day: anyHalfDay && !isShortShoot,
+      is_half_day: false,
       status: 'submitted',
     })
 
@@ -345,17 +419,14 @@ function PostJobInner() {
     )
   }
 
-  // Derive whether we're in short-shoot mode to toggle the budget field copy.
-  const anyShortShoot = form.shoot_days.some((d) => {
-    const h = shootDayHours(d)
-    return h != null && h < 4
-  })
-  const budgetNumeric = parseFloat(form.budget)
+  // Gate submission: title + at least one fully-specified day (date +
+  // budget at or above the platform minimum).
   const canSubmit =
     form.title.trim().length > 0 &&
-    form.shoot_days.some((d) => d.date) &&
-    Number.isFinite(budgetNumeric) &&
-    budgetNumeric > 0
+    form.shoot_days.some((d) => {
+      const c = budgetCents(d)
+      return Boolean(d.date) && c != null && c >= MIN_BUDGET_DOLLARS * 100
+    })
 
   return (
     <Shell>
@@ -466,7 +537,7 @@ function PostJobInner() {
 
         <Section title="Shoot day(s)">
           <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: -2, lineHeight: 1.5 }}>
-            Add a row for each day of the shoot — everything is billed at a day rate.
+            Add a row for each day of the shoot — set the budget you&rsquo;re offering per person.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -523,231 +594,11 @@ function PostJobInner() {
                   )}
                 </div>
 
-                <div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: 0,
-                      marginBottom: 5,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: TEXT_MUTED,
-                      }}
-                    >
-                      Shoot date *
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: TEXT_MUTED,
-                        paddingLeft: 12,
-                      }}
-                    >
-                      Call time
-                    </span>
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-                      overflow: 'hidden',
-                      borderRadius: 10,
-                      border: '1px solid rgba(255,255,255,0.2)',
-                    }}
-                  >
-                    <input
-                      type="date"
-                      required
-                      value={day.date}
-                      onChange={(e) => updateShootDay(i, { date: e.target.value })}
-                      style={{
-                        width: '100%',
-                        minWidth: 0,
-                        boxSizing: 'border-box',
-                        fontSize: 13,
-                        padding: '10px 12px',
-                        background: 'rgba(255,255,255,0.92)',
-                        border: 'none',
-                        borderRight: '1px solid rgba(170,189,224,0.3)',
-                        borderRadius: 0,
-                        color: '#1A3C6B',
-                        fontWeight: 500,
-                        outline: 'none',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                      }}
-                    />
-                    <select
-                      value={day.call_time}
-                      onChange={(e) => updateShootDay(i, { call_time: e.target.value })}
-                      style={{
-                        width: '100%',
-                        minWidth: 0,
-                        boxSizing: 'border-box',
-                        fontSize: 13,
-                        padding: '10px 12px',
-                        background: 'rgba(255,255,255,0.92)',
-                        border: 'none',
-                        borderRadius: 0,
-                        color: '#1A3C6B',
-                        fontWeight: 500,
-                        outline: 'none',
-                        appearance: 'none',
-                        WebkitAppearance: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <option value="00:00">00:00 AM</option>
-                      <option value="00:30">00:30 AM</option>
-                      <option value="01:00">01:00 AM</option>
-                      <option value="01:30">01:30 AM</option>
-                      <option value="02:00">02:00 AM</option>
-                      <option value="02:30">02:30 AM</option>
-                      <option value="03:00">03:00 AM</option>
-                      <option value="03:30">03:30 AM</option>
-                      <option value="04:00">04:00 AM</option>
-                      <option value="04:30">04:30 AM</option>
-                      <option value="05:00">05:00 AM</option>
-                      <option value="05:30">05:30 AM</option>
-                      <option value="06:00">06:00 AM</option>
-                      <option value="06:30">06:30 AM</option>
-                      <option value="07:00">07:00 AM</option>
-                      <option value="07:30">07:30 AM</option>
-                      <option value="08:00">08:00 AM</option>
-                      <option value="08:30">08:30 AM</option>
-                      <option value="09:00">09:00 AM</option>
-                      <option value="09:30">09:30 AM</option>
-                      <option value="10:00">10:00 AM</option>
-                      <option value="10:30">10:30 AM</option>
-                      <option value="11:00">11:00 AM</option>
-                      <option value="11:30">11:30 AM</option>
-                      <option value="12:00">12:00 PM</option>
-                      <option value="12:30">12:30 PM</option>
-                      <option value="13:00">13:00 PM</option>
-                      <option value="13:30">13:30 PM</option>
-                      <option value="14:00">14:00 PM</option>
-                      <option value="14:30">14:30 PM</option>
-                      <option value="15:00">15:00 PM</option>
-                      <option value="15:30">15:30 PM</option>
-                      <option value="16:00">16:00 PM</option>
-                      <option value="16:30">16:30 PM</option>
-                      <option value="17:00">17:00 PM</option>
-                      <option value="17:30">17:30 PM</option>
-                      <option value="18:00">18:00 PM</option>
-                      <option value="18:30">18:30 PM</option>
-                      <option value="19:00">19:00 PM</option>
-                      <option value="19:30">19:30 PM</option>
-                      <option value="20:00">20:00 PM</option>
-                      <option value="20:30">20:30 PM</option>
-                      <option value="21:00">21:00 PM</option>
-                      <option value="21:30">21:30 PM</option>
-                      <option value="22:00">22:00 PM</option>
-                      <option value="22:30">22:30 PM</option>
-                      <option value="23:00">23:00 PM</option>
-                      <option value="23:30">23:30 PM</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Duration — Full / Half / Custom hours */}
-                <div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: TEXT_MUTED,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Duration
-                  </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr 1fr',
-                      gap: 6,
-                    }}
-                  >
-                    {(
-                      [
-                        { key: 'full', label: 'Full day' },
-                        { key: 'half', label: 'Half day' },
-                        { key: 'custom', label: 'Custom hrs' },
-                      ] as { key: ShootDayDuration; label: string }[]
-                    ).map((opt) => {
-                      const active = day.duration === opt.key
-                      return (
-                        <button
-                          key={opt.key}
-                          type="button"
-                          onClick={() =>
-                            updateShootDay(i, {
-                              duration: opt.key,
-                              custom_hours:
-                                opt.key === 'custom' ? day.custom_hours : '',
-                            })
-                          }
-                          style={{
-                            padding: '8px 6px',
-                            borderRadius: 8,
-                            border: `1px solid ${
-                              active ? '#ffffff' : CHIP_INACTIVE_BORDER
-                            }`,
-                            background: active ? '#ffffff' : CHIP_INACTIVE_BG,
-                            color: active ? '#1A3C6B' : TEXT_MUTED,
-                            fontSize: 12,
-                            fontWeight: active ? 600 : 500,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {day.duration === 'custom' && (
-                    <div style={{ marginTop: 8 }}>
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={23.5}
-                        step={0.5}
-                        value={day.custom_hours}
-                        onChange={(e) =>
-                          updateShootDay(i, { custom_hours: e.target.value })
-                        }
-                        placeholder="Hours, e.g. 3"
-                        className="rs-input"
-                      />
-                    </div>
-                  )}
-                  {(() => {
-                    const h = shootDayHours(day)
-                    if (h != null && h < 4) {
-                      return (
-                        <p
-                          style={{
-                            marginTop: 6,
-                            fontSize: 11,
-                            color: '#F0A500',
-                            fontWeight: 600,
-                          }}
-                        >
-                          ⚡ Short shoot — billed as a flat fee, not a day
-                          rate.
-                        </p>
-                      )
-                    }
-                    return null
-                  })()}
-                </div>
+                <ShootDayFields
+                  day={day}
+                  index={i}
+                  onChange={(patch) => updateShootDay(i, patch)}
+                />
               </div>
             ))}
           </div>
@@ -809,61 +660,6 @@ function PostJobInner() {
               )
             })}
           </div>
-        </Section>
-
-        <Section title={anyShortShoot ? 'Flat fee budget' : 'Day rate budget'}>
-          <p
-            style={{
-              fontSize: 12,
-              color: TEXT_MUTED,
-              marginTop: -2,
-              lineHeight: 1.5,
-            }}
-          >
-            {anyShortShoot
-              ? `Total budget for this short shoot. Talent will see this as a flat fee offer. Minimum $${SHORT_SHOOT_MIN_DOLLARS}.`
-              : `Minimum day rate is $${CLIENT_MIN_BUDGET_DOLLARS}/day — this covers the $300 talent floor plus Rowly Studios' 15% production fee.`}
-          </p>
-          <Field
-            label={anyShortShoot ? 'Total flat fee' : 'Day rate'}
-            required
-          >
-            <div style={{ position: 'relative' }}>
-              <span
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: '#888',
-                  pointerEvents: 'none',
-                  fontSize: 14,
-                }}
-              >
-                $
-              </span>
-              <input
-                type="number"
-                inputMode="decimal"
-                required
-                min={
-                  anyShortShoot
-                    ? SHORT_SHOOT_MIN_DOLLARS
-                    : CLIENT_MIN_BUDGET_DOLLARS
-                }
-                step={5}
-                value={form.budget}
-                onChange={(e) => update('budget', e.target.value)}
-                placeholder={
-                  anyShortShoot
-                    ? `Min. $${SHORT_SHOOT_MIN_DOLLARS}`
-                    : `Min. $${CLIENT_MIN_BUDGET_DOLLARS}/day (incl. Rowly Studios fee)`
-                }
-                className="rs-input"
-                style={{ paddingLeft: 24 }}
-              />
-            </div>
-          </Field>
         </Section>
 
         <Section title="Notes">
@@ -1018,5 +814,380 @@ function Field({
       </span>
       {children}
     </label>
+  )
+}
+
+/**
+ * Per-shoot-day fields: date + call + end time, duration toggle, budget.
+ * Broken out so the per-day rendering logic stays self-contained.
+ */
+function ShootDayFields({
+  day,
+  index,
+  onChange,
+}: {
+  day: ShootDayInput
+  index: number
+  onChange: (patch: Partial<ShootDayInput>) => void
+}) {
+  const computedHours =
+    day.duration_type === 'custom'
+      ? shootDayHours(day)
+      : hoursBetween(day.call_time, day.end_time)
+  const isShort = computedHours != null && computedHours < 4
+
+  const budgetNum = parseFloat(day.budget)
+  const budgetBelowMin =
+    Number.isFinite(budgetNum) && budgetNum > 0 && budgetNum < MIN_BUDGET_DOLLARS
+
+  // Keep end_time sensible when call_time changes. If end was blank we
+  // shift to call + 8h (a reasonable default); otherwise preserve the
+  // existing span in minutes.
+  function setCallTime(nextCall: string) {
+    const prevCall = minutesOfDay(day.call_time)
+    const prevEnd = minutesOfDay(day.end_time)
+    const newCall = minutesOfDay(nextCall)
+    let nextEnd: string = day.end_time
+    if (newCall != null) {
+      if (!day.end_time || prevCall == null || prevEnd == null) {
+        nextEnd = formatHHMM(newCall + 8 * 60)
+      } else {
+        let span = prevEnd - prevCall
+        if (span <= 0) span += 24 * 60
+        nextEnd = formatHHMM(newCall + span)
+      }
+    }
+    onChange({ call_time: nextCall, end_time: nextEnd })
+  }
+
+  // When a custom hours value is typed in, derive end_time so both fields
+  // stay coherent. Leave end_time alone if hours is cleared.
+  function setCustomHours(raw: string) {
+    onChange({ duration_hours: raw })
+    const n = parseFloat(raw)
+    if (!Number.isFinite(n) || n <= 0) return
+    const call = minutesOfDay(day.call_time)
+    if (call == null) return
+    onChange({
+      duration_hours: raw,
+      end_time: formatHHMM(call + Math.round(n * 60)),
+    })
+  }
+
+  // Setting an end_time backfills duration_hours (only matters for custom).
+  function setEndTime(nextEnd: string) {
+    const h = hoursBetween(day.call_time, nextEnd)
+    onChange({
+      end_time: nextEnd,
+      duration_hours:
+        day.duration_type === 'custom' && h != null ? String(h) : day.duration_hours,
+    })
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Date / call / end — three columns on wider screens, wraps cleanly on mobile */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)',
+          gap: 6,
+        }}
+      >
+        <label
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: TEXT_MUTED,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Date
+          </span>
+          <input
+            type="date"
+            required
+            value={day.date}
+            onChange={(e) => onChange({ date: e.target.value })}
+            style={{
+              fontSize: 12,
+              padding: '10px 8px',
+              background: 'rgba(255,255,255,0.92)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 8,
+              color: '#1A3C6B',
+              fontWeight: 500,
+              outline: 'none',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              minWidth: 0,
+            }}
+          />
+        </label>
+        <label
+          style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: TEXT_MUTED,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            Call
+          </span>
+          <select
+            value={day.call_time}
+            onChange={(e) => setCallTime(e.target.value)}
+            style={{
+              fontSize: 12,
+              padding: '10px 8px',
+              background: 'rgba(255,255,255,0.92)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 8,
+              color: '#1A3C6B',
+              fontWeight: 500,
+              outline: 'none',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              cursor: 'pointer',
+              minWidth: 0,
+            }}
+          >
+            {TIME_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
+          style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: TEXT_MUTED,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            End
+          </span>
+          <select
+            value={day.end_time || ''}
+            onChange={(e) => setEndTime(e.target.value)}
+            style={{
+              fontSize: 12,
+              padding: '10px 8px',
+              background: 'rgba(255,255,255,0.92)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 8,
+              color: '#1A3C6B',
+              fontWeight: 500,
+              outline: 'none',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+              cursor: 'pointer',
+              minWidth: 0,
+            }}
+          >
+            <option value="">—</option>
+            {TIME_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Duration: Full day vs Custom. Custom unlocks an hours input. */}
+      <div>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: TEXT_MUTED,
+            marginBottom: 6,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Duration
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 6,
+          }}
+        >
+          {([
+            { key: 'full_day' as DurationType, label: 'Full day' },
+            { key: 'custom' as DurationType, label: 'Custom' },
+          ]).map((opt) => {
+            const active = day.duration_type === opt.key
+            return (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() =>
+                  onChange({
+                    duration_type: opt.key,
+                    duration_hours:
+                      opt.key === 'custom' ? day.duration_hours : '',
+                  })
+                }
+                style={{
+                  padding: '8px 6px',
+                  borderRadius: 8,
+                  border: `1px solid ${
+                    active ? '#ffffff' : CHIP_INACTIVE_BORDER
+                  }`,
+                  background: active ? '#ffffff' : CHIP_INACTIVE_BG,
+                  color: active ? '#1A3C6B' : TEXT_MUTED,
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 500,
+                  cursor: 'pointer',
+                }}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+        {day.duration_type === 'custom' && (
+          <div style={{ marginTop: 8 }}>
+            <label
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: TEXT_MUTED,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                display: 'block',
+                marginBottom: 4,
+              }}
+            >
+              How many hours?
+            </label>
+            <input
+              type="number"
+              min={0.5}
+              max={23.5}
+              step={0.5}
+              value={day.duration_hours}
+              onChange={(e) => setCustomHours(e.target.value)}
+              placeholder="Hours, e.g. 3"
+              className="rs-input"
+            />
+            {computedHours != null && (
+              <p
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: TEXT_MUTED,
+                }}
+              >
+                Call {day.call_time}
+                {day.end_time ? ` → End ${day.end_time}` : ''} ={' '}
+                <strong
+                  style={{
+                    color: isShort ? '#F0A500' : '#fff',
+                  }}
+                >
+                  {computedHours.toFixed(1)} hrs
+                </strong>
+              </p>
+            )}
+          </div>
+        )}
+        {isShort && (
+          <p
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: '#F0A500',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+            }}
+          >
+            ⚡ Short shoot · Under 4 hrs
+          </p>
+        )}
+      </div>
+
+      {/* Per-day working budget. Minimum is $300; no fee language. */}
+      <label style={{ display: 'block' }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: 10,
+            fontWeight: 600,
+            color: TEXT_MUTED,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            marginBottom: 4,
+          }}
+        >
+          Working budget · day {index + 1}
+        </span>
+        <div style={{ position: 'relative' }}>
+          <span
+            style={{
+              position: 'absolute',
+              left: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#888',
+              fontSize: 14,
+              pointerEvents: 'none',
+            }}
+          >
+            $
+          </span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={MIN_BUDGET_DOLLARS}
+            step={5}
+            value={day.budget}
+            onChange={(e) => onChange({ budget: e.target.value })}
+            placeholder="Enter your budget per person"
+            className="rs-input"
+            style={{
+              paddingLeft: 24,
+              borderColor: budgetBelowMin
+                ? '#EF4444'
+                : undefined,
+            }}
+          />
+        </div>
+        <p
+          style={{
+            marginTop: 4,
+            fontSize: 11,
+            color: budgetBelowMin ? '#F87171' : TEXT_MUTED,
+            lineHeight: 1.4,
+          }}
+        >
+          {budgetBelowMin
+            ? `Minimum budget is $${MIN_BUDGET_DOLLARS}`
+            : "This is what you're offering for this shoot day."}
+        </p>
+      </label>
+    </div>
   )
 }

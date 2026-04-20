@@ -5,6 +5,7 @@ import { JobCodePill } from '@/components/JobCodePill'
 import { generateInvoice } from '../actions'
 import { StatusActionButtons } from './StatusActionButtons'
 import { BookingAdminActions } from './BookingAdminActions'
+import { AdminBudgetRow } from './AdminBudgetRow'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,8 @@ type Job = {
   end_date: string | null
   call_time: string | null
   day_rate_cents: number | null
+  client_budget_cents: number | null
+  shoot_duration_hours: number | null
   num_talent: number | null
   location: string | null
   address_line: string | null
@@ -316,6 +319,16 @@ export default async function AdminJobDetailPage({
           <StatusActionButtons jobId={job.id} currentStatus={job.status} />
         )}
       </section>
+
+      {/* ─── Job budget (inline admin edit) ─── */}
+      <AdminBudgetRow
+        jobId={job.id}
+        budgetCents={job.client_budget_cents ?? job.day_rate_cents ?? null}
+        isShortShoot={
+          job.shoot_duration_hours != null && job.shoot_duration_hours < 4
+        }
+        editHref={`/admin/jobs/${job.id}/edit`}
+      />
 
       {/* ─── Talent section ─── */}
       <section className="mt-4">

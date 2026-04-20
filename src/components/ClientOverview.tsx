@@ -779,6 +779,11 @@ function ClientJobRow({
             </ExpandedSection>
           )}
 
+          {/* Working budget — client-facing language only. No fees, no day rates. */}
+          <ExpandedSection label="Working budget" divider>
+            <WorkingBudgetCard job={job} onRefresh={onRefresh} />
+          </ExpandedSection>
+
           <ExpandedSection label="Full address" divider>
             <AddressBlock job={job} />
           </ExpandedSection>
@@ -1051,6 +1056,270 @@ function CrewProgressStrip({ job }: { job: JobRow }) {
   )
 }
 
+/**
+ * Working-budget card shown inside the expanded client job view. Shows
+ * the headline per-person budget with an inline edit flow. If shoot days
+ * carry mixed budgets, each day is listed individually below the header.
+ */
+function WorkingBudgetCard({
+  job,
+  onRefresh,
+}: {
+  job: JobRow
+  onRefresh: () => void | Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const startDollars = job.client_budget_cents
+    ? String(job.client_budget_cents / 100)
+    : ''
+  const [dollars, setDollars] = useState(startDollars)
+  const [saving, setSaving] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  // Per-day breakdown: each shoot day might carry its own budget_cents.
+  type PerDay = {
+    date: string
+    cents: number | null
+  }
+  const perDay: PerDay[] = []
+  const rawDays = Array.isArray(job.shoot_days) ? job.shoot_days : []
+  for (const d of rawDays) {
+    const obj = d as {
+      date?: string | null
+      budget_cents?: number | null
+    }
+    if (obj?.date) {
+      perDay.push({
+        date: obj.date,
+        cents: typeof obj.budget_cents === 'number' ? obj.budget_cents : null,
+      })
+    }
+  }
+  const budgetsVary =
+    perDay.length > 1 &&
+    perDay.some(
+      (d, _, arr) =>
+        d.cents != null && arr[0].cents != null && d.cents !== arr[0].cents
+    )
+
+  const isTerminal =
+    job.status === 'cancelled' || job.status === 'wrapped' ||
+    !!job.cancelled_at || !!job.wrapped_at
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    setErrorMsg('')
+    if (saving) return
+    const num = parseFloat(dollars)
+    if (!Number.isFinite(num) || num <= 0) {
+      setErrorMsg('Enter a valid amount.')
+      return
+    }
+    setSaving(true)
+    try {
+      const { updateClientJobBudget } = await import('@/app/actions/jobs')
+      const fd = new FormData()
+      fd.set('jobId', job.id)
+      fd.set('budget', String(num))
+      const result = await updateClientJobBudget(fd)
+      if (result?.error) {
+        setErrorMsg(result.error)
+        return
+      }
+      setEditing(false)
+      await onRefresh()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: 'rgba(255,255,255,0.08)',
+        border: `1px solid ${SOFT_BORDER}`,
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      {!editing ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {job.client_budget_cents != null ? (
+              <>
+                <p
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    color: TEXT_PRIMARY,
+                    lineHeight: 1.1,
+                  }}
+                >
+                  ${Math.round(job.client_budget_cents / 100).toLocaleString()}
+                  <span style={{ fontSize: 13, color: TEXT_MUTED, fontWeight: 400 }}>
+                    {' '}
+                    per person
+                  </span>
+                </p>
+                {budgetsVary && (
+                  <ul
+                    style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: TEXT_MUTED,
+                      lineHeight: 1.5,
+                      paddingLeft: 14,
+                      listStyle: 'disc',
+                    }}
+                  >
+                    {perDay.map((d) => (
+                      <li key={d.date}>
+                        {d.date} —{' '}
+                        {d.cents != null
+                          ? `$${Math.round(d.cents / 100).toLocaleString()}/person`
+                          : 'no budget set'}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <p style={{ fontSize: 14, color: '#F0A500', fontWeight: 600 }}>
+                No budget set
+              </p>
+            )}
+          </div>
+          {!isTerminal && (
+            <button
+              type="button"
+              onClick={() => {
+                setDollars(startDollars)
+                setEditing(true)
+                setErrorMsg('')
+              }}
+              aria-label="Edit budget"
+              style={{
+                flexShrink: 0,
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                background: 'rgba(255,255,255,0.1)',
+                color: TEXT_PRIMARY,
+                border: `1px solid ${SOFT_BORDER}`,
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              ✎ Edit
+            </button>
+          )}
+        </div>
+      ) : (
+        <form
+          onSubmit={save}
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        >
+          <label style={{ display: 'block' }}>
+            <span
+              style={{
+                fontSize: 10,
+                color: TEXT_MUTED,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Budget per person
+            </span>
+            <div style={{ position: 'relative', marginTop: 4 }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#888',
+                  fontSize: 14,
+                  pointerEvents: 'none',
+                }}
+              >
+                $
+              </span>
+              <input
+                autoFocus
+                type="number"
+                min={300}
+                step={5}
+                value={dollars}
+                onChange={(e) => setDollars(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 10px 10px 22px',
+                  borderRadius: 8,
+                  background: 'rgba(255,255,255,0.1)',
+                  border: `1px solid ${SOFT_BORDER}`,
+                  color: TEXT_PRIMARY,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          </label>
+          <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.4 }}>
+            This updates every shoot day on this job and lets Rowly Studios
+            know to re-check any in-flight offers.
+          </p>
+          {errorMsg && (
+            <p style={{ fontSize: 11, color: '#fca5a5' }}>{errorMsg}</p>
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false)
+                setErrorMsg('')
+              }}
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '8px 10px',
+                fontSize: 12,
+                fontWeight: 500,
+                background: 'transparent',
+                color: TEXT_MUTED,
+                border: `1px solid ${SOFT_BORDER}`,
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '8px 10px',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                background: '#fff',
+                color: '#1A3C6B',
+                border: 'none',
+                borderRadius: 8,
+                cursor: saving ? 'wait' : 'pointer',
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? 'Saving…' : 'Save budget'}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  )
+}
+
 function CrewGroup({
   title,
   bookings,
@@ -1092,12 +1361,29 @@ function CrewGroup({
             pending &&
             !!b.response_deadline_at &&
             new Date(b.response_deadline_at).getTime() < Date.now()
-          const offered = b.offered_rate_cents
-          const offeredLabel = offered
-            ? b.is_short_shoot
-              ? `Flat fee $${Math.round(offered / 100).toLocaleString()}`
-              : `$${Math.round(offered / 100).toLocaleString()}/day`
+          // For confirmed rows show the confirmed rate; for everyone else
+          // show the offered amount so the client always has context.
+          const displayCents =
+            b.status === 'confirmed'
+              ? b.confirmed_rate_cents ?? b.offered_rate_cents
+              : b.offered_rate_cents
+          const shortShoot = Boolean(b.is_short_shoot)
+          const moneyText = displayCents
+            ? shortShoot
+              ? `Flat fee $${Math.round(displayCents / 100).toLocaleString()}`
+              : `$${Math.round(displayCents / 100).toLocaleString()}/day`
             : null
+          // Spec language per status:
+          //   requested  → "Offer sent" + "$X/day offered"
+          //   confirmed  → "✓ Confirmed" + "$X/day"
+          //   declined   → "Declined" + "Find replacement →"
+          let moneyLabel: string | null = null
+          if (b.status === 'confirmed') moneyLabel = moneyText
+          else if (pending) {
+            moneyLabel = moneyText
+              ? `${moneyText} offered`
+              : 'No rate set — contact Rowly Studios'
+          }
           return (
             <div
               key={b.id}
@@ -1178,8 +1464,8 @@ function CrewGroup({
                 </button>
               )}
             </div>
-            {/* Secondary line: offered rate + per-slot status hint */}
-            {(offeredLabel || overdue || b.status === 'declined') && (
+            {/* Secondary line — tuned to booking status */}
+            {(moneyLabel || overdue || b.status === 'declined') && (
               <div
                 style={{
                   marginLeft: 42, // align with the avatar + gap
@@ -1191,26 +1477,32 @@ function CrewGroup({
                   flexWrap: 'wrap',
                 }}
               >
-                {offeredLabel && <span>Offered: {offeredLabel}</span>}
-                {b.status === 'requested' && !overdue && (
-                  <span style={{ color: '#d4950a' }}>
-                    ⏳ Awaiting response
-                  </span>
+                {moneyLabel && <span>{moneyLabel}</span>}
+                {pending && !overdue && (
+                  <span style={{ color: '#d4950a' }}>Offer sent</span>
                 )}
                 {overdue && (
-                  <span
-                    style={{
-                      color: '#F87171',
-                      fontWeight: 600,
-                    }}
-                  >
-                    ⚠ 24hrs passed — Rowly Studios is following up
+                  <span style={{ color: '#F87171', fontWeight: 600 }}>
+                    24hrs passed · Rowly Studios is following up
                   </span>
                 )}
                 {b.status === 'declined' && (
-                  <span style={{ color: '#F87171' }}>
-                    ✗ Declined — seeking replacement
-                  </span>
+                  <>
+                    <span style={{ color: '#F87171' }}>Declined</span>
+                    <a
+                      href={`mailto:rowlystudios@gmail.com?subject=Replacement%20needed%20for%20${encodeURIComponent(
+                        job.title ?? 'job'
+                      )}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        color: '#AABDE0',
+                        textDecoration: 'underline',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Find replacement →
+                    </a>
+                  </>
                 )}
               </div>
             )}
