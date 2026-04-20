@@ -1,21 +1,138 @@
 import Link from 'next/link'
-import { revalidatePath } from 'next/cache'
-import {
-  requireAdmin,
-  centsToUsd,
-  formatDate,
-  formatDateShort,
-} from '@/lib/admin-auth'
+import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import { TalentAdminControls } from './TalentAdminControls'
 
 export const dynamic = 'force-dynamic'
 
-function isoDateAfter(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + days)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate()
-  ).padStart(2, '0')}`
+function todayIsoLA(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+  }).format(new Date())
+}
+
+function addDaysIso(base: string, n: number): string {
+  const parts = base.split('-').map(Number)
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+function dateDayMonth(iso: string | null): { day: string; month: string; dow: string } {
+  if (!iso) return { day: '—', month: '', dow: '' }
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN))
+    return { day: '—', month: '', dow: '' }
+  const d = new Date(parts[0], parts[1] - 1, parts[2])
+  return {
+    day: String(d.getDate()),
+    month: d.toLocaleString('en-US', { month: 'short' }).toUpperCase(),
+    dow: d.toLocaleString('en-US', { weekday: 'short' }),
+  }
+}
+
+function formatShort(iso: string | null): string {
+  if (!iso) return ''
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return ''
+  const d = new Date(parts[0], parts[1] - 1, parts[2])
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatRange(start: string | null, end: string | null): string {
+  if (!start) return ''
+  if (!end || end === start) return formatShort(start)
+  return `${formatShort(start)} – ${formatShort(end)}`
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2)
+  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
+}
+
+function unwrap<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null
+  return Array.isArray(v) ? v[0] ?? null : v
+}
+
+/** Build a set of iso dates covered by a booking (start through end inclusive). */
+function bookingDateSet(start: string | null, end: string | null): string[] {
+  if (!start) return []
+  const out: string[] = []
+  const from = new Date(start + 'T00:00:00Z')
+  const to = end ? new Date(end + 'T00:00:00Z') : from
+  const cur = new Date(from)
+  while (cur.getTime() <= to.getTime()) {
+    out.push(cur.toISOString().slice(0, 10))
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
+  return out
+}
+
+type Profile = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  full_name: string | null
+  email: string | null
+  phone: string | null
+  avatar_url: string | null
+  city: string | null
+  verified: boolean
+  verified_at: string | null
+  created_at: string | null
+}
+
+type TalentProfile = {
+  department: string | null
+  primary_role: string | null
+  secondary_roles: string[] | null
+  bio: string | null
+  day_rate_cents: number | null
+  half_day_rate_cents: number | null
+  rate_floor_cents: number | null
+  showreel_url: string | null
+  equipment: string | null
+  union_eligible: boolean | null
+  travel_radius_miles: number | null
+  admin_notes: string | null
+}
+
+type ClientJoin = {
+  full_name: string | null
+  client_profiles:
+    | { company_name: string | null }
+    | { company_name: string | null }[]
+    | null
+}
+
+type BookingRow = {
+  id: string
+  status: string
+  confirmed_rate_cents: number | null
+  paid: boolean | null
+  paid_at: string | null
+  created_at: string | null
+  jobs:
+    | {
+        id: string
+        title: string
+        start_date: string | null
+        end_date: string | null
+        location: string | null
+        status: string
+        profiles: ClientJoin | ClientJoin[] | null
+      }
+    | {
+        id: string
+        title: string
+        start_date: string | null
+        end_date: string | null
+        location: string | null
+        status: string
+        profiles: ClientJoin | ClientJoin[] | null
+      }[]
+    | null
 }
 
 export default async function AdminTalentDetailPage({
@@ -25,99 +142,102 @@ export default async function AdminTalentDetailPage({
 }) {
   const { supabase } = await requireAdmin()
 
-  const today = isoDateAfter(0)
-  const thirtyOut = isoDateAfter(30)
+  const today = todayIsoLA()
+  const fortyFiveOut = addDaysIso(today, 45)
 
   const [profileRes, talentRes, availabilityRes, bookingsRes] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', params.id)
-      .maybeSingle(),
-    supabase
-      .from('talent_profiles')
-      .select('*')
-      .eq('id', params.id)
-      .maybeSingle(),
+    supabase.from('profiles').select('*').eq('id', params.id).maybeSingle(),
+    supabase.from('talent_profiles').select('*').eq('id', params.id).maybeSingle(),
     supabase
       .from('availability')
       .select('date, status')
       .eq('talent_id', params.id)
       .gte('date', today)
-      .lte('date', thirtyOut)
+      .lte('date', fortyFiveOut)
       .order('date'),
     supabase
       .from('job_bookings')
       .select(
-        `id, status, confirmed_rate_cents,
-         jobs (id, title, start_date, end_date, status)`
+        `id, status, confirmed_rate_cents, paid, paid_at, created_at,
+         jobs (id, title, start_date, end_date, location, status,
+           profiles!jobs_client_id_fkey (full_name,
+             client_profiles (company_name)))`
       )
       .eq('talent_id', params.id)
-      .order('created_at', { ascending: false })
-      .limit(10),
+      .order('created_at', { ascending: false }),
   ])
 
-  const profile = profileRes.data as unknown as {
-    id: string
-    first_name: string | null
-    last_name: string | null
-    full_name: string | null
-    email: string | null
-    phone: string | null
-    avatar_url: string | null
-    city: string | null
-    verified: boolean
-    available: boolean
-  } | null
-
+  const profile = profileRes.data as unknown as Profile | null
   if (!profile) {
     return (
-      <div style={{ padding: 20 }}>
-        <p style={{ color: '#AABDE0' }}>Talent not found.</p>
-        <Link href="/admin/talent" style={{ color: '#F0A500' }}>
-          ← Back to talent
+      <div className="px-5 pt-5">
+        <Link href="/admin/talent" style={{ color: '#7A90AA', fontSize: 13 }}>
+          ← Talent
         </Link>
+        <p
+          className="mt-3"
+          style={{ fontSize: 14, color: '#AABDE0', fontStyle: 'italic' }}
+        >
+          Talent not found.
+        </p>
       </div>
     )
   }
 
-  const tp = talentRes.data as unknown as {
-    department: string | null
-    primary_role: string | null
-    day_rate_cents: number | null
-    bio: string | null
-  } | null
-
+  const tp = (talentRes.data ?? null) as unknown as TalentProfile | null
   const availability = (availabilityRes.data ?? []) as Array<{
     date: string
     status: string
   }>
-  const availByDate = new Map(availability.map((a) => [a.date, a.status]))
-
-  type BookingRow = {
-    id: string
-    status: string
-    confirmed_rate_cents: number | null
-    jobs:
-      | {
-          id: string
-          title: string
-          start_date: string | null
-          end_date: string | null
-          status: string
-        }
-      | {
-          id: string
-          title: string
-          start_date: string | null
-          end_date: string | null
-          status: string
-        }[]
-      | null
-  }
   const bookings = (bookingsRes.data ?? []) as unknown as BookingRow[]
-  function bookingJob(b: BookingRow) {
-    return Array.isArray(b.jobs) ? b.jobs[0] ?? null : b.jobs
+
+  // ─── Derive earnings ───
+  let paidCents = 0
+  let unpaidCents = 0
+  let confirmedCount = 0
+  let completedCount = 0
+  for (const b of bookings) {
+    if (b.status === 'confirmed' || b.status === 'completed') {
+      confirmedCount += b.status === 'confirmed' ? 1 : 0
+      completedCount += b.status === 'completed' ? 1 : 0
+      if (b.paid) paidCents += b.confirmed_rate_cents ?? 0
+      else if (b.status === 'confirmed')
+        unpaidCents += b.confirmed_rate_cents ?? 0
+    }
+  }
+
+  // ─── Build date sets for booking indicators on calendar ───
+  const confirmedDates = new Set<string>()
+  const requestedDates = new Set<string>()
+  for (const b of bookings) {
+    const j = unwrap(b.jobs)
+    if (!j) continue
+    const dates = bookingDateSet(j.start_date, j.end_date)
+    if (b.status === 'confirmed' || b.status === 'completed') {
+      for (const d of dates) confirmedDates.add(d)
+    } else if (b.status === 'requested') {
+      for (const d of dates) requestedDates.add(d)
+    }
+  }
+
+  // ─── Build 45-day grid ───
+  const availByDate = new Map<string, string>()
+  for (const a of availability) availByDate.set(a.date, a.status)
+
+  type Cell = { date: string; status: string | null; day: number; dow: string }
+  const cells: Cell[] = []
+  for (let i = 0; i < 45; i++) {
+    const iso = addDaysIso(today, i)
+    const d = new Date(iso + 'T00:00:00Z')
+    cells.push({
+      date: iso,
+      status: availByDate.get(iso) ?? null,
+      day: d.getUTCDate(),
+      dow: d.toLocaleString('en-US', {
+        weekday: 'short',
+        timeZone: 'UTC',
+      }),
+    })
   }
 
   const displayName =
@@ -125,352 +245,631 @@ export default async function AdminTalentDetailPage({
     profile.full_name ||
     'Unnamed'
 
-  async function toggleVerified() {
-    'use server'
-    const { supabase: sb } = await requireAdmin()
-    const next = !profile!.verified
-    await sb
-      .from('profiles')
-      .update({
-        verified: next,
-        verified_at: next ? new Date().toISOString() : null,
-      })
-      .eq('id', profile!.id)
-    revalidatePath(`/admin/talent/${profile!.id}`)
-    revalidatePath('/admin/talent')
-  }
-
-  async function updateRate(formData: FormData) {
-    'use server'
-    const { supabase: sb } = await requireAdmin()
-    const raw = formData.get('rate') as string
-    const cents = raw ? Math.round(parseFloat(raw) * 100) : null
-    await sb
-      .from('talent_profiles')
-      .upsert(
-        { id: profile!.id, day_rate_cents: cents },
-        { onConflict: 'id' }
-      )
-    revalidatePath(`/admin/talent/${profile!.id}`)
-  }
-
-  // Next 14 days pill row
-  const pills: Array<{ date: string; status: string | null; label: string }> = []
-  for (let i = 0; i < 14; i++) {
-    const d = new Date()
-    d.setDate(d.getDate() + i)
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      '0'
-    )}-${String(d.getDate()).padStart(2, '0')}`
-    pills.push({
-      date: iso,
-      status: availByDate.get(iso) ?? null,
-      label: String(d.getDate()),
-    })
-  }
-
-  function pillColor(status: string | null) {
+  function cellColor(status: string | null) {
     switch (status) {
       case 'available':
-        return { bg: 'rgba(34,197,94,0.22)', color: '#4ADE80' }
+        return {
+          bg: 'rgba(34,197,94,0.22)',
+          color: '#86EFAC',
+          border: 'rgba(34,197,94,0.35)',
+        }
       case 'hold':
-        return { bg: 'rgba(212,149,10,0.22)', color: '#F0A500' }
+        return {
+          bg: 'rgba(240,165,0,0.22)',
+          color: '#F0A500',
+          border: 'rgba(240,165,0,0.35)',
+        }
       case 'unavailable':
-        return { bg: 'rgba(239,68,68,0.22)', color: '#F87171' }
+        return {
+          bg: 'rgba(239,68,68,0.22)',
+          color: '#F87171',
+          border: 'rgba(239,68,68,0.35)',
+        }
       default:
-        return { bg: 'rgba(170,189,224,0.08)', color: '#7A90AA' }
+        return {
+          bg: '#253D5E',
+          color: '#7A90AA',
+          border: 'transparent',
+        }
     }
   }
 
+  function clientLabel(row: ClientJoin | ClientJoin[] | null): string {
+    const c = unwrap(row)
+    if (!c) return 'Unknown client'
+    const cp = unwrap(c.client_profiles)
+    return cp?.company_name || c.full_name || 'Unknown client'
+  }
+
   return (
-    <div style={{ padding: '18px 18px', maxWidth: 640, margin: '0 auto' }}>
-      <Link
-        href="/admin/talent"
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: '#AABDE0',
-          textDecoration: 'none',
-        }}
-      >
+    <div className="mx-auto" style={{ maxWidth: 720, padding: '20px 18px 28px' }}>
+      <Link href="/admin/talent" style={{ fontSize: 13, color: '#7A90AA', textDecoration: 'none' }}>
         ← Talent
       </Link>
 
-      {/* Header */}
-      <div
-        style={{
-          marginTop: 12,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-        }}
+      {/* ─── Profile header card ─── */}
+      <section
+        className="mt-3 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 20 }}
       >
-        <div
-          style={{
-            width: 80,
-            height: 80,
-            borderRadius: 999,
-            background: '#1E3A6B',
-            color: '#fff',
-            fontSize: 28,
-            fontWeight: 700,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            overflow: 'hidden',
-          }}
-        >
-          {profile.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={profile.avatar_url}
-              alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            displayName.slice(0, 1).toUpperCase()
-          )}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>
-            {displayName}
-          </h1>
-          <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 2 }}>
-            {[tp?.department, tp?.primary_role].filter(Boolean).join(' · ') ||
-              'No department'}
-            {profile.city && ` · ${profile.city}`}
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            {profile.verified ? (
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  background: 'rgba(34,197,94,0.18)',
-                  color: '#4ADE80',
-                }}
-              >
-                Verified
-              </span>
+        <div className="flex items-start gap-4">
+          <div
+            className="rounded-full overflow-hidden"
+            style={{
+              width: 72,
+              height: 72,
+              background: '#1E3A6B',
+              color: '#fff',
+              fontSize: 24,
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            {profile.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profile.avatar_url}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
             ) : (
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  background: 'rgba(212,149,10,0.18)',
-                  color: '#F0A500',
-                }}
-              >
-                Pending
-              </span>
+              initials(displayName)
             )}
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>
-              {tp?.day_rate_cents != null ? `${centsToUsd(tp.day_rate_cents)}/day` : 'No rate set'}
-            </span>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1
+              className="text-white"
+              style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}
+            >
+              {displayName}
+            </h1>
+            <p style={{ fontSize: 14, color: '#AABDE0', marginTop: 2 }}>
+              {[tp?.department, tp?.primary_role].filter(Boolean).join(' · ') ||
+                'No department'}
+            </p>
+            {profile.city && (
+              <p style={{ fontSize: 13, color: '#7A90AA', marginTop: 1 }}>
+                {profile.city}
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-2 mt-2">
+              <StatusBadge
+                status={profile.verified ? 'verified' : 'pending'}
+                size="sm"
+                label={profile.verified ? 'Verified' : 'Unverified'}
+              />
+              {tp?.union_eligible && (
+                <span
+                  className="rounded-full"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    background: 'rgba(170,189,224,0.15)',
+                    color: '#AABDE0',
+                    border: '1px solid rgba(170,189,224,0.25)',
+                  }}
+                >
+                  Union eligible
+                </span>
+              )}
+              {tp?.department && (
+                <span
+                  className="rounded-full"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    background: 'rgba(59,130,246,0.18)',
+                    color: '#93C5FD',
+                    border: '1px solid rgba(59,130,246,0.35)',
+                  }}
+                >
+                  {tp.department}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div
+            className="text-right"
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
+          >
+            <p
+              className="text-white"
+              style={{ fontSize: 24, fontWeight: 600, lineHeight: 1 }}
+            >
+              {tp?.day_rate_cents != null ? centsToUsd(tp.day_rate_cents) : '—'}
+            </p>
+            <p style={{ fontSize: 12, color: '#7A90AA', marginTop: 2 }}>
+              per day
+            </p>
+            {tp?.rate_floor_cents != null && (
+              <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 6 }}>
+                Floor: {centsToUsd(tp.rate_floor_cents)}
+              </p>
+            )}
+            {tp?.half_day_rate_cents != null && (
+              <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
+                Half day: {centsToUsd(tp.half_day_rate_cents)}
+              </p>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* Availability */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Availability — next 14 days</SectionLabel>
-        <div
+        {(profile.email || profile.phone || tp?.showreel_url) && (
+          <div
+            className="flex flex-wrap gap-x-4 gap-y-2 mt-4 pt-4"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            {profile.email && (
+              <a
+                href={`mailto:${profile.email}`}
+                className="inline-flex items-center gap-1.5"
+                style={{ fontSize: 13, color: '#AABDE0', textDecoration: 'underline' }}
+              >
+                <span aria-hidden>✉︎</span>
+                {profile.email}
+              </a>
+            )}
+            {profile.phone && (
+              <a
+                href={`tel:${profile.phone}`}
+                className="inline-flex items-center gap-1.5"
+                style={{ fontSize: 13, color: '#AABDE0', textDecoration: 'underline' }}
+              >
+                <span aria-hidden>☎</span>
+                {profile.phone}
+              </a>
+            )}
+            {tp?.showreel_url && (
+              <a
+                href={tp.showreel_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5"
+                style={{ fontSize: 13, color: '#AABDE0', textDecoration: 'underline' }}
+              >
+                <span aria-hidden>▶</span>
+                Showreel ↗
+              </a>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ─── Earnings strip ─── */}
+      <section className="mt-4 flex gap-3">
+        <EarningsChip label="Paid" value={centsToUsd(paidCents)} tone="green" />
+        <EarningsChip
+          label="Outstanding"
+          value={centsToUsd(unpaidCents)}
+          tone={unpaidCents > 0 ? 'amber' : 'default'}
+        />
+        <EarningsChip
+          label="Jobs"
+          value={String(confirmedCount + completedCount)}
+        />
+        <EarningsChip
+          label="Travel miles"
+          value={
+            tp?.travel_radius_miles != null ? String(tp.travel_radius_miles) : '—'
+          }
+        />
+      </section>
+
+      {/* ─── Bio ─── */}
+      {tp?.bio && (
+        <section
+          className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+          style={{ padding: 16 }}
+        >
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+              marginBottom: 8,
+            }}
+          >
+            Bio
+          </p>
+          <p
+            style={{
+              fontSize: 14,
+              color: '#C5D3E8',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {tp.bio}
+          </p>
+        </section>
+      )}
+
+      {/* ─── Equipment ─── */}
+      {tp?.equipment && (
+        <section
+          className="mt-3 rounded-xl bg-[#1A2E4A] border border-white/5"
+          style={{ padding: 16 }}
+        >
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+              marginBottom: 8,
+            }}
+          >
+            Equipment
+          </p>
+          <p
+            style={{
+              fontSize: 14,
+              color: '#C5D3E8',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {tp.equipment}
+          </p>
+        </section>
+      )}
+
+      {/* ─── Availability calendar ─── */}
+      <section
+        className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 16 }}
+      >
+        <p
           style={{
-            display: 'flex',
-            gap: 4,
-            overflowX: 'auto',
-            paddingBottom: 4,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 10,
           }}
         >
-          {pills.map((p) => {
-            const c = pillColor(p.status)
+          Availability — next 45 days
+        </p>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(38px, 1fr))',
+            gap: 6,
+          }}
+        >
+          {cells.map((cell) => {
+            const c = cellColor(cell.status)
+            const bookingDot = confirmedDates.has(cell.date)
+              ? '#4ADE80'
+              : requestedDates.has(cell.date)
+              ? '#F0A500'
+              : null
             return (
               <div
-                key={p.date}
-                title={`${p.date} — ${p.status ?? 'no record'}`}
+                key={cell.date}
+                title={`${cell.date} — ${cell.status ?? 'no record'}`}
+                className="rounded-lg relative"
                 style={{
-                  flex: '0 0 auto',
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
                   background: c.bg,
                   color: c.color,
-                  display: 'inline-flex',
+                  border: `1px solid ${c.border}`,
+                  minHeight: 42,
+                  padding: '4px 0',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 12,
-                  fontWeight: 700,
+                  gap: 1,
                 }}
               >
-                {p.label}
+                <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1 }}>
+                  {cell.day}
+                </span>
+                <span style={{ fontSize: 9, opacity: 0.8 }}>{cell.dow}</span>
+                {bookingDot && (
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      bottom: 3,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: 5,
+                      height: 5,
+                      borderRadius: 999,
+                      background: bookingDot,
+                    }}
+                  />
+                )}
               </div>
             )
           })}
         </div>
+
+        <div
+          className="flex flex-wrap gap-4 mt-3"
+          style={{ fontSize: 11, color: '#AABDE0' }}
+        >
+          <LegendDot color="#22C55E" label="Available" />
+          <LegendDot color="#F0A500" label="Hold" />
+          <LegendDot color="#EF4444" label="Unavailable" />
+          <LegendDot color="#7A90AA" label="No data" />
+        </div>
       </section>
 
-      {/* Recent bookings */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Recent bookings</SectionLabel>
-        {bookings.length === 0 ? (
-          <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
-            No bookings yet
+      {/* ─── Booking history ─── */}
+      <section className="mt-4">
+        <div className="flex items-center justify-between mb-2">
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+            }}
+          >
+            Booking history
           </p>
+          <span style={{ fontSize: 11, color: '#7A90AA' }}>
+            {bookings.length} total
+          </span>
+        </div>
+        {bookings.length === 0 ? (
+          <div
+            className="rounded-xl bg-[#1A2E4A] border border-white/5 text-center"
+            style={{ padding: '22px 18px' }}
+          >
+            <p style={{ fontSize: 13, color: '#7A90AA' }}>No bookings yet</p>
+          </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="flex flex-col gap-2">
             {bookings.map((b) => {
-              const j = bookingJob(b)
+              const j = unwrap(b.jobs)
+              const dm = dateDayMonth(j?.start_date ?? null)
+              const range = formatRange(j?.start_date ?? null, j?.end_date ?? null)
               return (
-              <Link
-                key={b.id}
-                href={j ? `/admin/jobs/${j.id}` : '/admin/jobs'}
-                style={{
-                  background: '#1A2E4A',
-                  border: '1px solid rgba(170,189,224,0.15)',
-                  borderRadius: 12,
-                  padding: '10px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  textDecoration: 'none',
-                  color: '#fff',
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {j?.title ?? 'Untitled job'}
-                  </p>
-                  <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
-                    {j?.start_date && formatDateShort(j.start_date)}
-                    {b.confirmed_rate_cents != null &&
-                      ` · ${centsToUsd(b.confirmed_rate_cents)}/day`}
-                  </p>
-                </div>
-                <StatusBadge status={b.status} size="sm" />
-              </Link>
+                <article
+                  key={b.id}
+                  className="rounded-xl"
+                  style={{
+                    background: '#253D5E',
+                    padding: 14,
+                    border: '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className="flex flex-col items-center justify-center rounded-lg"
+                      style={{
+                        width: 48,
+                        minHeight: 52,
+                        background: '#0F1B2E',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span
+                        className="text-white"
+                        style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}
+                      >
+                        {dm.day}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: '#7A90AA',
+                          letterSpacing: '0.12em',
+                          marginTop: 2,
+                        }}
+                      >
+                        {dm.month}
+                      </span>
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {j ? (
+                        <Link
+                          href={`/admin/jobs/${j.id}`}
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 500,
+                            color: '#fff',
+                            textDecoration: 'none',
+                            display: 'inline-block',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {j.title}
+                        </Link>
+                      ) : (
+                        <span
+                          style={{ fontSize: 14, color: '#fff', fontWeight: 500 }}
+                        >
+                          Untitled job
+                        </span>
+                      )}
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: '#AABDE0',
+                          marginTop: 2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {clientLabel(j?.profiles ?? null)}
+                        {range && ` · ${range}`}
+                      </p>
+                      {j?.location && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: '#7A90AA',
+                            marginTop: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {j.location}
+                        </p>
+                      )}
+                    </div>
+
+                    <div
+                      className="flex flex-col items-end gap-1"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <StatusBadge status={b.status} size="sm" />
+                      {b.confirmed_rate_cents != null && (
+                        <span style={{ fontSize: 12, color: '#AABDE0' }}>
+                          {centsToUsd(b.confirmed_rate_cents)}/day
+                        </span>
+                      )}
+                      {b.paid && (
+                        <span
+                          className="rounded-full"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            background: 'rgba(16,185,129,0.2)',
+                            color: '#10B981',
+                            border: '1px solid rgba(16,185,129,0.3)',
+                          }}
+                        >
+                          Paid
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </article>
               )
             })}
           </div>
         )}
       </section>
 
-      {/* Admin actions */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Admin actions</SectionLabel>
-        <div
+      {/* ─── Admin controls ─── */}
+      <section
+        className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 16 }}
+      >
+        <p
           style={{
-            background: '#1A2E4A',
-            border: '1px solid rgba(170,189,224,0.15)',
-            borderRadius: 12,
-            padding: 14,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 14,
           }}
         >
-          <form action={toggleVerified}>
-            <button
-              type="submit"
-              style={{
-                width: '100%',
-                padding: '10px 0',
-                borderRadius: 10,
-                background: profile.verified
-                  ? 'rgba(239,68,68,0.15)'
-                  : '#F0A500',
-                color: profile.verified ? '#F87171' : '#0F1B2E',
-                border: profile.verified
-                  ? '1px solid rgba(239,68,68,0.35)'
-                  : 'none',
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}
-            >
-              {profile.verified ? 'Unverify talent' : 'Mark verified'}
-            </button>
-          </form>
-
-          <form action={updateRate} style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="number"
-              name="rate"
-              min={0}
-              step={25}
-              defaultValue={
-                tp?.day_rate_cents != null ? tp.day_rate_cents / 100 : ''
-              }
-              placeholder="Day rate ($)"
-              style={{
-                flex: 1,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid rgba(170,189,224,0.2)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#fff',
-                fontSize: 14,
-              }}
-            />
-            <button
-              type="submit"
-              style={{
-                padding: '10px 14px',
-                borderRadius: 8,
-                background: '#1E3A6B',
-                color: '#fff',
-                border: 'none',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}
-            >
-              Save rate
-            </button>
-          </form>
-        </div>
+          Admin controls
+        </p>
+        <TalentAdminControls
+          talentId={profile.id}
+          verified={profile.verified}
+          dayRateCents={tp?.day_rate_cents ?? null}
+          rateFloorCents={tp?.rate_floor_cents ?? null}
+          adminNotes={tp?.admin_notes ?? null}
+        />
       </section>
+
+      <div className="mt-6 text-center">
+        <Link
+          href={`/admin/talent/${profile.id}/edit`}
+          style={{
+            fontSize: 12,
+            color: '#7A90AA',
+            textDecoration: 'underline',
+          }}
+        >
+          Edit full profile →
+        </Link>
+      </div>
     </div>
   )
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function EarningsChip({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  tone?: 'default' | 'amber' | 'green'
+}) {
+  const color =
+    tone === 'amber' ? '#F0A500' : tone === 'green' ? '#4ADE80' : '#fff'
   return (
-    <p
+    <div
+      className="rounded-xl"
       style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: '#7A90AA',
-        marginBottom: 10,
+        background: '#0F1B2E',
+        padding: 12,
+        flex: 1,
+        textAlign: 'center',
+        border: '1px solid rgba(255,255,255,0.05)',
       }}
     >
-      {children}
-    </p>
+      <p style={{ fontSize: 18, fontWeight: 600, color, lineHeight: 1 }}>
+        {value}
+      </p>
+      <p
+        style={{
+          fontSize: 10,
+          color: '#7A90AA',
+          textTransform: 'uppercase',
+          letterSpacing: '0.14em',
+          marginTop: 4,
+          fontWeight: 700,
+        }}
+      >
+        {label}
+      </p>
+    </div>
+  )
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        style={{
+          display: 'inline-block',
+          width: 8,
+          height: 8,
+          borderRadius: 999,
+          background: color,
+        }}
+      />
+      {label}
+    </span>
   )
 }
