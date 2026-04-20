@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { ShareCodeCard } from '@/components/ShareCodeCard'
+import { TaxDocumentsSection } from '@/components/TaxDocumentsSection'
 import { DEPARTMENT_LABELS, type Department, type TalentProfile } from '@/lib/types'
 
 const BG = '#1A3C6B'
@@ -232,6 +233,12 @@ export default function ProfilePage() {
         {/* Account & Security */}
         <div className="mt-8">
           <ShareCodeCard code={profile?.share_code ?? null} variant="dark" />
+        </div>
+
+        {/* Tax Documents — collapsible accordion so it stays out of the way
+            on first load but is there when talent need to upload W-9s etc. */}
+        <div className="mt-4">
+          <TaxDocumentsSection role="talent" variant="dark" />
         </div>
 
         <div style={{ borderTop: `1px solid ${CARD_BORDER}` }} className="mt-10 pt-6">

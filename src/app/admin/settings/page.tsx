@@ -41,6 +41,7 @@ export default async function AdminSettingsPage() {
       'drive_invoices_2026_id',
       'drive_talent_folder_id',
       'drive_tax_docs_folder_id',
+      'drive_client_docs_folder_id',
       'drive_payments_folder_id',
       'drive_payment_ledger_id',
       'drive_tax_tracker_id',
@@ -256,7 +257,9 @@ export default async function AdminSettingsPage() {
           }}
         >
           Paid invoices auto-upload to the 2026 invoices folder. Payments
-          append to the ledger sheet; W-9s land in Tax Documents.
+          append to the ledger sheet. Talent W-9s, IDs, and business
+          licenses land in Talent Tax Documents; client W-9s + vendor
+          agreements go to Client Documents — each nested by share code.
         </p>
         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <DriveLink
@@ -271,8 +274,13 @@ export default async function AdminSettingsPage() {
           />
           <DriveLink
             icon="📁"
-            label="Tax Documents"
+            label="Talent Tax Documents"
             href={driveFolderUrl(settings.drive_tax_docs_folder_id)}
+          />
+          <DriveLink
+            icon="📁"
+            label="Client Documents"
+            href={driveFolderUrl(settings.drive_client_docs_folder_id)}
           />
           <DriveLink
             icon="📁"

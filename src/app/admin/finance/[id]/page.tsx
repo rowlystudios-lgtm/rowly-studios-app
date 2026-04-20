@@ -10,6 +10,7 @@ import {
 import { markAsPaid, markAsOverdue, verifyInvoice } from '../actions'
 import { GmailSendButton } from './GmailSendButton'
 import { InvoicePreviewButton, type PreviewInvoice } from './InvoicePreviewModal'
+import { InvoiceDocuments } from './InvoiceDocuments'
 import {
   AddLineItemForm,
   RemoveLineItemButton,
@@ -135,6 +136,7 @@ type LineItem = {
   unit_price_cents: number | null
   total_cents: number | null
   booking_id: string | null
+  talent_id: string | null
   created_at: string | null
   profiles:
     | {
@@ -180,7 +182,7 @@ export default async function AdminInvoiceDetailPage({
       .from('invoice_line_items')
       .select(
         `id, description, quantity, unit_price_cents, total_cents,
-         booking_id, created_at,
+         booking_id, talent_id, created_at,
          profiles!invoice_line_items_talent_id_fkey (full_name,
            talent_profiles (primary_role))`
       )
@@ -1050,6 +1052,21 @@ export default async function AdminInvoiceDetailPage({
           </p>
         </section>
       )}
+
+      {/* Supporting documents — linked W-9s, licenses, etc. */}
+      <InvoiceDocuments
+        invoiceId={invoice.id}
+        jobId={invoice.job_id}
+        clientId={invoice.client_id}
+        talentIds={Array.from(
+          new Set(
+            lineItems
+              .map((li) => li.talent_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        )}
+        canEdit={isDraft}
+      />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { TalentAdminControls } from './TalentAdminControls'
 import { PaymentForm, type UnpaidBooking } from './PaymentForm'
 import { W9Form, Toggle1099SentButton } from './TaxControls'
 import { AutoAcceptToggle } from './AutoAcceptToggle'
+import { AdminDocumentsPanel } from '@/components/admin/AdminDocumentsPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -1215,6 +1216,24 @@ export default async function AdminTalentDetailPage({
           </section>
         )
       })()}
+
+      {/* Documents on file — W-9 scans, IDs, business registrations, etc.
+          Admin can upload on behalf of a talent (e.g. W-9 arrived via email). */}
+      <section className="mt-4">
+        <p
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 8,
+          }}
+        >
+          Documents on file
+        </p>
+        <AdminDocumentsPanel ownerId={profile.id} role="talent" />
+      </section>
 
       <div className="mt-6 text-center">
         <Link

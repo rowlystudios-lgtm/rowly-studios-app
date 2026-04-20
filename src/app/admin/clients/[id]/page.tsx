@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ClientAdminControls } from './ClientAdminControls'
+import { AdminDocumentsPanel } from '@/components/admin/AdminDocumentsPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -636,6 +637,23 @@ export default async function AdminClientDetailPage({
             })}
           </div>
         )}
+      </section>
+
+      {/* Documents on file — W-9s, COIs, vendor agreements, etc. */}
+      <section className="mt-5">
+        <p
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 10,
+          }}
+        >
+          Documents on file
+        </p>
+        <AdminDocumentsPanel ownerId={profile.id} role="client" />
       </section>
 
       {/* Admin controls */}

@@ -6,6 +6,7 @@ import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { PasswordInput } from '@/components/PasswordInput'
 import { ShareCodeCard } from '@/components/ShareCodeCard'
+import { TaxDocumentsSection } from '@/components/TaxDocumentsSection'
 import { CITY_OPTIONS } from '@/lib/types'
 
 const CARD_BG = '#2E5099'
@@ -316,6 +317,12 @@ function ViewAccount({
 
       <div style={{ marginTop: 20 }}>
         <ShareCodeCard code={profile.share_code ?? null} variant="dark" />
+      </div>
+
+      {/* Documents — W-9, business licenses, vendor agreements, etc.
+          Collapsed by default so the account page stays focused. */}
+      <div style={{ marginTop: 16 }}>
+        <TaxDocumentsSection role="client" variant="dark" />
       </div>
 
       <div style={{ borderTop: `1px solid ${CARD_BORDER}`, marginTop: 28, paddingTop: 20 }}>
