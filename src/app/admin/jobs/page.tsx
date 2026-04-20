@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { requireAdmin } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import { JobCodePill } from '@/components/JobCodePill'
 import { JobsFilterClient } from './JobsFilterClient'
 
 export const dynamic = 'force-dynamic'
@@ -60,6 +61,7 @@ type Row = {
   id: string
   title: string
   status: string
+  job_code: string | null
   start_date: string | null
   end_date: string | null
   location: string | null
@@ -70,8 +72,9 @@ type Row = {
   call_time: string | null
   created_at: string | null
   updated_at: string | null
+  crewed_at: string | null
   profiles: ClientJoin | ClientJoin[] | null
-  job_bookings: Array<{ id: string; status: string }> | null
+  job_bookings: Array<{ id: string; status: string; auto_accepted: boolean | null }> | null
 }
 
 export default async function AdminJobsPage({
@@ -84,12 +87,12 @@ export default async function AdminJobsPage({
   const { data } = await supabase
     .from('jobs')
     .select(
-      `id, title, status, start_date, end_date, location,
+      `id, title, status, job_code, start_date, end_date, location,
        address_city, address_state, day_rate_cents, num_talent, call_time,
-       created_at, updated_at,
+       created_at, updated_at, crewed_at,
        profiles!jobs_client_id_fkey (full_name,
          client_profiles (company_name)),
-       job_bookings (id, status)`
+       job_bookings (id, status, auto_accepted)`
     )
     .order('start_date', { ascending: false, nullsFirst: false })
 
@@ -157,6 +160,7 @@ export default async function AdminJobsPage({
             const confirmedCount = bookings.filter(
               (b) => b.status === 'confirmed'
             ).length
+            const anyAutoAccepted = bookings.some((b) => b.auto_accepted)
             const numNeeded = j.num_talent ?? null
             const fullyCrewed =
               numNeeded != null && confirmedCount >= numNeeded && numNeeded > 0
@@ -198,6 +202,11 @@ export default async function AdminJobsPage({
                   </p>
                   <StatusBadge status={j.status} size="sm" />
                 </div>
+                {j.job_code && (
+                  <div className="mt-1">
+                    <JobCodePill code={j.job_code} />
+                  </div>
+                )}
 
                 {/* Row 2: client + date */}
                 <div className="flex items-center gap-2 mt-1.5">
@@ -266,6 +275,27 @@ export default async function AdminJobsPage({
                         <span style={{ fontSize: 12, color: '#AABDE0' }}>
                           {confirmedCount}/{numNeeded ?? '?'} talent
                         </span>
+                        {anyAutoAccepted && (
+                          <span
+                            title="Auto-accepted booking"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3,
+                              padding: '2px 7px',
+                              borderRadius: 999,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              letterSpacing: '0.06em',
+                              textTransform: 'uppercase',
+                              background: 'rgba(34,197,94,0.18)',
+                              color: '#86EFAC',
+                              border: '1px solid rgba(34,197,94,0.35)',
+                            }}
+                          >
+                            ⚡ Auto
+                          </span>
+                        )}
                       </span>
                     )}
                     {j.day_rate_cents != null && (

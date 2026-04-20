@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
+  { key: 'completed', label: 'Completed' },
   { key: 'nojobs', label: 'No jobs' },
 ]
 

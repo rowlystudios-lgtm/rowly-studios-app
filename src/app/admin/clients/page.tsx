@@ -20,8 +20,20 @@ type ClientProfileJoin = {
   bio: string | null
 }
 
-type JobStub = { id: string; status: string }
-type InvoiceStub = { id: string; total_cents: number | null; status: string }
+type JobStub = {
+  id: string
+  status: string
+  day_rate_cents: number | null
+  num_talent: number | null
+  start_date: string | null
+  end_date: string | null
+}
+type InvoiceStub = {
+  id: string
+  total_cents: number | null
+  status: string
+  job_id: string | null
+}
 
 type Row = {
   id: string
@@ -75,8 +87,9 @@ export default async function AdminClientsPage({
        verified, verified_at, created_at,
        client_profiles (company_name, industry, website, billing_email,
          logo_url, entity_type, bio),
-       jobs!jobs_client_id_fkey (id, status),
-       invoices!invoices_client_id_fkey (id, total_cents, status)`
+       jobs!jobs_client_id_fkey (id, status, day_rate_cents, num_talent,
+         start_date, end_date),
+       invoices!invoices_client_id_fkey (id, total_cents, status, job_id)`
     )
     .eq('role', 'client')
     .order('verified', { ascending: false })
@@ -94,6 +107,19 @@ export default async function AdminClientsPage({
     totalJobs: number
     activeJobs: number
     outstandingCents: number
+    /** Estimated $ on wrapped jobs that have no invoice yet. */
+    uninvoicedCents: number
+    uninvoicedJobCount: number
+    draftInvoiceCount: number
+  }
+
+  function daysBetween(start: string | null, end: string | null): number {
+    if (!start) return 1
+    const s = new Date(start)
+    const e = end ? new Date(end) : s
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 1
+    const ms = e.getTime() - s.getTime()
+    return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)) + 1)
   }
 
   function enhance(r: Row): Enhanced {
@@ -106,6 +132,29 @@ export default async function AdminClientsPage({
     const outstanding = invoices
       .filter((i) => i.status === 'sent' || i.status === 'overdue')
       .reduce((s, i) => s + (i.total_cents ?? 0), 0)
+
+    // For every wrapped job, see if it has a non-void invoice already. If
+    // not, estimate the ready-to-bill dollars from job.day_rate × num_talent × days.
+    const invoicedJobIds = new Set(
+      invoices
+        .filter((i) => i.status !== 'void' && i.job_id)
+        .map((i) => i.job_id as string)
+    )
+    let uninvoicedCents = 0
+    let uninvoicedJobs = 0
+    for (const j of jobs) {
+      if (j.status !== 'wrapped') continue
+      if (invoicedJobIds.has(j.id)) continue
+      const days = daysBetween(j.start_date, j.end_date)
+      const perDay = j.day_rate_cents ?? 0
+      const numTalent = j.num_talent ?? 1
+      uninvoicedCents += perDay * numTalent * days
+      uninvoicedJobs += 1
+    }
+    const draftInvoiceCount = invoices.filter(
+      (i) => i.status === 'draft'
+    ).length
+
     return {
       ...r,
       cp,
@@ -113,6 +162,9 @@ export default async function AdminClientsPage({
       totalJobs: jobs.length,
       activeJobs: active,
       outstandingCents: outstanding,
+      uninvoicedCents,
+      uninvoicedJobCount: uninvoicedJobs,
+      draftInvoiceCount,
     }
   }
 
@@ -122,6 +174,12 @@ export default async function AdminClientsPage({
   const shown = all.filter((r) => {
     if (filter === 'active') return r.activeJobs > 0
     if (filter === 'nojobs') return r.totalJobs === 0
+    if (filter === 'completed') {
+      // All jobs terminal AND either has wrapped jobs without invoices, or
+      // has draft invoices that still need processing.
+      if (r.activeJobs > 0 || r.totalJobs === 0) return false
+      return r.uninvoicedJobCount > 0 || r.draftInvoiceCount > 0
+    }
     return true
   })
 
@@ -393,6 +451,71 @@ export default async function AdminClientsPage({
                     ) : null}
                   </div>
                 </div>
+
+                {filter === 'completed' && r.uninvoicedCents > 0 && (
+                  <div
+                    className="mt-3 flex items-center justify-between gap-2 rounded-lg"
+                    style={{
+                      background: 'rgba(240,165,0,0.10)',
+                      border: '1px solid rgba(240,165,0,0.30)',
+                      padding: '8px 10px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: '#F0A500',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {centsToUsd(r.uninvoicedCents)} ready to invoice (
+                      {r.uninvoicedJobCount} job
+                      {r.uninvoicedJobCount === 1 ? '' : 's'})
+                    </span>
+                    <Link
+                      href={`/admin/finance/new?client=${r.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        padding: '6px 10px',
+                        borderRadius: 7,
+                        background: '#F0A500',
+                        color: '#0F1B2E',
+                        textDecoration: 'none',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      + Invoice now
+                    </Link>
+                  </div>
+                )}
+                {filter === 'completed' &&
+                  r.uninvoicedCents === 0 &&
+                  r.draftInvoiceCount > 0 && (
+                    <div
+                      className="mt-3 flex items-center justify-between gap-2 rounded-lg"
+                      style={{
+                        background: 'rgba(59,130,246,0.12)',
+                        border: '1px solid rgba(59,130,246,0.35)',
+                        padding: '8px 10px',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: '#93C5FD',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {r.draftInvoiceCount} draft invoice
+                        {r.draftInvoiceCount === 1 ? '' : 's'} pending — review
+                        and send
+                      </span>
+                    </div>
+                  )}
               </Link>
             )
           })}

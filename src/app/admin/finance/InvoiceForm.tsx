@@ -307,6 +307,11 @@ export function InvoiceForm({
   )
   const taxCents = Math.round(subtotalCents * (taxPercent / 100))
   const totalCents = subtotalCents + taxCents
+  // Mirror the 15% RS production fee so admins see the final client-billed
+  // amount while they build the invoice.
+  const RS_FEE_PERCENT = 15
+  const rsFeeCents = Math.round((totalCents * RS_FEE_PERCENT) / 100)
+  const clientTotalCents = totalCents + rsFeeCents
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -666,13 +671,31 @@ export function InvoiceForm({
           )}
           <div
             className="flex items-center justify-between mt-3 pt-3"
-            style={{ borderTop: '1px solid #E5E7EB' }}
+            style={{ borderTop: '1px solid #E5E7EB', fontSize: 13, color: '#496275' }}
+          >
+            <span>Talent total</span>
+            <span style={{ fontWeight: 600, color: '#1E3A6B' }}>
+              {fmtCents(totalCents)}
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between mt-1"
+            style={{ fontSize: 13, color: '#496275' }}
+          >
+            <span>RS fee ({RS_FEE_PERCENT}%)</span>
+            <span style={{ fontWeight: 600, color: '#1E3A6B' }}>
+              {fmtCents(rsFeeCents)}
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between mt-2 pt-2"
+            style={{ borderTop: '2px solid #1E3A6B' }}
           >
             <span style={{ fontSize: 14, fontWeight: 700, color: '#1E3A6B' }}>
-              Total
+              Client total
             </span>
             <span style={{ fontSize: 18, fontWeight: 700, color: '#1E3A6B' }}>
-              {fmtCents(totalCents)}
+              {fmtCents(clientTotalCents)}
             </span>
           </div>
         </div>

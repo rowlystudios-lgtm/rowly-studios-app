@@ -14,7 +14,12 @@ export type GmailInvoicePayload = {
   }>
   subtotalCents: number
   taxCents: number
+  // totalCents = what talent get paid (subtotal + tax)
   totalCents: number
+  rsFeeCents: number
+  rsFeePercent: number
+  // clientTotalCents = talent total + RS production fee — what the client pays
+  clientTotalCents: number
   notes: string | null
   reminder?: boolean
 }
@@ -71,9 +76,15 @@ export function buildInvoiceBody(p: GmailInvoicePayload): string {
     lines.push(`Subtotal: ${fmtCents(p.subtotalCents)}`)
     if (p.taxCents > 0) lines.push(`Tax: ${fmtCents(p.taxCents)}`)
   }
+  lines.push(`Talent services total: ${fmtCents(p.totalCents)}`)
+  lines.push(`Production fee (${p.rsFeePercent}%): ${fmtCents(p.rsFeeCents)}`)
   lines.push('')
-  lines.push(`TOTAL DUE: ${fmtCents(p.totalCents)}`)
+  lines.push(`TOTAL DUE: ${fmtCents(p.clientTotalCents)}`)
   lines.push('-----------------------------------')
+  lines.push('')
+  lines.push(
+    `Amount due includes a ${p.rsFeePercent}% Rowly Studios production fee.`
+  )
   lines.push('')
   if (p.notes) {
     lines.push(p.notes)

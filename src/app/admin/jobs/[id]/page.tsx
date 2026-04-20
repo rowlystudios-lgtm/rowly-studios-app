@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import { JobCodePill } from '@/components/JobCodePill'
 import { generateInvoice } from '../actions'
 import { StatusActionButtons } from './StatusActionButtons'
 import { BookingAdminActions } from './BookingAdminActions'
@@ -32,6 +33,7 @@ type Job = {
   id: string
   title: string
   status: string
+  job_code: string | null
   start_date: string | null
   end_date: string | null
   call_time: string | null
@@ -96,6 +98,8 @@ type Booking = {
   paid: boolean | null
   paid_at: string | null
   created_at: string | null
+  auto_accepted: boolean | null
+  auto_accepted_at: string | null
   talent_reviewed_at: string | null
   response_deadline_at: string | null
   nudge_count: number | null
@@ -174,7 +178,8 @@ export default async function AdminJobDetailPage({
       .from('job_bookings')
       .select(
         `id, status, confirmed_rate_cents, offered_rate_cents, paid, paid_at,
-         created_at, talent_reviewed_at, response_deadline_at, nudge_count,
+         created_at, auto_accepted, auto_accepted_at,
+         talent_reviewed_at, response_deadline_at, nudge_count,
          nudged_at, declined_reason, rate_negotiation_notes,
          profiles!job_bookings_talent_id_fkey (id, full_name, avatar_url, email, phone,
            talent_profiles (department, primary_role, day_rate_cents))`
@@ -250,12 +255,27 @@ export default async function AdminJobDetailPage({
         style={{ padding: 20 }}
       >
         <div className="flex items-start justify-between gap-3">
-          <h1
-            className="text-white"
-            style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}
-          >
-            {job.title}
-          </h1>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1
+              className="text-white"
+              style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2 }}
+            >
+              {job.title}
+            </h1>
+            {job.job_code && (
+              <p
+                className="mt-1"
+                style={{
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontSize: 11,
+                  color: '#7A90AA',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Job # {job.job_code}
+              </p>
+            )}
+          </div>
           <StatusBadge status={job.status} />
         </div>
         <p
@@ -435,6 +455,23 @@ export default async function AdminJobDetailPage({
                       style={{ flexShrink: 0 }}
                     >
                       <StatusBadge status={b.status} size="sm" />
+                      {b.auto_accepted && (
+                        <span
+                          className="rounded-full"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            background: 'rgba(34,197,94,0.18)',
+                            color: '#86EFAC',
+                            border: '1px solid rgba(34,197,94,0.35)',
+                          }}
+                        >
+                          ⚡ Auto-accepted
+                        </span>
+                      )}
                       {b.confirmed_rate_cents != null && (
                         <span style={{ fontSize: 12, color: '#4ADE80', fontWeight: 600 }}>
                           Confirmed: {centsToUsd(b.confirmed_rate_cents)}/day

@@ -2,8 +2,14 @@ export type InvoicePdfInvoice = {
   invoice_number: string | null
   created_at: string | null
   due_date: string | null
+  // total_cents = what talent get paid (subtotal + tax).
   total_cents: number | null
   tax_cents: number | null
+  rs_fee_cents?: number | null
+  rs_fee_percent?: number | null
+  // client_total_cents = talent total + RS production fee. The client is
+  // billed this amount.
+  client_total_cents?: number | null
   notes: string | null
 }
 
@@ -64,9 +70,13 @@ export function generateInvoiceHTML(
   job: InvoicePdfJob
 ): string {
   const fmt = fmtCents
-  const total = invoice.total_cents ?? 0
+  const talentTotal = invoice.total_cents ?? 0
   const tax = invoice.tax_cents ?? 0
-  const subtotal = total - tax
+  const subtotal = talentTotal - tax
+  const rsFeePercent = Number(invoice.rs_fee_percent ?? 15)
+  const rsFeeCents =
+    invoice.rs_fee_cents ?? Math.round((talentTotal * rsFeePercent) / 100)
+  const clientTotal = invoice.client_total_cents ?? talentTotal + rsFeeCents
 
   const lineRows = lineItems
     .map(
@@ -94,13 +104,18 @@ export function generateInvoiceHTML(
   const clientEmail = client.billing_email ?? client.email ?? ''
   const jobTitle = job?.title ?? ''
   const jobStart = job?.start_date ? longDate(job.start_date) : ''
-  const taxBlock =
+  const subtotalRow =
     tax > 0
       ? `<tr><td colspan="3" style="padding:10px 0;text-align:right;color:#888">Subtotal</td>
             <td style="padding:10px 0;text-align:right">${fmt(subtotal)}</td></tr>
          <tr><td colspan="3" style="padding:4px 0;text-align:right;color:#888">Tax</td>
             <td style="padding:4px 0;text-align:right">${fmt(tax)}</td></tr>`
       : ''
+  const feeRows = `
+    <tr><td colspan="3" style="padding:10px 0;text-align:right;color:#666;border-top:1px solid #eee">Talent services total</td>
+        <td style="padding:10px 0;text-align:right;font-weight:600;border-top:1px solid #eee">${fmt(talentTotal)}</td></tr>
+    <tr><td colspan="3" style="padding:6px 0;text-align:right;color:#666">Production fee (${rsFeePercent}%)</td>
+        <td style="padding:6px 0;text-align:right">${fmt(rsFeeCents)}</td></tr>`
   const notesBlock = invoice.notes
     ? `<p style="margin-top:24px;font-size:13px;color:#555">${escapeHtml(
         invoice.notes
@@ -174,10 +189,11 @@ export function generateInvoiceHTML(
     </thead>
     <tbody>${lineRows}</tbody>
     <tfoot>
-      ${taxBlock}
+      ${subtotalRow}
+      ${feeRows}
       <tr class="total-row">
         <td colspan="3" style="text-align:right">Total Due</td>
-        <td style="text-align:right">${fmt(total)}</td>
+        <td style="text-align:right">${fmt(clientTotal)}</td>
       </tr>
     </tfoot>
   </table>
@@ -185,7 +201,8 @@ export function generateInvoiceHTML(
   ${notesBlock}
 
   <div class="footer">
-    <p>Payment terms: Net 14 days. Please reference ${escapeHtml(
+    <p>Amount due includes a ${rsFeePercent}% Rowly Studios production fee.</p>
+    <p style="margin-top:6px">Payment terms: Net 14 days. Please reference ${escapeHtml(
       invoice.invoice_number ?? 'this invoice'
     )} with payment.</p>
     <p style="margin-top:6px">Rowly Studios · rowlystudios@gmail.com · Los Angeles, CA</p>

@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DashboardRefreshButton } from '@/components/DashboardRefreshButton'
+import { OffersInFlight, type OfferInFlight } from './OffersInFlight'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,6 +98,7 @@ export default async function AdminDashboardPage() {
     upcomingRes,
     recentRes,
     todaysBookingsRes,
+    offersInFlightRes,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -165,6 +167,20 @@ export default async function AdminDashboardPage() {
       .filter('jobs.start_date', 'eq', today)
       .neq('status', 'declined')
       .neq('status', 'cancelled'),
+    // Query 5 — offers in flight (requested / negotiating on active jobs).
+    supabase
+      .from('job_bookings')
+      .select(
+        `id, status, offered_rate_cents, talent_reviewed_at,
+         response_deadline_at, nudge_count, auto_accepted,
+         jobs!inner (id, title, job_code, status, start_date, location, num_talent,
+           profiles!jobs_client_id_fkey (full_name,
+             client_profiles (company_name))),
+         profiles!job_bookings_talent_id_fkey (id, full_name, avatar_url,
+           talent_profiles (primary_role))`
+      )
+      .in('status', ['requested', 'negotiating'])
+      .order('created_at', { ascending: true }),
   ])
 
   const verifiedTalent = verifiedTalentRes.count ?? 0
@@ -284,6 +300,91 @@ export default async function AdminDashboardPage() {
     return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
   }
 
+  // ─── Offers in flight ───
+  type OfferRaw = {
+    id: string
+    status: string
+    offered_rate_cents: number | null
+    talent_reviewed_at: string | null
+    response_deadline_at: string | null
+    nudge_count: number | null
+    auto_accepted: boolean | null
+    jobs:
+      | {
+          id: string
+          title: string
+          job_code: string | null
+          status: string
+          start_date: string | null
+          location: string | null
+          num_talent: number | null
+          profiles: ClientJoin | ClientJoin[] | null
+        }
+      | {
+          id: string
+          title: string
+          job_code: string | null
+          status: string
+          start_date: string | null
+          location: string | null
+          num_talent: number | null
+          profiles: ClientJoin | ClientJoin[] | null
+        }[]
+      | null
+    profiles:
+      | {
+          id: string
+          full_name: string | null
+          avatar_url: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }
+      | {
+          id: string
+          full_name: string | null
+          avatar_url: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }[]
+      | null
+  }
+  const rawOffers = (offersInFlightRes.data ?? []) as unknown as OfferRaw[]
+  const offers: OfferInFlight[] = []
+  for (const r of rawOffers) {
+    const job = unwrap(r.jobs)
+    if (!job) continue
+    // Spec excludes wrapped/cancelled jobs (the !inner already filters most
+    // of these, but double-check in case a job just flipped).
+    if (job.status === 'cancelled' || job.status === 'wrapped') continue
+    const talent = unwrap(r.profiles)
+    const tp = talent ? unwrap(talent.talent_profiles) : null
+    offers.push({
+      bookingId: r.id,
+      bookingStatus: (r.status === 'negotiating'
+        ? 'negotiating'
+        : 'requested') as 'requested' | 'negotiating',
+      offeredRateCents: r.offered_rate_cents,
+      talentReviewedAt: r.talent_reviewed_at,
+      responseDeadlineAt: r.response_deadline_at,
+      nudgeCount: r.nudge_count,
+      autoAccepted: Boolean(r.auto_accepted),
+      jobId: job.id,
+      jobTitle: job.title,
+      jobCode: job.job_code,
+      jobStart: job.start_date,
+      jobLocation: job.location,
+      talentId: talent?.id ?? '',
+      talentName: talent?.full_name ?? 'Talent',
+      talentRole: tp?.primary_role ?? null,
+      talentAvatar: talent?.avatar_url ?? null,
+      clientName: clientDisplay(job.profiles),
+    })
+  }
+
   return (
     <div className="px-5 pt-5 pb-6 mx-auto" style={{ maxWidth: 720 }}>
       {/* Greeting */}
@@ -370,6 +471,9 @@ export default async function AdminDashboardPage() {
       >
         + New job
       </Link>
+
+      {/* Offers in flight */}
+      <OffersInFlight offers={offers} />
 
       {/* Upcoming shoots */}
       <section className="mt-6">

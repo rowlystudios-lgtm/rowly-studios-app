@@ -448,7 +448,7 @@ export async function addTalentToJob(formData: FormData) {
       .maybeSingle(),
     supabase
       .from('jobs')
-      .select('day_rate_cents, client_budget_cents')
+      .select('client_id, day_rate_cents, client_budget_cents, num_talent, crewed_at')
       .eq('id', jobId)
       .maybeSingle(),
   ])
@@ -466,25 +466,73 @@ export async function addTalentToJob(formData: FormData) {
       null
   }
 
+  // ─── Auto-accept check ───
+  // If this talent has auto_accept enabled with this client, skip the
+  // usual "requested → review" handshake and confirm immediately.
+  let autoAccept = false
+  let autoRate: number | null = null
+  if (job?.client_id) {
+    const { data: rel } = await supabase
+      .from('client_talent_relationships')
+      .select('auto_accept, auto_accept_rate')
+      .eq('client_id', job.client_id)
+      .eq('talent_id', talentId)
+      .maybeSingle()
+    if (rel?.auto_accept) {
+      autoAccept = true
+      autoRate = rel.auto_accept_rate ?? tp?.day_rate_cents ?? offeredCents
+    }
+  }
+
   const deadline = new Date()
   deadline.setHours(deadline.getHours() + 24)
 
+  const insertPayload: Record<string, unknown> = {
+    job_id: jobId,
+    talent_id: talentId,
+    offered_rate_cents: autoAccept ? autoRate : offeredCents,
+    response_deadline_at: deadline.toISOString(),
+  }
+  if (autoAccept) {
+    insertPayload.status = 'confirmed'
+    insertPayload.confirmed_rate_cents = autoRate
+    insertPayload.auto_accepted = true
+    insertPayload.auto_accepted_at = new Date().toISOString()
+    insertPayload.talent_reviewed_at = new Date().toISOString()
+  } else {
+    insertPayload.status = 'requested'
+    insertPayload.confirmed_rate_cents = null
+  }
+
   const { data: inserted } = await supabase
     .from('job_bookings')
-    .insert({
-      job_id: jobId,
-      talent_id: talentId,
-      status: 'requested',
-      offered_rate_cents: offeredCents,
-      confirmed_rate_cents: null,
-      response_deadline_at: deadline.toISOString(),
-    })
+    .insert(insertPayload)
     .select('id')
     .single()
 
   if (inserted?.id) {
     try {
-      await notifyJobOffer(inserted.id)
+      if (autoAccept) {
+        // Talent + client both get a confirmation notification — no "pending offer".
+        await notifyConfirmation(inserted.id)
+        // Check if job is now fully crewed.
+        if (job?.num_talent != null && job.num_talent > 0 && !job.crewed_at) {
+          const { count: confirmedCount } = await supabase
+            .from('job_bookings')
+            .select('id', { count: 'exact', head: true })
+            .eq('job_id', jobId)
+            .eq('status', 'confirmed')
+          if ((confirmedCount ?? 0) >= job.num_talent) {
+            await supabase
+              .from('jobs')
+              .update({ crewed_at: new Date().toISOString() })
+              .eq('id', jobId)
+            await notifyFullyCrewed(jobId)
+          }
+        }
+      } else {
+        await notifyJobOffer(inserted.id)
+      }
     } catch {
       // non-fatal
     }

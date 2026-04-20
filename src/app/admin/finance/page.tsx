@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import { JobCodePill } from '@/components/JobCodePill'
 import { FinanceFilterClient } from './FinanceFilterClient'
 
 export const dynamic = 'force-dynamic'
@@ -44,13 +45,15 @@ type InvoiceRow = {
   status: string
   total_cents: number | null
   tax_cents: number | null
+  rs_fee_cents: number | null
+  client_total_cents: number | null
   due_date: string | null
   sent_at: string | null
   paid_at: string | null
   created_at: string | null
   jobs:
-    | { title: string; start_date: string | null }
-    | { title: string; start_date: string | null }[]
+    | { title: string; job_code: string | null; start_date: string | null }
+    | { title: string; job_code: string | null; start_date: string | null }[]
     | null
   profiles: ClientJoin | ClientJoin[] | null
 }
@@ -68,8 +71,9 @@ export default async function AdminFinancePage({
       .from('invoices')
       .select(
         `id, invoice_number, status, total_cents, tax_cents,
+         rs_fee_cents, client_total_cents,
          due_date, sent_at, paid_at, created_at,
-         jobs (title, start_date),
+         jobs (title, job_code, start_date),
          profiles!invoices_client_id_fkey (full_name,
            client_profiles (company_name, billing_email))`
       )
@@ -107,7 +111,13 @@ export default async function AdminFinancePage({
   let sentCount = 0
   let overdueCount = 0
   for (const i of rows) {
-    const total = i.total_cents ?? 0
+    // Aggregate on the client-billed amount (talent total + production fee) —
+    // this is the actual revenue figure for the business. Fall back to an
+    // imputed 15% on top of total_cents for legacy invoices that haven't
+    // had client_total_cents populated yet.
+    const talent = i.total_cents ?? 0
+    const total =
+      i.client_total_cents ?? talent + Math.round(talent * 0.15)
     const overdueByDate =
       i.status === 'sent' && i.due_date && i.due_date < today
     if (i.status === 'paid') totalPaid += total
@@ -171,6 +181,11 @@ export default async function AdminFinancePage({
   function jobLabel(j: InvoiceRow['jobs']): string | null {
     const row = unwrap(j)
     return row?.title ?? null
+  }
+
+  function jobCode(j: InvoiceRow['jobs']): string | null {
+    const row = unwrap(j)
+    return row?.job_code ?? null
   }
 
   return (
@@ -297,6 +312,7 @@ export default async function AdminFinancePage({
               i.status === 'sent' && i.due_date && i.due_date < today
             const effectiveStatus = overdueByDate ? 'overdue' : i.status
             const job = jobLabel(i.jobs)
+            const jCode = jobCode(i.jobs)
             let dateLabel = ''
             let dateColor = '#7A90AA'
             if (i.status === 'paid' && i.paid_at) {
@@ -358,6 +374,11 @@ export default async function AdminFinancePage({
                         {job}
                       </p>
                     )}
+                    {jCode && (
+                      <div className="mt-1">
+                        <JobCodePill code={jCode} />
+                      </div>
+                    )}
                   </div>
 
                   <div
@@ -368,7 +389,11 @@ export default async function AdminFinancePage({
                       className="text-white"
                       style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}
                     >
-                      {centsToUsd(i.total_cents)}
+                      {centsToUsd(
+                        i.client_total_cents ??
+                          (i.total_cents ?? 0) +
+                            Math.round((i.total_cents ?? 0) * 0.15)
+                      )}
                     </p>
                     {i.tax_cents != null && i.tax_cents > 0 && (
                       <p style={{ fontSize: 11, color: '#7A90AA', marginTop: 2 }}>

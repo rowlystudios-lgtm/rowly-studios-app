@@ -64,8 +64,12 @@ async function nextInvoiceNumber(
 }
 
 /**
- * Recompute invoices.total_cents by summing line items + tax.
- * Called after any add/remove/update of line items.
+ * Recompute invoices.total_cents / rs_fee_cents / client_total_cents.
+ *
+ * Invariants:
+ *   total_cents        = Σ line items + tax   ← what talent get paid
+ *   rs_fee_cents       = round(total_cents * rs_fee_percent / 100)
+ *   client_total_cents = total_cents + rs_fee_cents
  */
 async function recalcTotal(
   supabase: Awaited<ReturnType<typeof requireAdmin>>['supabase'],
@@ -78,7 +82,7 @@ async function recalcTotal(
       .eq('invoice_id', invoiceId),
     supabase
       .from('invoices')
-      .select('tax_cents')
+      .select('tax_cents, rs_fee_percent')
       .eq('id', invoiceId)
       .maybeSingle(),
   ])
@@ -87,9 +91,16 @@ async function recalcTotal(
     0
   )
   const tax = inv?.tax_cents ?? 0
+  const total = itemSum + tax
+  const feePercent = Number(inv?.rs_fee_percent ?? 15)
+  const rsFee = Math.round((total * feePercent) / 100)
   await supabase
     .from('invoices')
-    .update({ total_cents: itemSum + tax })
+    .update({
+      total_cents: total,
+      rs_fee_cents: rsFee,
+      client_total_cents: total + rsFee,
+    })
     .eq('id', invoiceId)
 }
 
@@ -117,6 +128,10 @@ export async function createInvoice(formData: FormData) {
   const subtotal = items.reduce((s, i) => s + i.total_cents, 0)
   const taxCents = Math.round(subtotal * (taxRate / 100))
   const total = subtotal + taxCents
+  // total_cents is what talent get paid; RS takes rs_fee_cents on top.
+  const rsFeePercent = 15
+  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
+  const clientTotalCents = total + rsFeeCents
   const invoiceNumber = await nextInvoiceNumber(supabase)
 
   const { data: inv, error } = await supabase
@@ -128,6 +143,10 @@ export async function createInvoice(formData: FormData) {
       status: 'draft',
       total_cents: total,
       tax_cents: taxCents,
+      rs_fee_percent: rsFeePercent,
+      rs_fee_cents: rsFeeCents,
+      client_total_cents: clientTotalCents,
+      invoice_verified: false,
       due_date: dueDate,
       notes,
       created_by: user.id,
@@ -175,6 +194,16 @@ export async function updateInvoiceDraft(formData: FormData) {
   const subtotal = items.reduce((s, i) => s + i.total_cents, 0)
   const taxCents = Math.round(subtotal * (taxRate / 100))
   const total = subtotal + taxCents
+  // Pull the active fee % so edits keep the same fee contract the invoice was
+  // created with (defaults to 15 if unset).
+  const { data: feeRow } = await supabase
+    .from('invoices')
+    .select('rs_fee_percent')
+    .eq('id', invoiceId)
+    .maybeSingle()
+  const rsFeePercent = Number(feeRow?.rs_fee_percent ?? 15)
+  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
+  const clientTotalCents = total + rsFeeCents
 
   await supabase
     .from('invoices')
@@ -183,6 +212,13 @@ export async function updateInvoiceDraft(formData: FormData) {
       notes,
       tax_cents: taxCents,
       total_cents: total,
+      rs_fee_cents: rsFeeCents,
+      client_total_cents: clientTotalCents,
+      // Any edit to a draft invalidates the admin's prior verification —
+      // they need to re-review the updated totals before sending.
+      invoice_verified: false,
+      verified_by: null,
+      verified_at: null,
     })
     .eq('id', invoiceId)
 
@@ -231,9 +267,21 @@ async function updateStatus(
 }
 
 export async function markAsSent(formData: FormData) {
+  const { supabase } = await requireAdmin()
   const invoiceId = ((formData.get('invoiceId') as string) ?? '').trim()
-  await updateStatus(formData, 'sent')
   if (!invoiceId) return
+  // Guard: never let an unverified draft leave the building. The UI already
+  // hides the send button until verified, but enforce server-side too.
+  const { data: guardRow } = await supabase
+    .from('invoices')
+    .select('invoice_verified')
+    .eq('id', invoiceId)
+    .maybeSingle()
+  if (!guardRow?.invoice_verified) {
+    revalidatePath(`/admin/finance/${invoiceId}`)
+    return
+  }
+  await updateStatus(formData, 'sent')
   // Fire-and-forget the Drive upload — the main action has already
   // completed and revalidated, and Drive is allowed to fail soft.
   try {
@@ -242,6 +290,31 @@ export async function markAsSent(formData: FormData) {
     // eslint-disable-next-line no-console
     console.error('[invoice] Drive upload failed for', invoiceId, err)
   }
+  revalidatePath(`/admin/finance/${invoiceId}`)
+}
+
+/**
+ * Mark a draft invoice as verified by the admin. This unlocks the
+ * "Send via Gmail" button and records who signed off and when.
+ */
+export async function verifyInvoice(formData: FormData) {
+  const { supabase, user } = await requireAdmin()
+  const invoiceId = ((formData.get('invoiceId') as string) ?? '').trim()
+  if (!invoiceId) return
+  const { data: existing } = await supabase
+    .from('invoices')
+    .select('status')
+    .eq('id', invoiceId)
+    .maybeSingle()
+  if (!existing || existing.status !== 'draft') return
+  await supabase
+    .from('invoices')
+    .update({
+      invoice_verified: true,
+      verified_by: user.id,
+      verified_at: new Date().toISOString(),
+    })
+    .eq('id', invoiceId)
   revalidatePath(`/admin/finance/${invoiceId}`)
 }
 
@@ -316,6 +389,9 @@ async function uploadInvoiceToDrive(invoiceId: string) {
       due_date: invoice.due_date,
       total_cents: invoice.total_cents,
       tax_cents: invoice.tax_cents,
+      rs_fee_cents: invoice.rs_fee_cents,
+      rs_fee_percent: invoice.rs_fee_percent,
+      client_total_cents: invoice.client_total_cents,
       notes: invoice.notes,
     },
     (lineItems ?? []) as Array<{

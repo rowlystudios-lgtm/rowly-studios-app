@@ -19,7 +19,12 @@ export type PreviewInvoice = {
   }>
   subtotalCents: number
   taxCents: number
+  // totalCents = talent total (what talent get paid, subtotal + tax)
   totalCents: number
+  rsFeeCents: number
+  rsFeePercent: number
+  // clientTotalCents = what the client actually pays (talent total + fee)
+  clientTotalCents: number
   notes: string | null
 }
 
@@ -382,21 +387,23 @@ export function InvoicePreviewButton({
                 style={{
                   marginLeft: 'auto',
                   marginTop: 12,
-                  maxWidth: 280,
+                  maxWidth: 300,
                   fontSize: 13,
                 }}
               >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    padding: '6px 8px',
-                    color: '#374151',
-                  }}
-                >
-                  <span>Subtotal</span>
-                  <span>{fmtCents(invoice.subtotalCents)}</span>
-                </div>
+                {(invoice.items.length > 1 || invoice.taxCents > 0) && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      color: '#374151',
+                    }}
+                  >
+                    <span>Subtotal</span>
+                    <span>{fmtCents(invoice.subtotalCents)}</span>
+                  </div>
+                )}
                 {invoice.taxCents > 0 && (
                   <div
                     style={{
@@ -414,6 +421,32 @@ export function InvoicePreviewButton({
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
+                    padding: '8px',
+                    color: '#374151',
+                    borderTop: '1px solid #E5E7EB',
+                    marginTop: 4,
+                  }}
+                >
+                  <span>Talent services total</span>
+                  <span style={{ fontWeight: 600 }}>
+                    {fmtCents(invoice.totalCents)}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    color: '#374151',
+                  }}
+                >
+                  <span>Production fee ({invoice.rsFeePercent}%)</span>
+                  <span>{fmtCents(invoice.rsFeeCents)}</span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
                     padding: '12px 8px',
                     marginTop: 4,
                     borderTop: '2px solid #0F1B2E',
@@ -422,8 +455,8 @@ export function InvoicePreviewButton({
                     color: '#0F1B2E',
                   }}
                 >
-                  <span>Total</span>
-                  <span>{fmtCents(invoice.totalCents)}</span>
+                  <span>Total Due</span>
+                  <span>{fmtCents(invoice.clientTotalCents)}</span>
                 </div>
               </div>
 

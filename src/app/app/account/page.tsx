@@ -91,7 +91,7 @@ export default function AccountPage() {
     const [profileRes, clientRes] = await Promise.all([
       supabase
         .from('profiles')
-        .select('first_name, last_name, full_name, email, phone, city, avatar_url')
+        .select('first_name, last_name, full_name, email, phone, city, avatar_url, share_code')
         .eq('id', userId)
         .maybeSingle(),
       supabase

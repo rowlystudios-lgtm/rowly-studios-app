@@ -7,6 +7,7 @@ const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'verified', label: 'Verified' },
   { key: 'unverified', label: 'Unverified' },
+  { key: 'active', label: 'Active' },
 ]
 
 export function TalentFilterClient({ current }: { current: string }) {

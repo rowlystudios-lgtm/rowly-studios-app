@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import { JobCodePill } from '@/components/JobCodePill'
 import {
   buildGmailUrl,
   buildInvoiceBody,
   buildInvoiceSubject,
 } from '../gmail'
-import { markAsPaid, markAsOverdue } from '../actions'
+import { markAsPaid, markAsOverdue, verifyInvoice } from '../actions'
 import { GmailSendButton } from './GmailSendButton'
 import { InvoicePreviewButton, type PreviewInvoice } from './InvoicePreviewModal'
 import {
@@ -54,6 +55,11 @@ type Invoice = {
   status: string
   total_cents: number | null
   tax_cents: number | null
+  rs_fee_cents: number | null
+  rs_fee_percent: number | null
+  client_total_cents: number | null
+  invoice_verified: boolean | null
+  verified_at: string | null
   due_date: string | null
   sent_at: string | null
   paid_at: string | null
@@ -68,6 +74,7 @@ type Invoice = {
     | {
         id: string
         title: string
+        job_code: string | null
         start_date: string | null
         end_date: string | null
         location: string | null
@@ -75,6 +82,7 @@ type Invoice = {
     | {
         id: string
         title: string
+        job_code: string | null
         start_date: string | null
         end_date: string | null
         location: string | null
@@ -157,10 +165,12 @@ export default async function AdminInvoiceDetailPage({
     supabase
       .from('invoices')
       .select(
-        `id, invoice_number, status, total_cents, tax_cents, due_date,
-         sent_at, paid_at, voided_at, notes, created_at, client_id, job_id,
-         drive_file_id, drive_file_url,
-         jobs (id, title, start_date, end_date, location),
+        `id, invoice_number, status, total_cents, tax_cents,
+         rs_fee_cents, rs_fee_percent, client_total_cents,
+         invoice_verified, verified_at,
+         due_date, sent_at, paid_at, voided_at, notes, created_at,
+         client_id, job_id, drive_file_id, drive_file_url,
+         jobs (id, title, job_code, start_date, end_date, location),
          profiles!invoices_client_id_fkey (full_name, email,
            client_profiles (company_name, billing_email, website, entity_type))`
       )
@@ -215,7 +225,14 @@ export default async function AdminInvoiceDetailPage({
     0
   )
   const taxCents = invoice.tax_cents ?? 0
+  // total_cents = what talent get paid (subtotal + tax)
   const total = invoice.total_cents ?? subtotalCents + taxCents
+  const rsFeePercent = Number(invoice.rs_fee_percent ?? 15)
+  // Trust the persisted rs_fee_cents if set, otherwise recompute from total.
+  const rsFeeCents =
+    invoice.rs_fee_cents ?? Math.round((total * rsFeePercent) / 100)
+  const clientTotal = invoice.client_total_cents ?? total + rsFeeCents
+  const isVerified = invoice.invoice_verified === true
 
   const jobDateLabel = job
     ? formatRange(job.start_date, job.end_date)
@@ -246,6 +263,9 @@ export default async function AdminInvoiceDetailPage({
     subtotalCents,
     taxCents,
     totalCents: total,
+    rsFeeCents,
+    rsFeePercent,
+    clientTotalCents: clientTotal,
     notes: invoice.notes,
   })
   const normalSubject = buildInvoiceSubject(
@@ -267,6 +287,9 @@ export default async function AdminInvoiceDetailPage({
     subtotalCents,
     taxCents,
     totalCents: total,
+    rsFeeCents,
+    rsFeePercent,
+    clientTotalCents: clientTotal,
     notes: invoice.notes,
     reminder: true,
   })
@@ -296,6 +319,9 @@ export default async function AdminInvoiceDetailPage({
     subtotalCents,
     taxCents,
     totalCents: total,
+    rsFeeCents,
+    rsFeePercent,
+    clientTotalCents: clientTotal,
     notes: invoice.notes,
   }
 
@@ -340,16 +366,30 @@ export default async function AdminInvoiceDetailPage({
           </div>
           <div className="text-right" style={{ flexShrink: 0 }}>
             <p
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#7A90AA',
+                marginBottom: 2,
+              }}
+            >
+              Client total
+            </p>
+            <p
               className="text-white"
               style={{ fontSize: 26, fontWeight: 700, lineHeight: 1 }}
             >
-              {centsToUsd(total)}
+              {centsToUsd(clientTotal)}
             </p>
-            {taxCents > 0 && (
-              <p style={{ fontSize: 12, color: '#7A90AA', marginTop: 2 }}>
-                incl. {fmtCents(taxCents)} tax
-              </p>
-            )}
+            <p style={{ fontSize: 11, color: '#7A90AA', marginTop: 4 }}>
+              Talent: {fmtCents(total)}
+              {taxCents > 0 && <> · Tax: {fmtCents(taxCents)}</>}
+            </p>
+            <p style={{ fontSize: 11, color: '#7A90AA' }}>
+              RS fee ({rsFeePercent}%): {fmtCents(rsFeeCents)}
+            </p>
           </div>
         </div>
 
@@ -420,6 +460,11 @@ export default async function AdminInvoiceDetailPage({
                 >
                   {job.title}
                 </Link>
+                {job.job_code && (
+                  <div style={{ marginTop: 4 }}>
+                    <JobCodePill code={job.job_code} />
+                  </div>
+                )}
                 {jobDateLabel && (
                   <p style={{ fontSize: 13, color: '#AABDE0', marginTop: 2 }}>
                     {jobDateLabel}
@@ -494,23 +539,108 @@ export default async function AdminInvoiceDetailPage({
           </div>
         )}
 
-        {isDraft && (
-          <>
-            <GmailSendButton
-              invoiceId={invoice.id}
-              gmailUrl={gmailUrl}
-              label="Send via Gmail"
-              variant="primary"
-            />
+        {isDraft && !isVerified && (
+          <div
+            className="rounded-xl"
+            style={{
+              background: 'rgba(240,165,0,0.08)',
+              border: '1px solid rgba(240,165,0,0.35)',
+              padding: 16,
+            }}
+          >
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#F0A500',
+                marginBottom: 10,
+              }}
+            >
+              ⚠ Verify before sending
+            </p>
+            <p style={{ fontSize: 13, color: '#E8D9B6', lineHeight: 1.5, marginBottom: 12 }}>
+              Confirm every row below matches what you&rsquo;ll bill the client. Once verified,
+              the Gmail send button unlocks.
+            </p>
+            <ul
+              style={{
+                fontSize: 13,
+                color: '#C5D3E8',
+                lineHeight: 1.7,
+                paddingLeft: 18,
+                marginBottom: 14,
+                listStyle: 'disc',
+              }}
+            >
+              <li>
+                Job: <strong style={{ color: '#fff' }}>{job?.title ?? '— none —'}</strong>
+                {job?.job_code && (
+                  <span style={{ color: '#7A90AA', fontFamily: 'ui-monospace, monospace' }}>
+                    {' '}
+                    ({job.job_code})
+                  </span>
+                )}
+              </li>
+              <li>
+                Client: <strong style={{ color: '#fff' }}>{companyName}</strong>{' '}
+                <span style={{ color: '#7A90AA' }}>→ {billingEmail}</span>
+              </li>
+              <li>
+                Invoice date: <strong style={{ color: '#fff' }}>{todayLabel}</strong>
+                {dueLabel && (
+                  <> · Due: <strong style={{ color: '#fff' }}>{dueLabel}</strong></>
+                )}
+              </li>
+              {jobDateLabel && (
+                <li>
+                  Shoot date: <strong style={{ color: '#fff' }}>{jobDateLabel}</strong>
+                </li>
+              )}
+              <li>
+                Talent total:{' '}
+                <strong style={{ color: '#fff' }}>{fmtCents(total)}</strong>
+                {' '}(what talent get paid)
+              </li>
+              <li>
+                RS fee ({rsFeePercent}%):{' '}
+                <strong style={{ color: '#fff' }}>{fmtCents(rsFeeCents)}</strong>
+              </li>
+              <li style={{ color: '#F0A500' }}>
+                <strong style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Client total: {centsToUsd(clientTotal)}
+                </strong>{' '}
+                (what the client is billed)
+              </li>
+            </ul>
             <div className="flex gap-2 flex-wrap">
-              <InvoicePreviewButton invoice={previewInvoice} />
+              <form action={verifyInvoice} style={{ flex: 1, minWidth: 180 }}>
+                <input type="hidden" name="invoiceId" value={invoice.id} />
+                <button
+                  type="submit"
+                  className="w-full rounded-xl text-white transition-colors"
+                  style={{
+                    padding: '12px 0',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    background: '#F0A500',
+                    color: '#0B1220',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✓ Confirm and unlock send
+                </button>
+              </form>
               <Link
                 href={`/admin/finance/${invoice.id}/edit`}
                 style={{
-                  padding: '9px 14px',
-                  fontSize: 12,
+                  padding: '12px 16px',
+                  fontSize: 13,
                   fontWeight: 600,
-                  letterSpacing: '0.04em',
+                  letterSpacing: '0.02em',
                   background: 'rgba(255,255,255,0.06)',
                   color: '#AABDE0',
                   border: '1px solid rgba(170,189,224,0.2)',
@@ -518,10 +648,57 @@ export default async function AdminInvoiceDetailPage({
                   textDecoration: 'none',
                 }}
               >
-                Edit
+                Edit invoice
               </Link>
+            </div>
+          </div>
+        )}
+
+        {isDraft && (
+          <>
+            {isVerified ? (
+              <GmailSendButton
+                invoiceId={invoice.id}
+                gmailUrl={gmailUrl}
+                label="Send via Gmail"
+                variant="primary"
+              />
+            ) : null}
+            <div className="flex gap-2 flex-wrap">
+              <InvoicePreviewButton invoice={previewInvoice} />
+              {isVerified && (
+                <Link
+                  href={`/admin/finance/${invoice.id}/edit`}
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    background: 'rgba(255,255,255,0.06)',
+                    color: '#AABDE0',
+                    border: '1px solid rgba(170,189,224,0.2)',
+                    borderRadius: 10,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Edit
+                </Link>
+              )}
               <DeleteDraftButton invoiceId={invoice.id} />
             </div>
+            {isVerified && (
+              <p
+                style={{
+                  fontSize: 11,
+                  color: '#4ADE80',
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  textAlign: 'center',
+                }}
+              >
+                ✓ Verified — ready to send
+              </p>
+            )}
           </>
         )}
 
@@ -775,11 +952,8 @@ export default async function AdminInvoiceDetailPage({
           </table>
         )}
 
-        {/* Totals block */}
-        <div
-          className="mt-3 ml-auto"
-          style={{ maxWidth: 260 }}
-        >
+        {/* Totals block — talent total, RS fee, client total */}
+        <div className="mt-3 ml-auto" style={{ maxWidth: 280 }}>
           {(taxCents > 0 || lineItems.length > 1) && (
             <div
               className="flex items-center justify-between"
@@ -801,24 +975,44 @@ export default async function AdminInvoiceDetailPage({
           <div
             className="flex items-center justify-between mt-2 pt-2"
             style={{
-              borderTop: '1px solid rgba(255,255,255,0.1)',
+              borderTop: '1px solid rgba(255,255,255,0.08)',
+              fontSize: 13,
+              color: '#AABDE0',
             }}
+          >
+            <span>Talent total</span>
+            <span style={{ fontWeight: 600, color: '#fff' }}>
+              {fmtCents(total)}
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between mt-1"
+            style={{ fontSize: 13, color: '#AABDE0' }}
+          >
+            <span>RS fee ({rsFeePercent}%)</span>
+            <span style={{ fontWeight: 600, color: '#fff' }}>
+              {fmtCents(rsFeeCents)}
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between mt-2 pt-2"
+            style={{ borderTop: '1px solid rgba(240,165,0,0.3)' }}
           >
             <span
               style={{
                 fontSize: 12,
                 fontWeight: 700,
-                color: '#AABDE0',
+                color: '#F0A500',
                 textTransform: 'uppercase',
                 letterSpacing: '0.12em',
               }}
             >
-              Total
+              Client total
             </span>
             <span
-              style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}
+              style={{ fontSize: 18, fontWeight: 700, color: '#F0A500' }}
             >
-              {centsToUsd(total)}
+              {centsToUsd(clientTotal)}
             </span>
           </div>
         </div>

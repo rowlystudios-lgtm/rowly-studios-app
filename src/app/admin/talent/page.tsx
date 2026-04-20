@@ -83,7 +83,13 @@ export default async function AdminTalentPage({
 }) {
   const { supabase } = await requireAdmin()
 
-  const [talentRes, appsRes] = await Promise.all([
+  // "Active" = talent with at least one booking on an upcoming, non-terminal
+  // job. Compute the active id set first so we can filter against it.
+  const todayIso = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+  }).format(new Date())
+
+  const [talentRes, appsRes, activeRes] = await Promise.all([
     supabase
       .from('profiles')
       .select(
@@ -104,15 +110,33 @@ export default async function AdminTalentPage({
       )
       .eq('status', 'pending')
       .order('created_at', { ascending: true }),
+    supabase
+      .from('job_bookings')
+      .select(
+        `talent_id, status,
+         jobs!inner (start_date, status)`
+      )
+      .in('status', ['requested', 'negotiating', 'confirmed'])
+      .gte('jobs.start_date', todayIso)
+      .not('jobs.status', 'in', '(cancelled,wrapped)'),
   ])
 
   const rows = (talentRes.data ?? []) as unknown as Row[]
   const apps = (appsRes.data ?? []) as ApplicationRow[]
 
+  // Build a map of talent_id → count of active bookings (for the label).
+  type ActiveRow = { talent_id: string | null }
+  const activeCountById = new Map<string, number>()
+  for (const r of (activeRes.data ?? []) as unknown as ActiveRow[]) {
+    if (!r.talent_id) continue
+    activeCountById.set(r.talent_id, (activeCountById.get(r.talent_id) ?? 0) + 1)
+  }
+
   const filter = searchParams.filter ?? 'all'
   const filtered = rows.filter((r) => {
     if (filter === 'verified') return r.verified
     if (filter === 'unverified') return !r.verified
+    if (filter === 'active') return activeCountById.has(r.id)
     return true
   })
 
@@ -333,6 +357,19 @@ export default async function AdminTalentPage({
                       {tp?.day_rate_cents != null &&
                         ` · ${centsToUsd(tp.day_rate_cents)}/day`}
                     </p>
+                    {filter === 'active' && activeCountById.get(r.id) != null && (
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: '#4ADE80',
+                          marginTop: 2,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {activeCountById.get(r.id)} active booking
+                        {activeCountById.get(r.id) === 1 ? '' : 's'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Right */}

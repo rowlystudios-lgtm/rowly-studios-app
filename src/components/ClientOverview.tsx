@@ -87,6 +87,7 @@ type JobRow = {
   id: string
   title: string
   status: JobStatus
+  job_code: string | null
   location: string | null
   client_notes: string | null
   description: string | null
@@ -288,7 +289,7 @@ export function ClientOverview() {
     const { data, error } = await supabase
       .from('jobs')
       .select(
-        `id, title, status, location, client_notes, description,
+        `id, title, status, job_code, location, client_notes, description,
          address_line, address_city, address_state, address_zip,
          shoot_days, start_date, end_date, call_time,
          crew_needed, created_at,
@@ -688,6 +689,19 @@ function ClientJobRow({
           </div>
           <ChevronIcon expanded={expanded} />
         </div>
+        {job.job_code && (
+          <p
+            style={{
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 10,
+              color: 'rgba(170,189,224,0.55)',
+              marginTop: 4,
+              letterSpacing: '0.04em',
+            }}
+          >
+            Ref: {job.job_code}
+          </p>
+        )}
         {locationSubtitle && (
           <p
             style={{

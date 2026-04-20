@@ -545,6 +545,36 @@ export async function toggle1099Sent(formData: FormData) {
   revalidatePath('/admin/finance')
 }
 
+/* ─────────── Auto-accept toggle (client_talent_relationships) ─────────── */
+
+export async function setAutoAccept(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const clientId = ((formData.get('client_id') as string) ?? '').trim()
+  const talentId = ((formData.get('talent_id') as string) ?? '').trim()
+  const enabledRaw = ((formData.get('enabled') as string) ?? '').trim()
+  const rateRaw = ((formData.get('rate') as string) ?? '').trim()
+  if (!clientId || !talentId) return
+  const enabled = enabledRaw === 'true'
+  const cents = rateRaw ? Math.round(parseFloat(rateRaw) * 100) : null
+
+  // Upsert on the (client_id, talent_id) pair. A row is guaranteed by
+  // historical bookings but we still upsert defensively.
+  await supabase
+    .from('client_talent_relationships')
+    .upsert(
+      {
+        client_id: clientId,
+        talent_id: talentId,
+        auto_accept: enabled,
+        auto_accept_rate: enabled ? cents : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'client_id,talent_id' }
+    )
+
+  revalidatePath(`/admin/talent/${talentId}`)
+}
+
 /** Soft remove — flips verified=false so they drop out of the active roster. */
 export async function removeFromRoster(formData: FormData) {
   const { supabase } = await requireAdmin()

@@ -4,6 +4,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { TalentAdminControls } from './TalentAdminControls'
 import { PaymentForm, type UnpaidBooking } from './PaymentForm'
 import { W9Form, Toggle1099SentButton } from './TaxControls'
+import { AutoAcceptToggle } from './AutoAcceptToggle'
 
 export const dynamic = 'force-dynamic'
 
@@ -155,6 +156,7 @@ export default async function AdminTalentDetailPage({
     bookingsRes,
     paymentsRes,
     taxRes,
+    relationshipsRes,
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', params.id).maybeSingle(),
     supabase.from('talent_profiles').select('*').eq('id', params.id).maybeSingle(),
@@ -190,6 +192,15 @@ export default async function AdminTalentDetailPage({
       .eq('talent_id', params.id)
       .eq('tax_year', currentYear)
       .maybeSingle(),
+    supabase
+      .from('client_talent_relationships')
+      .select(
+        `client_id, auto_accept, auto_accept_rate, jobs_together,
+         profiles!client_talent_relationships_client_id_fkey (full_name,
+           client_profiles (company_name))`
+      )
+      .eq('talent_id', params.id)
+      .order('jobs_together', { ascending: false }),
   ])
 
   const profile = profileRes.data as unknown as Profile | null
@@ -823,6 +834,78 @@ export default async function AdminTalentDetailPage({
           adminNotes={tp?.admin_notes ?? null}
         />
       </section>
+
+      {/* ─── Returning clients (auto-accept) ─── */}
+      {(() => {
+        type RelRow = {
+          client_id: string
+          auto_accept: boolean | null
+          auto_accept_rate: number | null
+          jobs_together: number | null
+          profiles:
+            | {
+                full_name: string | null
+                client_profiles:
+                  | { company_name: string | null }
+                  | { company_name: string | null }[]
+                  | null
+              }
+            | {
+                full_name: string | null
+                client_profiles:
+                  | { company_name: string | null }
+                  | { company_name: string | null }[]
+                  | null
+              }[]
+            | null
+        }
+        const rels = (relationshipsRes.data ?? []) as unknown as RelRow[]
+        if (rels.length === 0) return null
+        return (
+          <section className="mt-4">
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#7A90AA',
+                marginBottom: 10,
+              }}
+            >
+              Returning clients
+            </p>
+            <div className="flex flex-col gap-2">
+              {rels.map((r) => {
+                const clientProfile = Array.isArray(r.profiles)
+                  ? r.profiles[0] ?? null
+                  : r.profiles
+                const cp = clientProfile
+                  ? Array.isArray(clientProfile.client_profiles)
+                    ? clientProfile.client_profiles[0] ?? null
+                    : clientProfile.client_profiles
+                  : null
+                const name =
+                  cp?.company_name ||
+                  clientProfile?.full_name ||
+                  'Unknown client'
+                return (
+                  <AutoAcceptToggle
+                    key={r.client_id}
+                    clientId={r.client_id}
+                    talentId={profile.id}
+                    companyName={name}
+                    jobsTogether={r.jobs_together ?? 0}
+                    autoAccept={Boolean(r.auto_accept)}
+                    autoAcceptRateCents={r.auto_accept_rate}
+                    defaultRateCents={tp?.day_rate_cents ?? null}
+                  />
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
 
       {/* ─── Payments ─── */}
       {(() => {
