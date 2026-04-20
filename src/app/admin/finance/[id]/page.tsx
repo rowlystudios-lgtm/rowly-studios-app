@@ -1,21 +1,147 @@
 import Link from 'next/link'
-import { revalidatePath } from 'next/cache'
-import { requireAdmin, centsToUsdPrecise, formatDate } from '@/lib/admin-auth'
+import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
+import {
+  buildGmailUrl,
+  buildInvoiceBody,
+  buildInvoiceSubject,
+} from '../gmail'
+import { markAsPaid, markAsOverdue } from '../actions'
+import { GmailSendButton } from './GmailSendButton'
+import { InvoicePreviewButton, type PreviewInvoice } from './InvoicePreviewModal'
+import {
+  AddLineItemForm,
+  RemoveLineItemButton,
+  DeleteDraftButton,
+  VoidButton,
+} from './DraftActions'
 
 export const dynamic = 'force-dynamic'
 
-async function recalcTotal(
-  supabase: Awaited<ReturnType<typeof requireAdmin>>['supabase'],
-  invoiceId: string
-) {
-  const { data } = await supabase
-    .from('invoice_line_items')
-    .select('total_cents')
-    .eq('invoice_id', invoiceId)
-  const total = (data ?? []).reduce((s, r) => s + (r.total_cents ?? 0), 0)
-  await supabase.from('invoices').update({ total_cents: total }).eq('id', invoiceId)
-  return total
+function unwrap<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null
+  return Array.isArray(v) ? v[0] ?? null : v
+}
+
+function todayIsoLA(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+  }).format(new Date())
+}
+
+function formatShort(iso: string | null): string {
+  if (!iso) return ''
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return ''
+  const d = new Date(parts[0], parts[1] - 1, parts[2])
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatRange(start: string | null, end: string | null): string {
+  if (!start) return ''
+  if (!end || end === start) return formatDate(start)
+  return `${formatDate(start)} – ${formatDate(end)}`
+}
+
+function fmtCents(c: number | null | undefined): string {
+  if (!c && c !== 0) return '$0'
+  return `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+}
+
+type Invoice = {
+  id: string
+  invoice_number: string | null
+  status: string
+  total_cents: number | null
+  tax_cents: number | null
+  due_date: string | null
+  sent_at: string | null
+  paid_at: string | null
+  voided_at: string | null
+  notes: string | null
+  created_at: string | null
+  client_id: string | null
+  job_id: string | null
+  jobs:
+    | {
+        id: string
+        title: string
+        start_date: string | null
+        end_date: string | null
+        location: string | null
+      }
+    | {
+        id: string
+        title: string
+        start_date: string | null
+        end_date: string | null
+        location: string | null
+      }[]
+    | null
+  profiles:
+    | {
+        full_name: string | null
+        email: string | null
+        client_profiles:
+          | {
+              company_name: string | null
+              billing_email: string | null
+              website: string | null
+              entity_type: string | null
+            }
+          | {
+              company_name: string | null
+              billing_email: string | null
+              website: string | null
+              entity_type: string | null
+            }[]
+          | null
+      }
+    | {
+        full_name: string | null
+        email: string | null
+        client_profiles:
+          | {
+              company_name: string | null
+              billing_email: string | null
+              website: string | null
+              entity_type: string | null
+            }
+          | {
+              company_name: string | null
+              billing_email: string | null
+              website: string | null
+              entity_type: string | null
+            }[]
+          | null
+      }[]
+    | null
+}
+
+type LineItem = {
+  id: string
+  description: string | null
+  quantity: number | null
+  unit_price_cents: number | null
+  total_cents: number | null
+  booking_id: string | null
+  created_at: string | null
+  profiles:
+    | {
+        full_name: string | null
+        talent_profiles:
+          | { primary_role: string | null }
+          | { primary_role: string | null }[]
+          | null
+      }
+    | {
+        full_name: string | null
+        talent_profiles:
+          | { primary_role: string | null }
+          | { primary_role: string | null }[]
+          | null
+      }[]
+    | null
 }
 
 export default async function AdminInvoiceDetailPage({
@@ -25,14 +151,15 @@ export default async function AdminInvoiceDetailPage({
 }) {
   const { supabase } = await requireAdmin()
 
-  const [invoiceRes, lineItemsRes] = await Promise.all([
+  const [invRes, itemsRes] = await Promise.all([
     supabase
       .from('invoices')
       .select(
-        `*,
-         jobs (id, title, start_date, end_date),
-         profiles!invoices_client_id_fkey (id, first_name, last_name, full_name,
-           client_profiles (company_name, billing_email))`
+        `id, invoice_number, status, total_cents, tax_cents, due_date,
+         sent_at, paid_at, voided_at, notes, created_at, client_id, job_id,
+         jobs (id, title, start_date, end_date, location),
+         profiles!invoices_client_id_fkey (full_name, email,
+           client_profiles (company_name, billing_email, website, entity_type))`
       )
       .eq('id', params.id)
       .maybeSingle(),
@@ -40,472 +167,677 @@ export default async function AdminInvoiceDetailPage({
       .from('invoice_line_items')
       .select(
         `id, description, quantity, unit_price_cents, total_cents,
-         profiles!invoice_line_items_talent_id_fkey (first_name, last_name, full_name)`
+         booking_id, created_at,
+         profiles!invoice_line_items_talent_id_fkey (full_name,
+           talent_profiles (primary_role))`
       )
       .eq('invoice_id', params.id)
-      .order('created_at'),
+      .order('created_at', { ascending: true }),
   ])
 
-  const invoice = invoiceRes.data as unknown as
-    | {
-        id: string
-        invoice_number: string | null
-        status: string
-        total_cents: number | null
-        tax_cents: number | null
-        due_date: string | null
-        notes: string | null
-        sent_at: string | null
-        paid_at: string | null
-        jobs:
-          | {
-              id: string
-              title: string
-              start_date: string | null
-              end_date: string | null
-            }
-          | {
-              id: string
-              title: string
-              start_date: string | null
-              end_date: string | null
-            }[]
-          | null
-        profiles:
-          | {
-              first_name: string | null
-              last_name: string | null
-              full_name: string | null
-              client_profiles:
-                | { company_name: string | null; billing_email: string | null }
-                | { company_name: string | null; billing_email: string | null }[]
-                | null
-            }
-          | {
-              first_name: string | null
-              last_name: string | null
-              full_name: string | null
-              client_profiles:
-                | { company_name: string | null; billing_email: string | null }
-                | { company_name: string | null; billing_email: string | null }[]
-                | null
-            }[]
-          | null
-      }
-    | null
-
+  const invoice = invRes.data as unknown as Invoice | null
   if (!invoice) {
     return (
-      <div style={{ padding: 20 }}>
-        <p style={{ color: '#AABDE0' }}>Invoice not found.</p>
-        <Link href="/admin/finance" style={{ color: '#F0A500' }}>
-          ← Back to finance
+      <div className="px-5 pt-5">
+        <Link href="/admin/finance" style={{ color: '#7A90AA', fontSize: 13 }}>
+          ← Finance
         </Link>
+        <p
+          className="mt-3"
+          style={{ fontSize: 14, color: '#AABDE0', fontStyle: 'italic' }}
+        >
+          Invoice not found.
+        </p>
       </div>
     )
   }
 
-  type LineItem = {
-    id: string
-    description: string | null
-    quantity: number | null
-    unit_price_cents: number | null
-    total_cents: number | null
-    profiles:
-      | {
-          first_name: string | null
-          last_name: string | null
-          full_name: string | null
-        }
-      | {
-          first_name: string | null
-          last_name: string | null
-          full_name: string | null
-        }[]
-      | null
-  }
-  const lineItems = (lineItemsRes.data ?? []) as unknown as LineItem[]
+  const lineItems = (itemsRes.data ?? []) as unknown as LineItem[]
 
-  const clientProfile = Array.isArray(invoice.profiles)
-    ? invoice.profiles[0] ?? null
-    : invoice.profiles
-  const cp = clientProfile
-    ? Array.isArray(clientProfile.client_profiles)
-      ? clientProfile.client_profiles[0] ?? null
-      : clientProfile.client_profiles
+  const today = todayIsoLA()
+  const overdueByDate =
+    invoice.status === 'sent' && invoice.due_date && invoice.due_date < today
+  const effectiveStatus = overdueByDate ? 'overdue' : invoice.status
+
+  const client = unwrap(invoice.profiles)
+  const cp = client ? unwrap(client.client_profiles) : null
+  const job = unwrap(invoice.jobs)
+
+  const companyName = cp?.company_name || client?.full_name || 'Unknown client'
+  const billingEmail =
+    cp?.billing_email || client?.email || 'billing@example.com'
+
+  const subtotalCents = lineItems.reduce(
+    (s, li) => s + (li.total_cents ?? 0),
+    0
+  )
+  const taxCents = invoice.tax_cents ?? 0
+  const total = invoice.total_cents ?? subtotalCents + taxCents
+
+  const jobDateLabel = job
+    ? formatRange(job.start_date, job.end_date)
     : null
-  const job = Array.isArray(invoice.jobs) ? invoice.jobs[0] ?? null : invoice.jobs
-  const clientName =
-    cp?.company_name ||
-    [clientProfile?.first_name, clientProfile?.last_name]
-      .filter(Boolean)
-      .join(' ') ||
-    clientProfile?.full_name ||
-    '—'
 
-  const total = (lineItems ?? []).reduce((s, r) => s + (r.total_cents ?? 0), 0)
+  // ─── Gmail payload ───
+  const todayLabel = formatDate(today)
+  const dueLabel = invoice.due_date ? formatDate(invoice.due_date) : null
 
-  async function addLineItem(formData: FormData) {
-    'use server'
-    const { supabase: sb } = await requireAdmin()
-    const invoiceId = params.id
-    const description = ((formData.get('description') as string) ?? '').trim()
-    const quantityRaw = (formData.get('quantity') as string) ?? '1'
-    const rateRaw = (formData.get('rate') as string) ?? ''
-    if (!description || !rateRaw) return
-    const quantity = Math.max(1, parseFloat(quantityRaw) || 1)
-    const unitPriceCents = Math.round(parseFloat(rateRaw) * 100)
-    const totalCents = Math.round(quantity * unitPriceCents)
-    await sb.from('invoice_line_items').insert({
-      invoice_id: invoiceId,
-      description,
-      quantity,
-      unit_price_cents: unitPriceCents,
-      total_cents: totalCents,
-    })
-    await recalcTotal(sb, invoiceId)
-    revalidatePath(`/admin/finance/${invoiceId}`)
+  const emailItems = lineItems
+    .filter((li) => (li.description ?? '').trim().length > 0)
+    .map((li) => ({
+      description: li.description ?? '',
+      quantity: li.quantity ?? 1,
+      unitPriceCents: li.unit_price_cents ?? 0,
+      totalCents: li.total_cents ?? 0,
+    }))
+
+  const normalBody = buildInvoiceBody({
+    invoiceNumber: invoice.invoice_number ?? 'DRAFT',
+    todayLabel,
+    dueLabel,
+    companyName,
+    billingEmail,
+    jobTitle: job?.title ?? null,
+    jobDateLabel,
+    items: emailItems,
+    subtotalCents,
+    taxCents,
+    totalCents: total,
+    notes: invoice.notes,
+  })
+  const normalSubject = buildInvoiceSubject(
+    invoice.invoice_number ?? 'DRAFT',
+    companyName,
+    job?.title ?? null
+  )
+  const gmailUrl = buildGmailUrl(billingEmail, normalSubject, normalBody)
+
+  const reminderBody = buildInvoiceBody({
+    invoiceNumber: invoice.invoice_number ?? 'DRAFT',
+    todayLabel,
+    dueLabel,
+    companyName,
+    billingEmail,
+    jobTitle: job?.title ?? null,
+    jobDateLabel,
+    items: emailItems,
+    subtotalCents,
+    taxCents,
+    totalCents: total,
+    notes: invoice.notes,
+    reminder: true,
+  })
+  const reminderSubject = buildInvoiceSubject(
+    invoice.invoice_number ?? 'DRAFT',
+    companyName,
+    job?.title ?? null,
+    true
+  )
+  const reminderUrl = buildGmailUrl(
+    billingEmail,
+    reminderSubject,
+    reminderBody
+  )
+
+  // ─── Preview payload ───
+  const previewInvoice: PreviewInvoice = {
+    invoiceNumber: invoice.invoice_number ?? 'DRAFT',
+    dateLabel: todayLabel,
+    dueLabel,
+    companyName,
+    billingEmail,
+    jobTitle: job?.title ?? null,
+    jobDateLabel,
+    jobLocation: job?.location ?? null,
+    items: emailItems,
+    subtotalCents,
+    taxCents,
+    totalCents: total,
+    notes: invoice.notes,
   }
 
-  async function removeLineItem(formData: FormData) {
-    'use server'
-    const { supabase: sb } = await requireAdmin()
-    const lineId = formData.get('lineId') as string
-    if (!lineId) return
-    await sb.from('invoice_line_items').delete().eq('id', lineId)
-    await recalcTotal(sb, params.id)
-    revalidatePath(`/admin/finance/${params.id}`)
-  }
+  const isDraft = invoice.status === 'draft'
 
-  async function markPaid() {
-    'use server'
-    const { supabase: sb } = await requireAdmin()
-    await sb
-      .from('invoices')
-      .update({ status: 'paid', paid_at: new Date().toISOString() })
-      .eq('id', params.id)
-    revalidatePath(`/admin/finance/${params.id}`)
-    revalidatePath('/admin/finance')
-  }
-
-  async function sendInvoice() {
-    'use server'
-    // Stub — Gmail send is coming in Day 6. For now just flip to 'sent'.
-    const { supabase: sb } = await requireAdmin()
-    await sb
-      .from('invoices')
-      .update({ status: 'sent', sent_at: new Date().toISOString() })
-      .eq('id', params.id)
-    revalidatePath(`/admin/finance/${params.id}`)
-    revalidatePath('/admin/finance')
+  // Due-date label for header row 3
+  let dueRowLabel = ''
+  let dueRowColor = '#fff'
+  if (invoice.due_date) {
+    dueRowLabel = `Due ${formatDate(invoice.due_date)}`
+    if (effectiveStatus === 'overdue') dueRowColor = '#F87171'
   }
 
   return (
-    <div style={{ padding: '18px 18px', maxWidth: 640, margin: '0 auto' }}>
-      <Link
-        href="/admin/finance"
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: '#AABDE0',
-          textDecoration: 'none',
-        }}
-      >
+    <div className="mx-auto" style={{ maxWidth: 720, padding: '20px 18px 28px' }}>
+      <Link href="/admin/finance" style={{ fontSize: 13, color: '#7A90AA', textDecoration: 'none' }}>
         ← Finance
       </Link>
 
-      {/* Header */}
-      <div
-        style={{
-          marginTop: 12,
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 10,
-        }}
+      {/* ─── Header card ─── */}
+      <section
+        className="mt-3 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 20 }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#fff' }}>
-            {invoice.invoice_number}
-          </h1>
-          <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 4 }}>
-            {clientName}
-            {job && ` · ${job.title}`}
-          </p>
-          {invoice.due_date && (
-            <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 2 }}>
-              Due {formatDate(invoice.due_date)}
+        <div className="flex items-start justify-between gap-4">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1
+                className="text-white"
+                style={{
+                  fontSize: 22,
+                  fontWeight: 600,
+                  lineHeight: 1.1,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  letterSpacing: '0.02em',
+                }}
+              >
+                {invoice.invoice_number ?? 'DRAFT'}
+              </h1>
+              <StatusBadge status={effectiveStatus} />
+            </div>
+          </div>
+          <div className="text-right" style={{ flexShrink: 0 }}>
+            <p
+              className="text-white"
+              style={{ fontSize: 26, fontWeight: 700, lineHeight: 1 }}
+            >
+              {centsToUsd(total)}
             </p>
-          )}
+            {taxCents > 0 && (
+              <p style={{ fontSize: 12, color: '#7A90AA', marginTop: 2 }}>
+                incl. {fmtCents(taxCents)} tax
+              </p>
+            )}
+          </div>
         </div>
-        <StatusBadge status={invoice.status} />
-      </div>
 
-      {cp?.billing_email && (
-        <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 4 }}>
-          Billing: {cp.billing_email}
-        </p>
-      )}
-
-      {/* Line items */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Line items</SectionLabel>
         <div
-          style={{
-            background: '#1A2E4A',
-            border: '1px solid rgba(170,189,224,0.15)',
-            borderRadius: 12,
-            padding: 14,
-          }}
+          className="mt-4 grid gap-3"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
         >
-          {lineItems.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
-              No line items yet
+          <div
+            className="rounded-xl"
+            style={{
+              background: '#253D5E',
+              padding: 14,
+              border: '1px solid rgba(255,255,255,0.04)',
+            }}
+          >
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#7A90AA',
+                marginBottom: 6,
+              }}
+            >
+              Billed to
             </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {lineItems.map((li) => (
-                <div
-                  key={li.id}
+            <p
+              className="text-white"
+              style={{ fontSize: 14, fontWeight: 500 }}
+            >
+              {companyName}
+            </p>
+            <p style={{ fontSize: 13, color: '#AABDE0', marginTop: 2 }}>
+              {billingEmail}
+            </p>
+          </div>
+          <div
+            className="rounded-xl"
+            style={{
+              background: '#253D5E',
+              padding: 14,
+              border: '1px solid rgba(255,255,255,0.04)',
+            }}
+          >
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#7A90AA',
+                marginBottom: 6,
+              }}
+            >
+              Job
+            </p>
+            {job ? (
+              <>
+                <Link
+                  href={`/admin/jobs/${job.id}`}
+                  className="text-white"
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                    paddingBottom: 10,
-                    borderBottom: '1px solid rgba(170,189,224,0.1)',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    textDecoration: 'none',
                   }}
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, color: '#fff', fontWeight: 600 }}>
-                      {li.description || 'Line item'}
-                    </p>
-                    <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
-                      {li.quantity ?? 1} × {centsToUsdPrecise(li.unit_price_cents)}
-                    </p>
-                  </div>
-                  <span
+                  {job.title}
+                </Link>
+                {jobDateLabel && (
+                  <p style={{ fontSize: 13, color: '#AABDE0', marginTop: 2 }}>
+                    {jobDateLabel}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
+                No job linked
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div
+          className="mt-3 flex flex-wrap gap-x-6 gap-y-1.5"
+          style={{ fontSize: 12 }}
+        >
+          {dueRowLabel && (
+            <span style={{ color: dueRowColor, fontWeight: 500 }}>
+              {dueRowLabel}
+            </span>
+          )}
+          {invoice.sent_at && (
+            <span style={{ color: '#AABDE0' }}>
+              Sent {formatDate(invoice.sent_at)}
+            </span>
+          )}
+          {invoice.paid_at && (
+            <span style={{ color: '#4ADE80', fontWeight: 600 }}>
+              Paid {formatDate(invoice.paid_at)}
+            </span>
+          )}
+          {invoice.voided_at && (
+            <span style={{ color: '#7A90AA' }}>
+              Voided {formatDate(invoice.voided_at)}
+            </span>
+          )}
+        </div>
+      </section>
+
+      {/* ─── Actions ─── */}
+      <section className="mt-4 flex flex-col gap-3">
+        {invoice.status === 'void' && (
+          <div
+            className="rounded-xl"
+            style={{
+              background: 'rgba(170,189,224,0.06)',
+              border: '1px solid rgba(170,189,224,0.18)',
+              padding: 14,
+              color: '#AABDE0',
+              fontSize: 13,
+              textAlign: 'center',
+            }}
+          >
+            This invoice has been voided.
+          </div>
+        )}
+
+        {isDraft && (
+          <>
+            <GmailSendButton
+              invoiceId={invoice.id}
+              gmailUrl={gmailUrl}
+              label="Send via Gmail"
+              variant="primary"
+            />
+            <div className="flex gap-2 flex-wrap">
+              <InvoicePreviewButton invoice={previewInvoice} />
+              <Link
+                href={`/admin/finance/${invoice.id}/edit`}
+                style={{
+                  padding: '9px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  background: 'rgba(255,255,255,0.06)',
+                  color: '#AABDE0',
+                  border: '1px solid rgba(170,189,224,0.2)',
+                  borderRadius: 10,
+                  textDecoration: 'none',
+                }}
+              >
+                Edit
+              </Link>
+              <DeleteDraftButton invoiceId={invoice.id} />
+            </div>
+          </>
+        )}
+
+        {invoice.status === 'sent' && (
+          <>
+            <form action={markAsPaid}>
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <button
+                type="submit"
+                className="w-full rounded-xl text-white transition-colors"
+                style={{
+                  padding: '14px 0',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  background: '#166534',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                ✓ Mark as paid
+              </button>
+            </form>
+            <div className="flex gap-2 flex-wrap">
+              <InvoicePreviewButton invoice={previewInvoice} />
+              <GmailSendButton
+                invoiceId={invoice.id}
+                gmailUrl={gmailUrl}
+                label="Resend via Gmail"
+                variant="secondary"
+                reminder
+              />
+              <form action={markAsOverdue}>
+                <input type="hidden" name="invoiceId" value={invoice.id} />
+                <button
+                  type="submit"
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    background: 'rgba(239,68,68,0.15)',
+                    color: '#F87171',
+                    border: '1px solid rgba(239,68,68,0.35)',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Mark overdue
+                </button>
+              </form>
+            </div>
+          </>
+        )}
+
+        {effectiveStatus === 'overdue' && invoice.status !== 'paid' && invoice.status !== 'void' && (
+          <>
+            <form action={markAsPaid}>
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <button
+                type="submit"
+                className="w-full rounded-xl text-white transition-colors"
+                style={{
+                  padding: '14px 0',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  background: '#166534',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                ✓ Mark as paid
+              </button>
+            </form>
+            <div className="flex gap-2 flex-wrap">
+              <InvoicePreviewButton invoice={previewInvoice} />
+              <GmailSendButton
+                invoiceId={invoice.id}
+                gmailUrl={reminderUrl}
+                label="Send reminder via Gmail"
+                variant="secondary"
+                reminder
+              />
+              <VoidButton invoiceId={invoice.id} />
+            </div>
+          </>
+        )}
+
+        {invoice.status === 'paid' && (
+          <div className="flex gap-2 flex-wrap">
+            <InvoicePreviewButton invoice={previewInvoice} variant="primary" />
+          </div>
+        )}
+      </section>
+
+      {/* ─── Line items ─── */}
+      <section
+        className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 16 }}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+            }}
+          >
+            Line items
+          </p>
+          <span style={{ fontSize: 11, color: '#7A90AA' }}>
+            {lineItems.length} item{lineItems.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {lineItems.length === 0 ? (
+          <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
+            No line items yet.
+          </p>
+        ) : (
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: 13,
+            }}
+          >
+            <thead>
+              <tr
+                style={{
+                  textAlign: 'left',
+                  borderBottom: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <th
+                  style={{
+                    padding: '4px 4px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: '#7A90AA',
+                  }}
+                >
+                  Description
+                </th>
+                <th
+                  style={{
+                    padding: '4px 4px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: '#7A90AA',
+                    textAlign: 'center',
+                    width: 56,
+                  }}
+                >
+                  Days
+                </th>
+                <th
+                  style={{
+                    padding: '4px 4px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: '#7A90AA',
+                    textAlign: 'right',
+                    width: 110,
+                  }}
+                >
+                  Rate
+                </th>
+                <th
+                  style={{
+                    padding: '4px 4px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: '#7A90AA',
+                    textAlign: 'right',
+                    width: 96,
+                  }}
+                >
+                  Total
+                </th>
+                {isDraft && <th style={{ width: 36 }} />}
+              </tr>
+            </thead>
+            <tbody>
+              {lineItems.map((li) => (
+                <tr
+                  key={li.id}
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  <td
                     style={{
-                      fontSize: 13,
-                      fontWeight: 700,
+                      padding: '12px 4px',
                       color: '#fff',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {li.description || 'Line item'}
+                  </td>
+                  <td
+                    style={{
+                      padding: '12px 4px',
+                      color: '#AABDE0',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {li.quantity != null && Number.isInteger(li.quantity)
+                      ? li.quantity
+                      : (li.quantity ?? 1).toFixed(2)}
+                  </td>
+                  <td
+                    style={{
+                      padding: '12px 4px',
+                      color: '#AABDE0',
+                      textAlign: 'right',
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {centsToUsdPrecise(li.total_cents)}
-                  </span>
-                  {invoice.status === 'draft' && (
-                    <form action={removeLineItem}>
-                      <input type="hidden" name="lineId" value={li.id} />
-                      <button
-                        type="submit"
-                        aria-label="Remove line item"
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid rgba(239,68,68,0.3)',
-                          color: '#F87171',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          padding: '4px 8px',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        ×
-                      </button>
-                    </form>
+                    {fmtCents(li.unit_price_cents)}/day
+                  </td>
+                  <td
+                    style={{
+                      padding: '12px 4px',
+                      color: '#fff',
+                      fontWeight: 600,
+                      textAlign: 'right',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {fmtCents(li.total_cents)}
+                  </td>
+                  {isDraft && (
+                    <td style={{ padding: '12px 4px', textAlign: 'right' }}>
+                      <RemoveLineItemButton
+                        lineItemId={li.id}
+                        invoiceId={invoice.id}
+                      />
+                    </td>
                   )}
-                </div>
+                </tr>
               ))}
+            </tbody>
+          </table>
+        )}
+
+        {/* Totals block */}
+        <div
+          className="mt-3 ml-auto"
+          style={{ maxWidth: 260 }}
+        >
+          {(taxCents > 0 || lineItems.length > 1) && (
+            <div
+              className="flex items-center justify-between"
+              style={{ fontSize: 13, color: '#AABDE0' }}
+            >
+              <span>Subtotal</span>
+              <span>{fmtCents(subtotalCents)}</span>
             </div>
           )}
-
+          {taxCents > 0 && (
+            <div
+              className="flex items-center justify-between mt-1"
+              style={{ fontSize: 13, color: '#AABDE0' }}
+            >
+              <span>Tax</span>
+              <span>{fmtCents(taxCents)}</span>
+            </div>
+          )}
           <div
+            className="flex items-center justify-between mt-2 pt-2"
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              paddingTop: 10,
-              marginTop: lineItems.length > 0 ? 0 : 10,
+              borderTop: '1px solid rgba(255,255,255,0.1)',
             }}
           >
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
                 color: '#AABDE0',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
               }}
             >
               Total
             </span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
-              {centsToUsdPrecise(total)}
+            <span
+              style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}
+            >
+              {centsToUsd(total)}
             </span>
           </div>
         </div>
+
+        {isDraft && <AddLineItemForm invoiceId={invoice.id} />}
       </section>
 
-      {/* Add line item form (only when draft) */}
-      {invoice.status === 'draft' && (
-        <section style={{ marginTop: 14 }}>
-          <form
-            action={addLineItem}
+      {/* ─── Notes ─── */}
+      {invoice.notes && (
+        <section
+          className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+          style={{ padding: 16 }}
+        >
+          <p
             style={{
-              background: '#1A2E4A',
-              border: '1px solid rgba(170,189,224,0.15)',
-              borderRadius: 12,
-              padding: 14,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+              marginBottom: 8,
             }}
           >
-            <input
-              type="text"
-              name="description"
-              required
-              placeholder="Description (e.g. Photographer – day 1)"
-              style={inputStyle}
-            />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
-              <input
-                type="number"
-                name="quantity"
-                min={1}
-                step={0.5}
-                defaultValue={1}
-                placeholder="Qty"
-                style={inputStyle}
-              />
-              <input
-                type="number"
-                name="rate"
-                min={0}
-                step={25}
-                required
-                placeholder="Rate ($)"
-                style={inputStyle}
-              />
-            </div>
-            <button
-              type="submit"
-              style={{
-                padding: '10px 0',
-                borderRadius: 8,
-                background: '#F0A500',
-                color: '#0F1B2E',
-                border: 'none',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}
-            >
-              + Add line item
-            </button>
-          </form>
+            Notes
+          </p>
+          <p
+            style={{
+              fontSize: 14,
+              color: '#C5D3E8',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {invoice.notes}
+          </p>
         </section>
       )}
-
-      {/* Actions */}
-      <section style={{ marginTop: 18 }}>
-        <SectionLabel>Actions</SectionLabel>
-        <div
-          style={{
-            background: '#1A2E4A',
-            border: '1px solid rgba(170,189,224,0.15)',
-            borderRadius: 12,
-            padding: 14,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          {invoice.status === 'draft' && (
-            <form action={sendInvoice}>
-              <button
-                type="submit"
-                disabled={lineItems.length === 0}
-                style={{
-                  width: '100%',
-                  padding: '12px 0',
-                  borderRadius: 10,
-                  background: '#F0A500',
-                  color: '#0F1B2E',
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  cursor: lineItems.length === 0 ? 'not-allowed' : 'pointer',
-                  opacity: lineItems.length === 0 ? 0.5 : 1,
-                }}
-              >
-                Send via Gmail (stub — marks sent)
-              </button>
-            </form>
-          )}
-          {invoice.status === 'sent' && (
-            <form action={markPaid}>
-              <button
-                type="submit"
-                style={{
-                  width: '100%',
-                  padding: '12px 0',
-                  borderRadius: 10,
-                  background: '#4ADE80',
-                  color: '#0F1B2E',
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                }}
-              >
-                Mark as paid
-              </button>
-            </form>
-          )}
-          {invoice.status === 'paid' && (
-            <p style={{ fontSize: 13, color: '#4ADE80', fontWeight: 600 }}>
-              Paid{invoice.paid_at ? ` on ${formatDate(invoice.paid_at)}` : ''}
-            </p>
-          )}
-        </div>
-      </section>
     </div>
-  )
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '10px 12px',
-  borderRadius: 8,
-  border: '1px solid rgba(170,189,224,0.2)',
-  background: 'rgba(255,255,255,0.05)',
-  color: '#fff',
-  fontSize: 14,
-  outline: 'none',
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.14em',
-        textTransform: 'uppercase',
-        color: '#7A90AA',
-        marginBottom: 10,
-      }}
-    >
-      {children}
-    </p>
   )
 }
