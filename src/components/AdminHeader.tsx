@@ -228,7 +228,6 @@ export function AdminHeader({
           onClick={handleSignOut}
           disabled={signingOut}
           aria-label="Sign out"
-          className="hidden sm:inline-block"
           style={{
             background: 'transparent',
             border: 'none',
