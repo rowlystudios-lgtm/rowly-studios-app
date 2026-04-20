@@ -56,12 +56,17 @@ export async function verifyTalent(formData: FormData) {
   revalidatePath('/admin/talent')
 }
 
+// $300/day is the platform-wide floor for talent rates.
+const TALENT_FLOOR_CENTS = 30000
+
 export async function updateTalentRate(formData: FormData) {
   const { supabase } = await requireAdmin()
   const id = (formData.get('id') as string) ?? ''
   const raw = (formData.get('day_rate') as string) ?? ''
   if (!id) return
-  const cents = raw ? Math.round(parseFloat(raw) * 100) : null
+  const cents = raw
+    ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(raw) * 100))
+    : null
   await supabase
     .from('talent_profiles')
     .upsert({ id, day_rate_cents: cents }, { onConflict: 'id' })
@@ -74,7 +79,9 @@ export async function updateRateFloor(formData: FormData) {
   const id = (formData.get('id') as string) ?? ''
   const raw = (formData.get('rate_floor') as string) ?? ''
   if (!id) return
-  const cents = raw ? Math.round(parseFloat(raw) * 100) : null
+  const cents = raw
+    ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(raw) * 100))
+    : null
   await supabase
     .from('talent_profiles')
     .upsert({ id, rate_floor_cents: cents }, { onConflict: 'id' })
@@ -139,9 +146,13 @@ function parseFormTalent(formData: FormData): TalentInput {
     primary_role:
       ((formData.get('primary_role') as string) ?? '').trim() || null,
     secondary_roles: secondary,
-    day_rate_cents: dayRate ? Math.round(parseFloat(dayRate) * 100) : null,
+    day_rate_cents: dayRate
+      ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(dayRate) * 100))
+      : null,
     half_day_rate_cents: halfDay ? Math.round(parseFloat(halfDay) * 100) : null,
-    rate_floor_cents: floor ? Math.round(parseFloat(floor) * 100) : null,
+    rate_floor_cents: floor
+      ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(floor) * 100))
+      : null,
     bio: ((formData.get('bio') as string) ?? '').trim() || null,
     showreel_url:
       ((formData.get('showreel_url') as string) ?? '').trim() || null,

@@ -231,7 +231,7 @@ function RateControl({
           </span>
           <input
             type="number"
-            min={0}
+            min={300}
             step={25}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -247,6 +247,16 @@ function RateControl({
               outline: 'none',
             }}
           />
+          <p
+            style={{
+              marginTop: 4,
+              fontSize: 10,
+              color: '#7A90AA',
+              letterSpacing: '0.04em',
+            }}
+          >
+            Min: $300
+          </p>
         </div>
         <button
           type="button"

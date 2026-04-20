@@ -14,9 +14,12 @@ type SendEmail = {
   replyTo?: string
 }
 
+// Default to Resend's on-domain sender so emails ship immediately on any
+// Resend account. Once rowlystudios.com is DNS-verified in Resend, set
+// RESEND_FROM="Rowly Studios <noreply@rowlystudios.com>" in Vercel and
+// traffic switches over automatically.
 const DEFAULT_FROM =
-  process.env.RESEND_FROM ??
-  'Rowly Studios <noreply@rowlystudios.com>'
+  process.env.RESEND_FROM ?? 'Rowly Studios <onboarding@resend.dev>'
 
 export async function sendTransactionalEmail({
   to,
@@ -210,6 +213,169 @@ export const EmailTemplates = {
       `<p><strong>${talentName}</strong> has declined the offer for <strong>${jobTitle}</strong>.</p>
        <p style="color:#7A90AA;margin-top:6px">Reason: ${reason || 'Not provided'}</p>`,
       { label: 'Open job', url: actionUrl }
+    )
+  },
+  // Confirms to the client that their booking request has been sent to a
+  // specific talent. Fires alongside jobOffer to talent.
+  clientBookingSent({
+    talentName,
+    jobTitle,
+    dateLabel,
+    rateLabel,
+    actionUrl,
+  }: {
+    talentName: string
+    jobTitle: string
+    dateLabel: string
+    rateLabel: string
+    actionUrl: string
+  }) {
+    return wrap(
+      'Your booking request has been sent',
+      `<p>We&rsquo;ve sent your booking request to <strong>${talentName}</strong> for <strong>${jobTitle}</strong> on ${dateLabel}.</p>
+       <p style="font-size:15px;color:#0F1B2E;font-weight:600;margin-top:10px">Offered rate: ${rateLabel}</p>
+       <p style="color:#7A90AA;margin-top:8px">You&rsquo;ll be notified as soon as they respond.</p>`,
+      { label: 'View job status', url: actionUrl }
+    )
+  },
+  // Talent-side confirmation email — sent to talent when they accept an offer.
+  talentConfirmation({
+    jobTitle,
+    dateLabel,
+    rateLabel,
+    location,
+    callTime,
+    actionUrl,
+  }: {
+    jobTitle: string
+    dateLabel: string
+    rateLabel: string
+    location: string | null
+    callTime: string | null
+    actionUrl: string
+  }) {
+    const detailsList = [
+      `Rate: <strong>${rateLabel}</strong>`,
+      location ? `Location: ${location}` : null,
+      callTime ? `Call time: ${callTime}` : null,
+    ]
+      .filter(Boolean)
+      .join('<br/>')
+    return wrap(
+      `You're confirmed for ${jobTitle}`,
+      `<p>You&rsquo;re confirmed for <strong>${jobTitle}</strong> on ${dateLabel}.</p>
+       <p style="font-size:14px;color:#374151;margin-top:10px;line-height:1.7">${detailsList}</p>
+       <p style="color:#7A90AA;margin-top:8px">See the full brief and call sheet in your app.</p>`,
+      { label: 'Open booking', url: actionUrl }
+    )
+  },
+  /**
+   * Admin status digest — a management-brief style email for every booking
+   * event. Goes to rowlystudios@gmail.com (or whoever has role='admin'),
+   * giving them a single-glance view of the job without having to click.
+   */
+  adminStatus({
+    statusLabel,
+    jobTitle,
+    jobCode,
+    jobDateLabel,
+    jobLocation,
+    talentName,
+    talentEmail,
+    clientName,
+    clientEmail,
+    offeredLabel,
+    confirmedLabel,
+    durationLabel,
+    offerSentLabel,
+    deadlineLabel,
+    respondedLabel,
+    actionUrl,
+  }: {
+    statusLabel: string
+    jobTitle: string
+    jobCode: string | null
+    jobDateLabel: string
+    jobLocation: string | null
+    talentName: string
+    talentEmail: string | null
+    clientName: string
+    clientEmail: string | null
+    offeredLabel: string
+    confirmedLabel: string
+    durationLabel: string
+    offerSentLabel: string | null
+    deadlineLabel: string | null
+    respondedLabel: string | null
+    actionUrl: string
+  }) {
+    const row = (label: string, value: string) => `
+      <tr>
+        <td style="padding:4px 14px 4px 0;color:#7A90AA;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;vertical-align:top">${label}</td>
+        <td style="padding:4px 0;color:#0F1B2E;font-size:13px;vertical-align:top">${value}</td>
+      </tr>`
+    const header = (title: string) => `
+      <tr>
+        <td colspan="2" style="padding:14px 0 4px;border-top:1px solid #E5E7EB;color:#F0A500;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;font-weight:700">─── ${title} ───</td>
+      </tr>`
+    return wrap(
+      `Booking status: ${statusLabel}`,
+      `<p style="margin:0 0 10px;padding:8px 12px;background:#F0A500;color:#0F1B2E;border-radius:8px;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;text-align:center">STATUS: ${statusLabel}</p>
+       <table style="width:100%;border-collapse:collapse">
+         ${header('Job')}
+         ${row('Title', jobTitle)}
+         ${jobCode ? row('Code', `<span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${jobCode}</span>`) : ''}
+         ${row('Date', jobDateLabel)}
+         ${jobLocation ? row('Location', jobLocation) : ''}
+         ${header('Booking')}
+         ${row('Talent', `${talentName}${talentEmail ? ` &lt;${talentEmail}&gt;` : ''}`)}
+         ${row('Client', `${clientName}${clientEmail ? ` &lt;${clientEmail}&gt;` : ''}`)}
+         ${row('Offered', offeredLabel)}
+         ${row('Confirmed', confirmedLabel)}
+         ${row('Duration', durationLabel)}
+         ${header('Timeline')}
+         ${offerSentLabel ? row('Offer sent', offerSentLabel) : ''}
+         ${deadlineLabel ? row('Deadline', deadlineLabel) : ''}
+         ${row('Responded', respondedLabel ?? 'Not yet')}
+       </table>`,
+      { label: 'View in admin', url: actionUrl }
+    )
+  },
+  // Admin-side receipt when a booking is declined.
+  adminDecline({
+    talentName,
+    jobTitle,
+    reason,
+    actionUrl,
+  }: {
+    talentName: string
+    jobTitle: string
+    reason: string | null
+    actionUrl: string
+  }) {
+    return wrap(
+      `Declined: ${talentName} / ${jobTitle}`,
+      `<p><strong>${talentName}</strong> declined the offer for <strong>${jobTitle}</strong>.</p>
+       <p style="color:#7A90AA;margin-top:6px">Reason: ${reason || 'Not provided'}</p>
+       <p style="color:#374151">You&rsquo;ll need to offer the slot to someone else.</p>`,
+      { label: 'Open job in admin', url: actionUrl }
+    )
+  },
+  // Client-side receipt when a talent they requested declines.
+  clientDecline({
+    talentName,
+    jobTitle,
+    actionUrl,
+  }: {
+    talentName: string
+    jobTitle: string
+    actionUrl: string
+  }) {
+    return wrap(
+      `Update on ${jobTitle}`,
+      `<p><strong>${talentName}</strong> couldn&rsquo;t take <strong>${jobTitle}</strong>. We&rsquo;re already looking for a replacement.</p>
+       <p style="color:#7A90AA">No action needed from you — we&rsquo;ll update you as soon as someone new confirms.</p>`,
+      { label: 'View job', url: actionUrl }
     )
   },
 }

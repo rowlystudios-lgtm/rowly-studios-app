@@ -198,7 +198,7 @@ function defaultEmailHtml(
 /* ─────────── Higher-level event helpers ─────────── */
 
 function fmtUsd(cents: number | null | undefined): string {
-  if (!cents && cents !== 0) return '$0'
+  if (cents == null) return 'TBD'
   return `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
@@ -215,19 +215,59 @@ function fmtDateRange(start: string | null, end: string | null): string {
   return `${fmtDateShort(start)} – ${fmtDateShort(end)}`
 }
 
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/Los_Angeles',
+  })
+}
+
 type BookingContext = {
   bookingId: string
   talentUserId: string
   talentName: string
+  talentEmail: string | null
   clientUserId: string | null
   clientName: string
+  clientEmail: string | null
   jobId: string
   jobTitle: string
+  jobCode: string | null
   jobStart: string | null
   jobEnd: string | null
   jobLocation: string | null
+  jobCallTime: string | null
   offeredRateCents: number | null
   confirmedRateCents: number | null
+  isShortShoot: boolean
+  durationHours: number | null
+  createdAt: string | null
+  responseDeadlineAt: string | null
+  talentReviewedAt: string | null
+}
+
+/**
+ * Shape the rate label consistently across all emails. Short shoots bill
+ * as a flat fee, so don't suffix "/day".
+ */
+function rateLabel(cents: number | null | undefined, isShort: boolean): string {
+  if (!cents && cents !== 0) return 'Rate TBD'
+  return isShort ? `Flat fee: ${fmtUsd(cents)}` : `${fmtUsd(cents)}/day`
+}
+
+function durationLabel(ctx: BookingContext): string {
+  if (ctx.isShortShoot) {
+    return ctx.durationHours
+      ? `Short shoot (${ctx.durationHours} hours)`
+      : 'Short shoot'
+  }
+  return 'Full day'
 }
 
 async function loadBookingContext(
@@ -238,75 +278,60 @@ async function loadBookingContext(
     .from('job_bookings')
     .select(
       `id, offered_rate_cents, confirmed_rate_cents, talent_id,
-       profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name),
-       jobs (id, title, start_date, end_date, location, client_id,
-         profiles!jobs_client_id_fkey (full_name,
-           client_profiles (company_name)))`
+       is_short_shoot, shoot_duration_hours,
+       created_at, response_deadline_at, talent_reviewed_at,
+       profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name, email),
+       jobs (id, title, job_code, start_date, end_date, location, call_time,
+         shoot_duration_hours, is_half_day, client_id,
+         profiles!jobs_client_id_fkey (full_name, email,
+           client_profiles (company_name, billing_email)))`
     )
     .eq('id', bookingId)
     .maybeSingle()
   if (!data) return null
 
+  type ClientProfiles = {
+    company_name: string | null
+    billing_email: string | null
+  }
+  type ClientProfile = {
+    full_name: string | null
+    email: string | null
+    client_profiles: ClientProfiles | ClientProfiles[] | null
+  }
+  type Job = {
+    id: string
+    title: string
+    job_code: string | null
+    start_date: string | null
+    end_date: string | null
+    location: string | null
+    call_time: string | null
+    shoot_duration_hours: number | null
+    is_half_day: boolean | null
+    client_id: string | null
+    profiles: ClientProfile | ClientProfile[] | null
+  }
+  type Talent = {
+    full_name: string | null
+    first_name: string | null
+    last_name: string | null
+    email: string | null
+  }
   type Row = {
     id: string
     offered_rate_cents: number | null
     confirmed_rate_cents: number | null
     talent_id: string | null
-    profiles:
-      | { full_name: string | null; first_name: string | null; last_name: string | null }
-      | { full_name: string | null; first_name: string | null; last_name: string | null }[]
-      | null
-    jobs:
-      | {
-          id: string
-          title: string
-          start_date: string | null
-          end_date: string | null
-          location: string | null
-          client_id: string | null
-          profiles:
-            | {
-                full_name: string | null
-                client_profiles:
-                  | { company_name: string | null }
-                  | { company_name: string | null }[]
-                  | null
-              }
-            | {
-                full_name: string | null
-                client_profiles:
-                  | { company_name: string | null }
-                  | { company_name: string | null }[]
-                  | null
-              }[]
-            | null
-        }
-      | {
-          id: string
-          title: string
-          start_date: string | null
-          end_date: string | null
-          location: string | null
-          client_id: string | null
-          profiles:
-            | {
-                full_name: string | null
-                client_profiles:
-                  | { company_name: string | null }
-                  | { company_name: string | null }[]
-                  | null
-              }
-            | {
-                full_name: string | null
-                client_profiles:
-                  | { company_name: string | null }
-                  | { company_name: string | null }[]
-                  | null
-              }[]
-            | null
-        }[]
-      | null
+    is_short_shoot: boolean | null
+    shoot_duration_hours: number | null
+    created_at: string | null
+    response_deadline_at: string | null
+    talent_reviewed_at: string | null
+    profiles: Talent | Talent[] | null
+    jobs: Job | Job[] | null
   }
+
   const row = data as unknown as Row
   const talent = Array.isArray(row.profiles) ? row.profiles[0] ?? null : row.profiles
   const job = Array.isArray(row.jobs) ? row.jobs[0] ?? null : row.jobs
@@ -320,6 +345,15 @@ async function loadBookingContext(
       : clientProfile.client_profiles
     : null
 
+  // Short-shoot flag: either the booking itself is flagged, or the parent
+  // job has a duration under 4 hours. Duration is read from the booking
+  // first, falling back to the job.
+  const jobDuration = job.shoot_duration_hours ?? null
+  const bookingDuration = row.shoot_duration_hours ?? jobDuration
+  const isShortShoot =
+    row.is_short_shoot === true ||
+    (bookingDuration != null && bookingDuration < 4)
+
   return {
     bookingId: row.id,
     talentUserId: row.talent_id ?? '',
@@ -327,15 +361,86 @@ async function loadBookingContext(
       [talent?.first_name, talent?.last_name].filter(Boolean).join(' ') ||
       talent?.full_name ||
       'Talent',
+    talentEmail: talent?.email ?? null,
     clientUserId: job.client_id ?? null,
     clientName: cp?.company_name || clientProfile?.full_name || 'Client',
+    clientEmail: cp?.billing_email || clientProfile?.email || null,
     jobId: job.id,
     jobTitle: job.title,
+    jobCode: job.job_code,
     jobStart: job.start_date,
     jobEnd: job.end_date,
     jobLocation: job.location,
+    jobCallTime: job.call_time,
     offeredRateCents: row.offered_rate_cents,
     confirmedRateCents: row.confirmed_rate_cents,
+    isShortShoot,
+    durationHours: bookingDuration,
+    createdAt: row.created_at,
+    responseDeadlineAt: row.response_deadline_at,
+    talentReviewedAt: row.talent_reviewed_at,
+  }
+}
+
+/**
+ * Fan out the admin-status digest to every admin role in the profiles
+ * table. Safe to call in fire-and-forget — errors are swallowed.
+ */
+async function notifyAdminStatus(
+  ctx: BookingContext,
+  statusLabel: string
+): Promise<void> {
+  try {
+    const supabase = createServiceClient()
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin')
+
+    const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const offered = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
+    const confirmed = ctx.confirmedRateCents
+      ? rateLabel(ctx.confirmedRateCents, ctx.isShortShoot)
+      : 'Pending'
+    const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
+    const html = EmailTemplates.adminStatus({
+      statusLabel,
+      jobTitle: ctx.jobTitle,
+      jobCode: ctx.jobCode,
+      jobDateLabel: dateLabel,
+      jobLocation: ctx.jobLocation,
+      talentName: ctx.talentName,
+      talentEmail: ctx.talentEmail,
+      clientName: ctx.clientName,
+      clientEmail: ctx.clientEmail,
+      offeredLabel: offered,
+      confirmedLabel: confirmed,
+      durationLabel: durationLabel(ctx),
+      offerSentLabel: fmtDateTime(ctx.createdAt) || null,
+      deadlineLabel: fmtDateTime(ctx.responseDeadlineAt) || null,
+      respondedLabel: fmtDateTime(ctx.talentReviewedAt) || null,
+      actionUrl,
+    })
+    const subject = `${statusLabel.toUpperCase()}: ${ctx.talentName} → ${
+      ctx.jobCode ?? ctx.jobTitle
+    }`
+
+    for (const a of (admins ?? []) as Array<{ id: string }>) {
+      await sendNotification({
+        userId: a.id,
+        type: 'admin_status',
+        title: subject,
+        body: `${statusLabel} — ${ctx.talentName} / ${ctx.jobTitle}`,
+        actionUrl: `/admin/jobs/${ctx.jobId}`,
+        bookingId: ctx.bookingId,
+        jobId: ctx.jobId,
+        channels: ['in_app', 'email'],
+        emailHtml: html,
+      })
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[notify] admin status failed', err)
   }
 }
 
@@ -344,30 +449,57 @@ export async function notifyJobOffer(bookingId: string) {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const rateLabel = fmtUsd(ctx.offeredRateCents)
-    const html = EmailTemplates.jobOffer({
+    const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
+
+    // Email 1: talent
+    const talentHtml = EmailTemplates.jobOffer({
       jobTitle: ctx.jobTitle,
       dateLabel,
       location: ctx.jobLocation ?? '',
-      rateLabel: `${rateLabel}/day`,
+      rateLabel: rate,
       actionUrl: `${APP_URL}/app`,
     })
     await sendNotification({
       userId: ctx.talentUserId,
       type: 'job_offer',
       title: `New job offer: ${ctx.jobTitle}`,
-      body: `You have been offered ${ctx.jobTitle} on ${dateLabel} at ${rateLabel}/day. Tap to respond.`,
+      body: `You have been offered ${ctx.jobTitle} on ${dateLabel} at ${rate}. Tap to respond.`,
       actionUrl: '/app',
       bookingId,
       jobId: ctx.jobId,
       channels: ['in_app', 'email', 'sms'],
-      emailHtml: html,
+      emailHtml: talentHtml,
       smsBody: SmsTemplates.jobOffer(
         ctx.jobTitle,
         fmtDateShort(ctx.jobStart),
-        rateLabel
+        fmtUsd(ctx.offeredRateCents)
       ),
     })
+
+    // Email 2: client — receipt that we've sent their request
+    if (ctx.clientUserId) {
+      const clientHtml = EmailTemplates.clientBookingSent({
+        talentName: ctx.talentName,
+        jobTitle: ctx.jobTitle,
+        dateLabel,
+        rateLabel: rate,
+        actionUrl: `${APP_URL}/app`,
+      })
+      await sendNotification({
+        userId: ctx.clientUserId,
+        type: 'booking_sent',
+        title: `Booking request sent: ${ctx.jobTitle}`,
+        body: `We've sent your booking request to ${ctx.talentName}. You'll be notified when they respond.`,
+        actionUrl: '/app',
+        bookingId,
+        jobId: ctx.jobId,
+        channels: ['in_app', 'email'],
+        emailHtml: clientHtml,
+      })
+    }
+
+    // Email 3: admin status digest
+    await notifyAdminStatus(ctx, 'New offer')
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[notify] jobOffer failed', err)
@@ -377,27 +509,58 @@ export async function notifyJobOffer(bookingId: string) {
 export async function notifyConfirmation(bookingId: string) {
   try {
     const ctx = await loadBookingContext(bookingId)
-    if (!ctx || !ctx.clientUserId) return
+    if (!ctx) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const rateLabel = fmtUsd(ctx.confirmedRateCents ?? ctx.offeredRateCents)
-    const html = EmailTemplates.talentConfirmed({
-      talentName: ctx.talentName,
-      jobTitle: ctx.jobTitle,
-      dateLabel,
-      rateLabel: `${rateLabel}/day`,
-      actionUrl: `${APP_URL}/app`,
-    })
-    await sendNotification({
-      userId: ctx.clientUserId,
-      type: 'booking_confirmed',
-      title: `${ctx.talentName} confirmed`,
-      body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${dateLabel} at ${rateLabel}/day.`,
-      actionUrl: '/app',
-      bookingId,
-      jobId: ctx.jobId,
-      channels: ['in_app', 'email'],
-      emailHtml: html,
-    })
+    const confirmed = ctx.confirmedRateCents ?? ctx.offeredRateCents
+    const rate = rateLabel(confirmed, ctx.isShortShoot)
+
+    // Email 1: talent
+    if (ctx.talentUserId) {
+      const talentHtml = EmailTemplates.talentConfirmation({
+        jobTitle: ctx.jobTitle,
+        dateLabel,
+        rateLabel: rate,
+        location: ctx.jobLocation,
+        callTime: ctx.jobCallTime,
+        actionUrl: `${APP_URL}/app`,
+      })
+      await sendNotification({
+        userId: ctx.talentUserId,
+        type: 'booking_confirmed',
+        title: `Confirmed: ${ctx.jobTitle} — ${dateLabel}`,
+        body: `You're confirmed for ${ctx.jobTitle} on ${dateLabel} at ${rate}.`,
+        actionUrl: '/app',
+        bookingId,
+        jobId: ctx.jobId,
+        channels: ['in_app', 'email'],
+        emailHtml: talentHtml,
+      })
+    }
+
+    // Email 2: client
+    if (ctx.clientUserId) {
+      const clientHtml = EmailTemplates.talentConfirmed({
+        talentName: ctx.talentName,
+        jobTitle: ctx.jobTitle,
+        dateLabel,
+        rateLabel: rate,
+        actionUrl: `${APP_URL}/app`,
+      })
+      await sendNotification({
+        userId: ctx.clientUserId,
+        type: 'booking_confirmed',
+        title: `${ctx.talentName} is confirmed for ${ctx.jobTitle}`,
+        body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${dateLabel} at ${rate}.`,
+        actionUrl: '/app',
+        bookingId,
+        jobId: ctx.jobId,
+        channels: ['in_app', 'email'],
+        emailHtml: clientHtml,
+      })
+    }
+
+    // Email 3: admin status digest
+    await notifyAdminStatus(ctx, 'Confirmed')
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[notify] confirmation failed', err)
@@ -408,15 +571,36 @@ export async function notifyDecline(bookingId: string, reason: string | null) {
   try {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx) return
-    const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
-    const html = EmailTemplates.declined({
+    const supabase = createServiceClient()
+
+    // Email to client — a soft "someone else will be found" note
+    if (ctx.clientUserId) {
+      const clientHtml = EmailTemplates.clientDecline({
+        talentName: ctx.talentName,
+        jobTitle: ctx.jobTitle,
+        actionUrl: `${APP_URL}/app`,
+      })
+      await sendNotification({
+        userId: ctx.clientUserId,
+        type: 'booking_declined',
+        title: `Update on ${ctx.jobTitle}`,
+        body: `${ctx.talentName} couldn't take this one — we're finding a replacement.`,
+        actionUrl: '/app',
+        bookingId,
+        jobId: ctx.jobId,
+        channels: ['in_app', 'email'],
+        emailHtml: clientHtml,
+      })
+    }
+
+    // Admin receipt — keep the per-admin in-app notification with reason
+    const adminUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
+    const adminHtml = EmailTemplates.adminDecline({
       talentName: ctx.talentName,
       jobTitle: ctx.jobTitle,
       reason,
-      actionUrl,
+      actionUrl: adminUrl,
     })
-    // Notify every admin — lightweight fan-out, tiny admin roster.
-    const supabase = createServiceClient()
     const { data: admins } = await supabase
       .from('profiles')
       .select('id')
@@ -426,16 +610,17 @@ export async function notifyDecline(bookingId: string, reason: string | null) {
         userId: a.id,
         type: 'booking_declined',
         title: `${ctx.talentName} declined ${ctx.jobTitle}`,
-        body: `${ctx.talentName} has declined the offer. Reason: ${
-          reason || 'Not provided'
-        }`,
+        body: `${ctx.talentName} has declined. Reason: ${reason || 'Not provided'}`,
         actionUrl: `/admin/jobs/${ctx.jobId}`,
         bookingId,
         jobId: ctx.jobId,
         channels: ['in_app', 'email'],
-        emailHtml: html,
+        emailHtml: adminHtml,
       })
     }
+
+    // Plus the structured admin-status digest
+    await notifyAdminStatus(ctx, 'Declined')
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[notify] decline failed', err)
@@ -447,10 +632,10 @@ export async function notifyNudge(bookingId: string) {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const rateLabel = `${fmtUsd(ctx.offeredRateCents)}/day`
+    const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
     const html = EmailTemplates.nudge({
       jobTitle: ctx.jobTitle,
-      rateLabel,
+      rateLabel: rate,
       dateLabel,
       actionUrl: `${APP_URL}/app`,
     })
@@ -479,7 +664,7 @@ export async function notifyCounterOffer(bookingId: string, notes: string | null
     const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
     // Pull counter amount out of the notes string when possible.
     const counterLabel = ctx.offeredRateCents
-      ? `${fmtUsd(ctx.offeredRateCents)}/day (was offered)`
+      ? `${rateLabel(ctx.offeredRateCents, ctx.isShortShoot)} (was offered)`
       : 'see notes'
     const html = EmailTemplates.counterOffer({
       talentName: ctx.talentName,
@@ -506,6 +691,9 @@ export async function notifyCounterOffer(bookingId: string, notes: string | null
         emailHtml: html,
       })
     }
+
+    // Admin digest entry too
+    await notifyAdminStatus(ctx, 'Counter-offer')
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[notify] counter failed', err)
@@ -518,9 +706,9 @@ export async function notifyFullyCrewed(jobId: string) {
     const { data: job } = await supabase
       .from('jobs')
       .select(
-        `id, title, start_date, end_date, client_id, num_talent,
-         profiles!jobs_client_id_fkey (full_name,
-           client_profiles (company_name))`
+        `id, title, job_code, start_date, end_date, location, client_id, num_talent,
+         profiles!jobs_client_id_fkey (full_name, email,
+           client_profiles (company_name, billing_email))`
       )
       .eq('id', jobId)
       .maybeSingle()
@@ -529,7 +717,8 @@ export async function notifyFullyCrewed(jobId: string) {
     const { data: confirmed } = await supabase
       .from('job_bookings')
       .select(
-        `profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name,
+        `confirmed_rate_cents, is_short_shoot,
+         profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name,
           talent_profiles (primary_role))`
       )
       .eq('job_id', jobId)
@@ -544,9 +733,13 @@ export async function notifyFullyCrewed(jobId: string) {
         | { primary_role: string | null }[]
         | null
     }
-    const talentList = ((confirmed ?? []) as Array<{
+    type ConfirmedRow = {
+      confirmed_rate_cents: number | null
+      is_short_shoot: boolean | null
       profiles: TalentJoin | TalentJoin[] | null
-    }>)
+    }
+    const confirmedRows = (confirmed ?? []) as ConfirmedRow[]
+    const talentList = confirmedRows
       .map((b) => {
         const p = Array.isArray(b.profiles) ? b.profiles[0] ?? null : b.profiles
         if (!p) return null
@@ -559,50 +752,70 @@ export async function notifyFullyCrewed(jobId: string) {
           [p.first_name, p.last_name].filter(Boolean).join(' ') ||
           p.full_name ||
           'Talent'
-        return tp?.primary_role ? `${name} — ${tp.primary_role}` : name
+        const rate = rateLabel(
+          b.confirmed_rate_cents,
+          b.is_short_shoot === true
+        )
+        const role = tp?.primary_role ? ` — ${tp.primary_role}` : ''
+        return `${name}${role} — ${rate}`
       })
       .filter((x): x is string => Boolean(x))
 
-    const dateLabel = fmtDateRange(
-      (job as { start_date: string | null }).start_date,
-      (job as { end_date: string | null }).end_date
-    )
-    const html = EmailTemplates.fullyCrewed({
-      jobTitle: (job as { title: string }).title,
+    const jobRow = job as {
+      id: string
+      title: string
+      job_code: string | null
+      start_date: string | null
+      end_date: string | null
+      location: string | null
+      client_id: string | null
+    }
+    const dateLabel = fmtDateRange(jobRow.start_date, jobRow.end_date)
+    const clientActionUrl = `${APP_URL}/app`
+    const clientHtml = EmailTemplates.fullyCrewed({
+      jobTitle: jobRow.title,
       dateLabel,
       talentList,
-      actionUrl: `${APP_URL}/app`,
+      actionUrl: clientActionUrl,
     })
 
-    const clientId = (job as { client_id: string | null }).client_id
-    if (clientId) {
+    if (jobRow.client_id) {
       await sendNotification({
-        userId: clientId,
+        userId: jobRow.client_id,
         type: 'job_fully_crewed',
-        title: `${(job as { title: string }).title} is fully crewed!`,
-        body: `All talent confirmed for ${(job as { title: string }).title} on ${dateLabel}.`,
+        title: `${jobRow.title} is fully crewed!`,
+        body: `All talent confirmed for ${jobRow.title} on ${dateLabel}.`,
         actionUrl: '/app',
         jobId,
         channels: ['in_app', 'email', 'sms'],
-        emailHtml: html,
-        smsBody: SmsTemplates.fullyCrewed((job as { title: string }).title),
+        emailHtml: clientHtml,
+        smsBody: SmsTemplates.fullyCrewed(jobRow.title),
       })
     }
 
-    // Notify admins in-app.
+    // Admin digest: full crew summary with the talent list baked in.
     const { data: admins } = await supabase
       .from('profiles')
       .select('id')
       .eq('role', 'admin')
+    const adminActionUrl = `${APP_URL}/admin/jobs/${jobId}`
+    const adminHtml = EmailTemplates.fullyCrewed({
+      jobTitle: jobRow.title,
+      dateLabel: `${dateLabel} · ${jobRow.job_code ?? ''}`.trim(),
+      talentList,
+      actionUrl: adminActionUrl,
+    })
+    const adminSubject = `✓ Fully crewed: ${jobRow.job_code ?? jobRow.title}`
     for (const a of (admins ?? []) as Array<{ id: string }>) {
       await sendNotification({
         userId: a.id,
         type: 'job_fully_crewed',
-        title: `${(job as { title: string }).title} — fully crewed`,
-        body: `All ${talentList.length} talent confirmed.`,
+        title: adminSubject,
+        body: `All ${talentList.length} talent confirmed for ${jobRow.title}.`,
         actionUrl: `/admin/jobs/${jobId}`,
         jobId,
-        channels: ['in_app'],
+        channels: ['in_app', 'email'],
+        emailHtml: adminHtml,
       })
     }
   } catch (err) {

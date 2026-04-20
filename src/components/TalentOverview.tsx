@@ -57,6 +57,7 @@ export function TalentOverview() {
         .select(
           `id, status, confirmed_rate_cents, offered_rate_cents,
            talent_reviewed_at, rate_negotiation_notes,
+           is_short_shoot, shoot_duration_hours,
            jobs (
              id, title, description, location,
              start_date, end_date, call_time,
@@ -384,13 +385,34 @@ function JobCard({
   const ext = booking as unknown as {
     offered_rate_cents: number | null
     rate_negotiation_notes: string | null
+    is_short_shoot: boolean | null
+    shoot_duration_hours: number | null
   }
   const offeredCents = ext.offered_rate_cents ?? null
   const rateCents =
     variant === 'confirmed'
       ? booking.confirmed_rate_cents
       : offeredCents ?? booking.confirmed_rate_cents ?? job.day_rate_cents
-  const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Offered rate'
+  const isShortShoot =
+    ext.is_short_shoot === true ||
+    (ext.shoot_duration_hours != null && Number(ext.shoot_duration_hours) < 4)
+  const durationHrs =
+    ext.shoot_duration_hours != null
+      ? Number(ext.shoot_duration_hours)
+      : null
+  // Label varies by whether this is a flat-fee short shoot vs. a day rate.
+  const rateLabel = isShortShoot
+    ? variant === 'confirmed'
+      ? 'Confirmed flat fee'
+      : 'Flat fee offered'
+    : variant === 'confirmed'
+    ? 'Confirmed rate'
+    : 'Offered rate'
+  // Talent's own day rate, for the contextual "instead of your $X/day" note.
+  const talentDayRateCents =
+    (booking as unknown as {
+      talent_day_rate_cents?: number | null
+    }).talent_day_rate_cents ?? null
   const isOffer = variant === 'offer'
   const [counterOpen, setCounterOpen] = useState(false)
   const [counterDollars, setCounterDollars] = useState(
@@ -443,6 +465,26 @@ function JobCard({
               }}
             >
               Job offer
+            </span>
+          )}
+          {isShortShoot && (
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: 'rgba(240,165,0,0.18)',
+                color: '#F0A500',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                marginBottom: 6,
+                marginLeft: isOffer ? 6 : 0,
+                border: '1px solid rgba(240,165,0,0.4)',
+              }}
+            >
+              ⚡ Short shoot — under 4 hours
             </span>
           )}
           <h3
@@ -560,17 +602,36 @@ function JobCard({
             {rateLabel}
           </p>
           <p style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginTop: 2 }}>
-            {rateCents
-              ? (
-                <>
-                  {formatMoney(rateCents)}
-                  <span style={{ color: TEXT_MUTED, fontWeight: 400 }}> / day</span>
-                </>
-              )
-              : (
-                <span style={{ color: TEXT_MUTED, fontWeight: 500 }}>Rate TBC</span>
-              )}
+            {rateCents ? (
+              <>
+                {formatMoney(rateCents)}
+                {!isShortShoot && (
+                  <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>
+                    {' '}
+                    / day
+                  </span>
+                )}
+              </>
+            ) : (
+              <span style={{ color: '#F0A500', fontWeight: 600 }}>Rate TBD</span>
+            )}
           </p>
+          {isShortShoot && (
+            <p
+              style={{
+                fontSize: 11,
+                color: TEXT_MUTED,
+                marginTop: 4,
+                lineHeight: 1.45,
+              }}
+            >
+              Sub-{durationHrs ?? 4}hr engagement — flat fee applies
+              {talentDayRateCents
+                ? `, not your standard ${formatMoney(talentDayRateCents)}/day`
+                : ''}
+              .
+            </p>
+          )}
         </div>
 
         {variant === 'confirmed' ? (

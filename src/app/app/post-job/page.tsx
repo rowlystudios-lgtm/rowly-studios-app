@@ -19,7 +19,16 @@ const CARD_BORDER = 'rgba(170,189,224,0.15)'
 const CHIP_INACTIVE_BG = 'rgba(255,255,255,0.06)'
 const CHIP_INACTIVE_BORDER = 'rgba(170,189,224,0.2)'
 
-type ShootDayInput = { date: string; call_time: string }
+type ShootDayDuration = 'full' | 'half' | 'custom'
+
+type ShootDayInput = {
+  date: string
+  call_time: string
+  // 'full' = billed as a day rate, 'half' = 4h, 'custom' = number of hours
+  duration: ShootDayDuration
+  // Only meaningful when duration === 'custom'
+  custom_hours: string
+}
 
 type FormState = {
   title: string
@@ -31,7 +40,14 @@ type FormState = {
   shoot_days: ShootDayInput[]
   crew_needed: string[]
   client_notes: string
+  // Dollar amount as string so the input stays controlled.
+  budget: string
 }
+
+// $345 = $300 talent floor × 1.15 Rowly Studios production fee.
+const CLIENT_MIN_BUDGET_DOLLARS = 345
+// Short-shoot flat-fee minimum (admin can override during add-talent).
+const SHORT_SHOOT_MIN_DOLLARS = 150
 
 const INITIAL: FormState = {
   title: '',
@@ -40,9 +56,23 @@ const INITIAL: FormState = {
   address_city: '',
   address_state: 'CA',
   address_zip: '',
-  shoot_days: [{ date: '', call_time: '08:00' }],
+  shoot_days: [
+    { date: '', call_time: '08:00', duration: 'full', custom_hours: '' },
+  ],
   crew_needed: [],
   client_notes: '',
+  budget: '',
+}
+
+/**
+ * Resolve a day-level `ShootDayInput` to its duration in hours (or null for
+ * a full-day booking). Keeps the "short shoot" logic in one place.
+ */
+function shootDayHours(day: ShootDayInput): number | null {
+  if (day.duration === 'full') return null
+  if (day.duration === 'half') return 4
+  const n = parseFloat(day.custom_hours)
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function formatAddress(form: FormState): string {
@@ -119,6 +149,8 @@ function PostJobInner() {
         {
           date: '',
           call_time: f.shoot_days[f.shoot_days.length - 1]?.call_time ?? '08:00',
+          duration: 'full',
+          custom_hours: '',
         },
       ],
     }))
@@ -170,10 +202,51 @@ function PostJobInner() {
       return
     }
 
+    // Budget validation — a job can't be posted without at minimum a
+    // full-day floor budget (full-day) or a flat fee (short shoot).
+    const budgetNum = parseFloat(form.budget)
+    if (!Number.isFinite(budgetNum) || budgetNum <= 0) {
+      setError('Please enter your budget for this job.')
+      return
+    }
+    const budgetCents = Math.round(budgetNum * 100)
+
+    // Any day under 4 hours flips the whole job into short-shoot (flat fee) mode.
+    const dayHours = validDays.map((d) => shootDayHours(d))
+    const shortestHours = dayHours.reduce<number | null>((min, h) => {
+      if (h == null) return min
+      if (min == null) return h
+      return h < min ? h : min
+    }, null)
+    const isShortShoot = shortestHours != null && shortestHours < 4
+    const anyHalfDay = validDays.some((d) => d.duration === 'half')
+
+    if (isShortShoot) {
+      if (budgetCents < SHORT_SHOOT_MIN_DOLLARS * 100) {
+        setError(
+          `Short-shoot flat fees start at $${SHORT_SHOOT_MIN_DOLLARS}. Adjust your budget or extend the shoot.`
+        )
+        return
+      }
+    } else if (budgetCents < CLIENT_MIN_BUDGET_DOLLARS * 100) {
+      setError(
+        `Minimum day rate is $${CLIENT_MIN_BUDGET_DOLLARS}/day. This covers the $300 talent rate floor plus Rowly Studios' 15% production fee.`
+      )
+      return
+    }
+
     setSaving(true)
 
     const sortedDays = [...validDays].sort((a, b) => a.date.localeCompare(b.date))
     const addressString = formatAddress(form)
+
+    // Compute talent-facing day rate from the client budget: client sees the
+    // gross including the 15% RS fee, talent rate = budget ÷ 1.15. For short
+    // shoots, day_rate_cents is null — the flat fee lives on
+    // client_budget_cents and the admin will set offered_rate on add-talent.
+    const talentDayRateCents = isShortShoot
+      ? null
+      : Math.round(budgetCents / 1.15)
 
     const { error: insertError } = await supabase.from('jobs').insert({
       client_id: user.id,
@@ -187,13 +260,17 @@ function PostJobInner() {
       shoot_days: sortedDays.map((d) => ({
         date: d.date,
         call_time: d.call_time || null,
+        duration_hours: shootDayHours(d),
       })),
       start_date: sortedDays[0].date,
       end_date: sortedDays[sortedDays.length - 1].date,
       call_time: sortedDays[0].call_time || null,
       crew_needed: form.crew_needed,
       client_notes: form.client_notes.trim() || null,
-      day_rate_cents: null,
+      client_budget_cents: budgetCents,
+      day_rate_cents: talentDayRateCents,
+      shoot_duration_hours: shortestHours,
+      is_half_day: anyHalfDay && !isShortShoot,
       status: 'submitted',
     })
 
@@ -268,8 +345,17 @@ function PostJobInner() {
     )
   }
 
+  // Derive whether we're in short-shoot mode to toggle the budget field copy.
+  const anyShortShoot = form.shoot_days.some((d) => {
+    const h = shootDayHours(d)
+    return h != null && h < 4
+  })
+  const budgetNumeric = parseFloat(form.budget)
   const canSubmit =
-    form.title.trim().length > 0 && form.shoot_days.some((d) => d.date)
+    form.title.trim().length > 0 &&
+    form.shoot_days.some((d) => d.date) &&
+    Number.isFinite(budgetNumeric) &&
+    budgetNumeric > 0
 
   return (
     <Shell>
@@ -569,6 +655,99 @@ function PostJobInner() {
                     </select>
                   </div>
                 </div>
+
+                {/* Duration — Full / Half / Custom hours */}
+                <div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: TEXT_MUTED,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Duration
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr 1fr',
+                      gap: 6,
+                    }}
+                  >
+                    {(
+                      [
+                        { key: 'full', label: 'Full day' },
+                        { key: 'half', label: 'Half day' },
+                        { key: 'custom', label: 'Custom hrs' },
+                      ] as { key: ShootDayDuration; label: string }[]
+                    ).map((opt) => {
+                      const active = day.duration === opt.key
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() =>
+                            updateShootDay(i, {
+                              duration: opt.key,
+                              custom_hours:
+                                opt.key === 'custom' ? day.custom_hours : '',
+                            })
+                          }
+                          style={{
+                            padding: '8px 6px',
+                            borderRadius: 8,
+                            border: `1px solid ${
+                              active ? '#ffffff' : CHIP_INACTIVE_BORDER
+                            }`,
+                            background: active ? '#ffffff' : CHIP_INACTIVE_BG,
+                            color: active ? '#1A3C6B' : TEXT_MUTED,
+                            fontSize: 12,
+                            fontWeight: active ? 600 : 500,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {day.duration === 'custom' && (
+                    <div style={{ marginTop: 8 }}>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={23.5}
+                        step={0.5}
+                        value={day.custom_hours}
+                        onChange={(e) =>
+                          updateShootDay(i, { custom_hours: e.target.value })
+                        }
+                        placeholder="Hours, e.g. 3"
+                        className="rs-input"
+                      />
+                    </div>
+                  )}
+                  {(() => {
+                    const h = shootDayHours(day)
+                    if (h != null && h < 4) {
+                      return (
+                        <p
+                          style={{
+                            marginTop: 6,
+                            fontSize: 11,
+                            color: '#F0A500',
+                            fontWeight: 600,
+                          }}
+                        >
+                          ⚡ Short shoot — billed as a flat fee, not a day
+                          rate.
+                        </p>
+                      )
+                    }
+                    return null
+                  })()}
+                </div>
               </div>
             ))}
           </div>
@@ -630,6 +809,61 @@ function PostJobInner() {
               )
             })}
           </div>
+        </Section>
+
+        <Section title={anyShortShoot ? 'Flat fee budget' : 'Day rate budget'}>
+          <p
+            style={{
+              fontSize: 12,
+              color: TEXT_MUTED,
+              marginTop: -2,
+              lineHeight: 1.5,
+            }}
+          >
+            {anyShortShoot
+              ? `Total budget for this short shoot. Talent will see this as a flat fee offer. Minimum $${SHORT_SHOOT_MIN_DOLLARS}.`
+              : `Minimum day rate is $${CLIENT_MIN_BUDGET_DOLLARS}/day — this covers the $300 talent floor plus Rowly Studios' 15% production fee.`}
+          </p>
+          <Field
+            label={anyShortShoot ? 'Total flat fee' : 'Day rate'}
+            required
+          >
+            <div style={{ position: 'relative' }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#888',
+                  pointerEvents: 'none',
+                  fontSize: 14,
+                }}
+              >
+                $
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                required
+                min={
+                  anyShortShoot
+                    ? SHORT_SHOOT_MIN_DOLLARS
+                    : CLIENT_MIN_BUDGET_DOLLARS
+                }
+                step={5}
+                value={form.budget}
+                onChange={(e) => update('budget', e.target.value)}
+                placeholder={
+                  anyShortShoot
+                    ? `Min. $${SHORT_SHOOT_MIN_DOLLARS}`
+                    : `Min. $${CLIENT_MIN_BUDGET_DOLLARS}/day (incl. Rowly Studios fee)`
+                }
+                className="rs-input"
+                style={{ paddingLeft: 24 }}
+              />
+            </div>
+          </Field>
         </Section>
 
         <Section title="Notes">

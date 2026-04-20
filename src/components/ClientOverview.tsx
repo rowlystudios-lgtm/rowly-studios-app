@@ -46,6 +46,9 @@ type JobBooking = {
   id: string
   status: BookingStatus
   confirmed_rate_cents: number | null
+  offered_rate_cents: number | null
+  response_deadline_at: string | null
+  is_short_shoot: boolean | null
   profiles: BookingProfile | BookingProfile[] | null
 }
 
@@ -100,6 +103,9 @@ type JobRow = {
   end_date: string | null
   call_time: string | null
   crew_needed: string[] | null
+  num_talent: number | null
+  client_budget_cents: number | null
+  shoot_duration_hours: number | null
   created_at: string
   cancelled_at: string | null
   wrapped_at: string | null
@@ -292,10 +298,12 @@ export function ClientOverview() {
         `id, title, status, job_code, location, client_notes, description,
          address_line, address_city, address_state, address_zip,
          shoot_days, start_date, end_date, call_time,
-         crew_needed, created_at,
+         crew_needed, num_talent, client_budget_cents, shoot_duration_hours,
+         created_at,
          cancelled_at, wrapped_at,
          job_bookings (
-           id, status, confirmed_rate_cents,
+           id, status, confirmed_rate_cents, offered_rate_cents,
+           response_deadline_at, is_short_shoot,
            profiles (
              id, first_name, last_name, avatar_url,
              talent_profiles (department, primary_role)
@@ -743,6 +751,7 @@ function ClientJobRow({
             {collapsedDateLine(shootDays)}
           </p>
         )}
+        <CrewProgressStrip job={job} />
       </button>
 
       {expanded && (
@@ -969,6 +978,79 @@ function ExpandedSection({
   )
 }
 
+/**
+ * A single-line progress strip that tells the client where their job stands
+ * with its crew — e.g. "2 of 3 talent confirmed · awaiting 1 response".
+ * Rendered on the collapsed client job card so they don't have to open it
+ * to see booking health. Skipped for terminal states (cancelled / wrapped).
+ */
+function CrewProgressStrip({ job }: { job: JobRow }) {
+  if (job.cancelled_at || job.wrapped_at) return null
+  const bookings = (job.job_bookings ?? []).filter(
+    (b) => b.status !== 'cancelled'
+  )
+  if (bookings.length === 0) return null
+
+  const total = job.num_talent ?? bookings.length
+  const confirmed = bookings.filter((b) => b.status === 'confirmed').length
+  const pending = bookings.filter(
+    (b) => b.status === 'requested' || b.status === 'admin_approved'
+  ).length
+  const declined = bookings.filter((b) => b.status === 'declined').length
+  const overdue = bookings.some((b) => {
+    if (b.status !== 'requested' && b.status !== 'admin_approved') return false
+    if (!b.response_deadline_at) return false
+    return new Date(b.response_deadline_at).getTime() < Date.now()
+  })
+
+  // Pick the right tone + message: green when complete, amber when waiting
+  // (red if any response is overdue), blue-grey otherwise.
+  let tone: 'green' | 'amber' | 'red' | 'muted' = 'muted'
+  if (confirmed >= total && total > 0) tone = 'green'
+  else if (overdue) tone = 'red'
+  else if (pending > 0) tone = 'amber'
+
+  const colorMap = {
+    green: { bg: 'rgba(74,222,128,0.12)', fg: '#4ade80', border: 'rgba(74,222,128,0.3)' },
+    amber: { bg: 'rgba(240,165,0,0.12)', fg: '#F0A500', border: 'rgba(240,165,0,0.35)' },
+    red: { bg: 'rgba(239,68,68,0.12)', fg: '#F87171', border: 'rgba(239,68,68,0.35)' },
+    muted: { bg: 'rgba(170,189,224,0.08)', fg: '#AABDE0', border: 'rgba(170,189,224,0.2)' },
+  } as const
+  const c = colorMap[tone]
+
+  const parts: string[] = []
+  parts.push(`${confirmed} of ${total} confirmed`)
+  if (pending > 0) parts.push(`${pending} awaiting response`)
+  if (declined > 0) parts.push(`${declined} declined`)
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: '6px 10px',
+        borderRadius: 8,
+        background: c.bg,
+        border: `1px solid ${c.border}`,
+        color: c.fg,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '0.02em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      <span style={{ fontSize: 11 }}>
+        {tone === 'green' ? '✓' : tone === 'red' ? '⚠' : tone === 'amber' ? '⏳' : '•'}
+      </span>
+      <span>{parts.join(' · ')}</span>
+      {overdue && (
+        <span style={{ color: '#F87171', marginLeft: 4 }}>Overdue</span>
+      )}
+    </div>
+  )
+}
+
 function CrewGroup({
   title,
   bookings,
@@ -1004,9 +1086,28 @@ function CrewGroup({
           const role = tp?.primary_role ?? (tp?.department ? DEPARTMENT_LABELS[tp.department as Department] : '')
           const removable = canRemove(b, job)
           const busy = removingId === b.id
+          const pending =
+            b.status === 'requested' || b.status === 'admin_approved'
+          const overdue =
+            pending &&
+            !!b.response_deadline_at &&
+            new Date(b.response_deadline_at).getTime() < Date.now()
+          const offered = b.offered_rate_cents
+          const offeredLabel = offered
+            ? b.is_short_shoot
+              ? `Flat fee $${Math.round(offered / 100).toLocaleString()}`
+              : `$${Math.round(offered / 100).toLocaleString()}/day`
+            : null
           return (
             <div
               key={b.id}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+            <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1076,6 +1177,43 @@ function CrewGroup({
                   {busy ? '…' : 'Remove'}
                 </button>
               )}
+            </div>
+            {/* Secondary line: offered rate + per-slot status hint */}
+            {(offeredLabel || overdue || b.status === 'declined') && (
+              <div
+                style={{
+                  marginLeft: 42, // align with the avatar + gap
+                  fontSize: 11,
+                  color: TEXT_MUTED,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
+                {offeredLabel && <span>Offered: {offeredLabel}</span>}
+                {b.status === 'requested' && !overdue && (
+                  <span style={{ color: '#d4950a' }}>
+                    ⏳ Awaiting response
+                  </span>
+                )}
+                {overdue && (
+                  <span
+                    style={{
+                      color: '#F87171',
+                      fontWeight: 600,
+                    }}
+                  >
+                    ⚠ 24hrs passed — Rowly Studios is following up
+                  </span>
+                )}
+                {b.status === 'declined' && (
+                  <span style={{ color: '#F87171' }}>
+                    ✗ Declined — seeking replacement
+                  </span>
+                )}
+              </div>
+            )}
             </div>
           )
         })}

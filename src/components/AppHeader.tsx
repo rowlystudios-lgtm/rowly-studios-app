@@ -11,24 +11,69 @@ export function AppHeader() {
   const pathname = usePathname()
   const [unread, setUnread] = useState(0)
 
-  // Re-fetch the unread count whenever the user navigates — cheap head query.
+  // Re-fetch the unread count whenever the user navigates — cheap head query
+  // — and also subscribe to realtime INSERT events so the badge increments
+  // the moment a new notification row lands.
   useEffect(() => {
     if (!user?.id) {
       setUnread(0)
       return
     }
     let cancelled = false
-    async function load() {
+    const userId = user.id
+
+    async function refresh() {
       const { count } = await supabase
         .from('notifications')
         .select('id', { count: 'exact', head: true })
-        .eq('user_id', user!.id)
+        .eq('user_id', userId)
         .is('read_at', null)
-      if (!cancelled) setUnread(count ?? 0)
+      if (cancelled) return
+      const next = count ?? 0
+      setUnread(next)
+      // Mirror the count onto the PWA app icon where supported. Safari/iOS
+      // and modern Chrome both expose this; everything else simply no-ops.
+      try {
+        const nav = navigator as Navigator & {
+          setAppBadge?: (n: number) => Promise<void>
+          clearAppBadge?: () => Promise<void>
+        }
+        if (next > 0 && nav.setAppBadge) {
+          void nav.setAppBadge(next)
+        } else if (next === 0 && nav.clearAppBadge) {
+          void nav.clearAppBadge()
+        }
+      } catch {
+        // setAppBadge isn't critical — never let it throw up the UI.
+      }
     }
-    load()
+
+    refresh()
+
+    // Realtime: watch for any new notification row for this user.
+    const channel = supabase
+      .channel(`notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void refresh()
+        }
+      )
+      .subscribe()
+
     return () => {
       cancelled = true
+      try {
+        void supabase.removeChannel(channel)
+      } catch {
+        // ignore cleanup errors on unmount
+      }
     }
   }, [user?.id, supabase, pathname])
 

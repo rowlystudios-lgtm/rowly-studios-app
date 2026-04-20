@@ -448,7 +448,9 @@ export async function addTalentToJob(formData: FormData) {
       .maybeSingle(),
     supabase
       .from('jobs')
-      .select('client_id, day_rate_cents, client_budget_cents, num_talent, crewed_at')
+      .select(
+        'client_id, day_rate_cents, client_budget_cents, num_talent, crewed_at, shoot_duration_hours'
+      )
       .eq('id', jobId)
       .maybeSingle(),
   ])
@@ -487,11 +489,20 @@ export async function addTalentToJob(formData: FormData) {
   const deadline = new Date()
   deadline.setHours(deadline.getHours() + 24)
 
+  // Short-shoot flag is derived from the job's duration. Persisting it on
+  // the booking row keeps the flat-fee display logic independent of the
+  // job's live state later (e.g. if shoot_duration_hours is edited).
+  const jobDuration =
+    job?.shoot_duration_hours != null ? Number(job.shoot_duration_hours) : null
+  const isShortShoot = jobDuration != null && jobDuration < 4
+
   const insertPayload: Record<string, unknown> = {
     job_id: jobId,
     talent_id: talentId,
     offered_rate_cents: autoAccept ? autoRate : offeredCents,
     response_deadline_at: deadline.toISOString(),
+    is_short_shoot: isShortShoot,
+    shoot_duration_hours: jobDuration,
   }
   if (autoAccept) {
     insertPayload.status = 'confirmed'

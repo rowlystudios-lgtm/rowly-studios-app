@@ -204,14 +204,23 @@ export default function EditProfilePage() {
       return
     }
 
+    // Enforce the platform-wide floor on save. The UI already prevents
+    // anything below $300 via input min, but double-check server-bound
+    // values in case a talent bypasses the slider min or sends manual JSON.
+    const FLOOR_CENTS = 30000
+    const dayRateCents = form.day_rate
+      ? Math.max(FLOOR_CENTS, Math.round(parseFloat(form.day_rate) * 100))
+      : null
+    const rateFloorCents = Math.max(FLOOR_CENTS, form.rate_floor_cents)
+
     const talentUpsert = await supabase.from('talent_profiles').upsert(
       {
         id: userId,
         department: form.department || null,
         primary_role: form.primary_role || null,
         bio: form.bio || null,
-        day_rate_cents: form.day_rate ? Math.round(parseFloat(form.day_rate) * 100) : null,
-        rate_floor_cents: form.rate_floor_cents,
+        day_rate_cents: dayRateCents,
+        rate_floor_cents: rateFloorCents,
         showreel_url: form.showreel_url || null,
         equipment: form.equipment || null,
       },
@@ -251,7 +260,8 @@ export default function EditProfilePage() {
   }
 
   const rateFloorDollars = Math.round(form.rate_floor_cents / 100)
-  const sliderMin = 450
+  // $300 is the platform-wide floor: any talent rate below this is invalid.
+  const sliderMin = 300
   const sliderMax = 1000
   const sliderPct = ((rateFloorDollars - sliderMin) / (sliderMax - sliderMin)) * 100
 
@@ -472,15 +482,18 @@ export default function EditProfilePage() {
               </span>
               <input
                 type="number"
-                min="0"
-                step="25"
+                min={300}
+                step={25}
                 value={form.day_rate}
                 onChange={(e) => update('day_rate', e.target.value)}
-                placeholder="0"
+                placeholder="300"
                 className="rs-input"
                 style={{ paddingLeft: 24 }}
               />
             </div>
+            <p className="text-[10px] mt-1" style={{ color: TEXT_MUTED }}>
+              Minimum day rate: $300 (platform-wide floor).
+            </p>
           </Field>
 
           <div>
@@ -501,6 +514,7 @@ export default function EditProfilePage() {
               style={{ color: TEXT_MUTED }}
             >
               Jobs posted below this rate won&apos;t show your profile to the client.
+              Minimum rate floor: $300/day.
             </p>
             <input
               type="range"

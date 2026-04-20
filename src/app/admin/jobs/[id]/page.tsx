@@ -291,8 +291,18 @@ export default async function AdminJobDetailPage({
             <InfoLine icon="🕐" text={`Call: ${formatCall(job.call_time)}`} />
           )}
           {loc && <InfoLine icon="📍" text={loc} />}
-          {job.day_rate_cents != null && (
+          {job.day_rate_cents != null ? (
             <InfoLine icon="💰" text={`${centsToUsd(job.day_rate_cents)}/day`} />
+          ) : (
+            <span
+              style={{
+                fontSize: 12,
+                color: '#F0A500',
+                fontWeight: 600,
+              }}
+            >
+              💰 Rate TBD
+            </span>
           )}
           {job.num_talent != null && job.num_talent > 0 && (
             <InfoLine

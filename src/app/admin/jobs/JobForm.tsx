@@ -290,7 +290,7 @@ export function JobForm({
               className={INPUT_CLS}
             />
           </Field>
-          <Field label="Day rate">
+          <Field label="Talent day rate">
             <div style={{ position: 'relative' }}>
               <span
                 style={{
@@ -307,10 +307,11 @@ export function JobForm({
               </span>
               <input
                 type="number"
-                min={0}
+                min={300}
                 step={25}
                 value={dayRate}
                 onChange={(e) => setDayRate(e.target.value)}
+                placeholder="300"
                 className={INPUT_CLS}
                 style={{ paddingLeft: 26, paddingRight: 56 }}
               />
@@ -328,6 +329,19 @@ export function JobForm({
                 /day
               </span>
             </div>
+            <p
+              style={{
+                fontSize: 11,
+                color: '#6B7280',
+                marginTop: 4,
+              }}
+            >
+              Min: $300. What talent actually get paid. Client sees $
+              {dayRate
+                ? Math.round(parseFloat(dayRate) * 1.15).toLocaleString()
+                : '345'}
+              /day (incl. 15% RS fee).
+            </p>
           </Field>
         </div>
 

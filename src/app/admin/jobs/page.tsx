@@ -298,9 +298,19 @@ export default async function AdminJobsPage({
                         )}
                       </span>
                     )}
-                    {j.day_rate_cents != null && (
+                    {j.day_rate_cents != null ? (
                       <span style={{ fontSize: 12, color: '#AABDE0' }}>
                         {centsToUsd(j.day_rate_cents)}/day
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: '#F0A500',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Rate TBD
                       </span>
                     )}
                   </div>

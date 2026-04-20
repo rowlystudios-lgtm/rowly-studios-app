@@ -51,6 +51,9 @@ export default function AddTalentPage() {
   const [jobTitle, setJobTitle] = useState<string | null>(null)
   const [jobRateCents, setJobRateCents] = useState<number | null>(null)
   const [jobBudgetCents, setJobBudgetCents] = useState<number | null>(null)
+  const [jobDurationHours, setJobDurationHours] = useState<number | null>(null)
+  const isShortShoot = jobDurationHours != null && jobDurationHours < 4
+  const hasNoRate = jobRateCents == null && jobBudgetCents == null
   const [talent, setTalent] = useState<TalentRow[]>([])
   const [existingTalentIds, setExistingTalentIds] = useState<Set<string>>(
     new Set()
@@ -67,7 +70,9 @@ export default function AddTalentPage() {
       const [jobRes, talentRes, bookingsRes] = await Promise.all([
         supabase
           .from('jobs')
-          .select('title, day_rate_cents, client_budget_cents')
+          .select(
+            'title, day_rate_cents, client_budget_cents, shoot_duration_hours'
+          )
           .eq('id', jobId)
           .maybeSingle(),
         supabase
@@ -89,6 +94,11 @@ export default function AddTalentPage() {
       setJobTitle(jobRes.data?.title ?? null)
       setJobRateCents(jobRes.data?.day_rate_cents ?? null)
       setJobBudgetCents(jobRes.data?.client_budget_cents ?? null)
+      setJobDurationHours(
+        jobRes.data?.shoot_duration_hours != null
+          ? Number(jobRes.data.shoot_duration_hours)
+          : null
+      )
       setTalent((talentRes.data ?? []) as TalentRow[])
       setExistingTalentIds(
         new Set(
@@ -189,11 +199,73 @@ export default function AddTalentPage() {
         Each talent gets a <strong style={{ color: '#F0A500' }}>24-hour</strong>{' '}
         response window. They can accept, counter, or decline.
       </p>
-      {jobBudgetCents != null && (
+      {jobBudgetCents != null && !isShortShoot && (
         <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 2 }}>
           Client budget: <strong>{fmtUsd(jobBudgetCents)}/day</strong>. Default
           offers will use this.
         </p>
+      )}
+
+      {isShortShoot && (
+        <div
+          className="rounded-xl mt-3"
+          style={{
+            background: 'rgba(240,165,0,0.1)',
+            border: '1px solid rgba(240,165,0,0.4)',
+            padding: 14,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#F0A500',
+              marginBottom: 6,
+            }}
+          >
+            ⚡ Short shoot — under 4 hours
+          </p>
+          <p
+            style={{ fontSize: 13, color: '#E8D9B6', lineHeight: 1.5 }}
+          >
+            This is a flat-fee engagement ({jobDurationHours}hrs), not a day
+            rate. Client budget:{' '}
+            <strong style={{ color: '#fff' }}>
+              {jobBudgetCents != null ? fmtUsd(jobBudgetCents) : 'not set'}
+            </strong>
+            . Offered rate below is a flat fee to that talent.
+          </p>
+        </div>
+      )}
+
+      {hasNoRate && (
+        <div
+          className="rounded-xl mt-3"
+          style={{
+            background: 'rgba(239,68,68,0.1)',
+            border: '1px solid rgba(239,68,68,0.4)',
+            padding: 14,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#F87171',
+              marginBottom: 4,
+            }}
+          >
+            ⚠ No rate set for this job
+          </p>
+          <p style={{ fontSize: 13, color: '#E8C5C5', lineHeight: 1.5 }}>
+            Set a day rate or budget on the job before booking talent, or enter
+            a per-talent offered rate below for every add.
+          </p>
+        </div>
       )}
 
       <input
@@ -335,7 +407,7 @@ export default function AddTalentPage() {
                           marginBottom: 4,
                         }}
                       >
-                        Offered rate
+                        {isShortShoot ? 'Flat fee $' : 'Offered rate $/day'}
                       </span>
                       <div style={{ position: 'relative' }}>
                         <span
@@ -353,7 +425,7 @@ export default function AddTalentPage() {
                         </span>
                         <input
                           type="number"
-                          min={0}
+                          min={isShortShoot ? 0 : 300}
                           step={25}
                           value={draft}
                           onChange={(e) => setDraftFor(t.id, e.target.value)}
@@ -387,7 +459,11 @@ export default function AddTalentPage() {
                         opacity: busy || !draft ? 0.7 : 1,
                       }}
                     >
-                      {busy ? 'Adding…' : 'Add to job'}
+                      {busy
+                        ? 'Adding…'
+                        : isShortShoot
+                        ? 'Add (flat fee)'
+                        : 'Add to job'}
                     </button>
                   </div>
                 )}

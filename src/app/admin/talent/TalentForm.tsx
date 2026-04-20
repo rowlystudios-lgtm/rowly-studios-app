@@ -286,15 +286,25 @@ export function TalentForm({
         <SectionHeading>Rates</SectionHeading>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Day rate" required>
-            <CurrencyInput value={dayRate} onChange={setDayRate} required />
+            <CurrencyInput value={dayRate} onChange={setDayRate} required min={300} />
           </Field>
           <Field label="Half day">
-            <CurrencyInput value={halfDayRate} onChange={setHalfDayRate} />
+            <CurrencyInput value={halfDayRate} onChange={setHalfDayRate} min={150} />
           </Field>
           <Field label="Rate floor">
-            <CurrencyInput value={rateFloor} onChange={setRateFloor} />
+            <CurrencyInput value={rateFloor} onChange={setRateFloor} min={300} />
           </Field>
         </div>
+        <p
+          style={{
+            fontSize: 11,
+            color: '#7A90AA',
+            marginTop: 6,
+            letterSpacing: '0.02em',
+          }}
+        >
+          Platform floor: $300/day.
+        </p>
 
         <Divider />
 
@@ -433,10 +443,12 @@ function CurrencyInput({
   value,
   onChange,
   required,
+  min = 300,
 }: {
   value: string
   onChange: (v: string) => void
   required?: boolean
+  min?: number
 }) {
   return (
     <div style={{ position: 'relative' }}>
@@ -455,13 +467,14 @@ function CurrencyInput({
       </span>
       <input
         type="number"
-        min={0}
+        min={min}
         step={25}
         required={required}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={INPUT_CLS}
         style={{ paddingLeft: 26 }}
+        placeholder={String(min)}
       />
     </div>
   )
