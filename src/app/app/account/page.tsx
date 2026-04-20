@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { PasswordInput } from '@/components/PasswordInput'
+import { ShareCodeCard } from '@/components/ShareCodeCard'
 import { CITY_OPTIONS } from '@/lib/types'
 
 const CARD_BG = '#2E5099'
@@ -55,6 +56,7 @@ type ProfileRow = {
   phone: string | null
   city: string | null
   avatar_url: string | null
+  share_code: string | null
 }
 
 type AccountData = {
@@ -112,6 +114,7 @@ export default function AccountPage() {
         phone: null,
         city: null,
         avatar_url: null,
+        share_code: null,
       },
       client: (clientRes.data as ClientRow | null) ?? emptyClient(),
     })
@@ -310,6 +313,10 @@ function ViewAccount({
           </p>
         )}
       </Card>
+
+      <div style={{ marginTop: 20 }}>
+        <ShareCodeCard code={profile.share_code ?? null} variant="dark" />
+      </div>
 
       <div style={{ borderTop: `1px solid ${CARD_BORDER}`, marginTop: 28, paddingTop: 20 }}>
         <Label>Account &amp; Security</Label>

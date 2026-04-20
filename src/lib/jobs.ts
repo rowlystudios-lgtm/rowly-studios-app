@@ -85,9 +85,11 @@ export { CREW_OPTIONS } from '@/lib/crew-taxonomy'
 export type BookingStatus =
   | 'requested'
   | 'admin_approved'
+  | 'negotiating'
   | 'confirmed'
   | 'declined'
   | 'cancelled'
+  | 'completed'
 
 export type Booking = {
   id: string

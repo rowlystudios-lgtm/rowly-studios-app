@@ -17,12 +17,14 @@ type TalentResult = {
   avatar_url: string | null
   primary_role: string | null
   department: string | null
+  byCode?: boolean
 }
 
 type ClientResult = {
   id: string
   name: string
   industry: string | null
+  byCode?: boolean
 }
 
 type SearchResults = {
@@ -299,6 +301,7 @@ export function AdminSearch() {
                             .join(' · ') || 'Talent'}
                         </p>
                       </div>
+                      {t.byCode && <IdMatchPill />}
                     </ResultRow>
                   ))}
                 </Group>
@@ -338,6 +341,7 @@ export function AdminSearch() {
                           </p>
                         )}
                       </div>
+                      {c.byCode && <IdMatchPill />}
                     </ResultRow>
                   ))}
                 </Group>
@@ -463,6 +467,28 @@ function StatusPill({ status }: { status: string }) {
       }}
     >
       {status}
+    </span>
+  )
+}
+
+function IdMatchPill() {
+  return (
+    <span
+      style={{
+        padding: '2px 7px',
+        borderRadius: 999,
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        background: 'rgba(170,189,224,0.14)',
+        color: '#AABDE0',
+        border: '1px solid rgba(170,189,224,0.25)',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+    >
+      ID match
     </span>
   )
 }

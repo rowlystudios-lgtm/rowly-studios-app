@@ -14,6 +14,12 @@ import {
   summariseShootDays,
   type Booking,
 } from '@/lib/jobs'
+import {
+  acceptBookingOffer,
+  counterBookingOffer,
+  declineBookingOffer,
+  markBookingViewed,
+} from '@/app/actions/bookings'
 
 const BG = '#1A3C6B'
 const CARD_BG = '#2E5099'
@@ -49,7 +55,8 @@ export function TalentOverview() {
       const { data, error } = await supabase
         .from('job_bookings')
         .select(
-          `id, status, confirmed_rate_cents,
+          `id, status, confirmed_rate_cents, offered_rate_cents,
+           talent_reviewed_at, rate_negotiation_notes,
            jobs (
              id, title, description, location,
              start_date, end_date, call_time,
@@ -58,8 +65,14 @@ export function TalentOverview() {
            )`
         )
         .eq('talent_id', uid)
-        // Talent only sees bookings once admin has approved them.
-        .in('status', ['admin_approved', 'confirmed'])
+        // Talent sees every actionable booking — requested offers, active
+        // negotiations, already-confirmed jobs, and legacy admin_approved rows.
+        .in('status', [
+          'requested',
+          'negotiating',
+          'admin_approved',
+          'confirmed',
+        ])
         .order('created_at', { ascending: false })
 
       if (cancelled) return
@@ -83,7 +96,26 @@ export function TalentOverview() {
   }, [user?.id, supabase])
 
   const upcoming = bookings.filter((b) => b.status === 'confirmed')
-  const offers = bookings.filter((b) => b.status === 'admin_approved')
+  const offers = bookings.filter(
+    (b) =>
+      b.status === 'requested' ||
+      b.status === 'negotiating' ||
+      b.status === 'admin_approved'
+  )
+
+  // Mark each visible offer as viewed once per session. Server idempotently
+  // only writes when talent_reviewed_at is still null.
+  useEffect(() => {
+    const unseen = offers.filter(
+      (b) => (b as unknown as { talent_reviewed_at?: string | null }).talent_reviewed_at == null
+    )
+    for (const b of unseen) {
+      const fd = new FormData()
+      fd.set('bookingId', b.id)
+      markBookingViewed(fd).catch(() => undefined)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offers.length])
 
   function setBookingError(id: string, msg: string) {
     setCardError((prev) => ({ ...prev, [id]: msg }))
@@ -104,32 +136,56 @@ export function TalentOverview() {
         x.id === booking.id ? { ...x, status: 'confirmed' as const } : x
       )
     )
-    const { error } = await supabase
-      .from('job_bookings')
-      .update({ status: 'confirmed' })
-      .eq('id', booking.id)
-    if (error) {
+    try {
+      const fd = new FormData()
+      fd.set('bookingId', booking.id)
+      await acceptBookingOffer(fd)
+      return { ok: true as const }
+    } catch (err) {
       setBookings(snapshot)
-      setBookingError(booking.id, error.message)
-      return { ok: false as const, error: error.message }
+      const msg = err instanceof Error ? err.message : 'Could not confirm'
+      setBookingError(booking.id, msg)
+      return { ok: false as const, error: msg }
     }
-    return { ok: true as const }
   }
 
   async function declineBooking(booking: Booking) {
     const snapshot = bookings
     clearBookingError(booking.id)
     setBookings((b) => b.filter((x) => x.id !== booking.id))
-    const { error } = await supabase
-      .from('job_bookings')
-      .update({ status: 'declined' })
-      .eq('id', booking.id)
-    if (error) {
+    try {
+      const fd = new FormData()
+      fd.set('bookingId', booking.id)
+      await declineBookingOffer(fd)
+      return { ok: true as const }
+    } catch (err) {
       setBookings(snapshot)
-      setBookingError(booking.id, error.message)
-      return { ok: false as const, error: error.message }
+      const msg = err instanceof Error ? err.message : 'Could not decline'
+      setBookingError(booking.id, msg)
+      return { ok: false as const, error: msg }
     }
-    return { ok: true as const }
+  }
+
+  async function counterBooking(booking: Booking, dollars: string) {
+    const snapshot = bookings
+    clearBookingError(booking.id)
+    setBookings((b) =>
+      b.map((x) =>
+        x.id === booking.id ? { ...x, status: 'negotiating' as const } : x
+      )
+    )
+    try {
+      const fd = new FormData()
+      fd.set('bookingId', booking.id)
+      fd.set('counter', dollars)
+      await counterBookingOffer(fd)
+      return { ok: true as const }
+    } catch (err) {
+      setBookings(snapshot)
+      const msg = err instanceof Error ? err.message : 'Could not send counter'
+      setBookingError(booking.id, msg)
+      return { ok: false as const, error: msg }
+    }
   }
 
   async function sheetConfirm() {
@@ -246,6 +302,7 @@ export function TalentOverview() {
                   onDecline={() => {
                     declineBooking(b)
                   }}
+                  onCounter={(dollars) => counterBooking(b, dollars)}
                 />
               ))
             )}
@@ -308,6 +365,7 @@ type JobCardProps = {
   onViewDetails?: () => void
   onConfirm?: () => void
   onDecline?: () => void
+  onCounter?: (dollars: string) => void
 }
 
 function JobCard({
@@ -317,13 +375,28 @@ function JobCard({
   onViewDetails,
   onConfirm,
   onDecline,
+  onCounter,
 }: JobCardProps) {
   const job = booking.job
   const dateStr = summariseShootDays(job)
+  // Cast once so we can read the extended columns fetched on the booking
+  // without polluting the shared Booking type.
+  const ext = booking as unknown as {
+    offered_rate_cents: number | null
+    rate_negotiation_notes: string | null
+  }
+  const offeredCents = ext.offered_rate_cents ?? null
   const rateCents =
-    variant === 'confirmed' ? booking.confirmed_rate_cents : booking.confirmed_rate_cents ?? job.day_rate_cents
-  const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Day rate'
+    variant === 'confirmed'
+      ? booking.confirmed_rate_cents
+      : offeredCents ?? booking.confirmed_rate_cents ?? job.day_rate_cents
+  const rateLabel = variant === 'confirmed' ? 'Confirmed rate' : 'Offered rate'
   const isOffer = variant === 'offer'
+  const [counterOpen, setCounterOpen] = useState(false)
+  const [counterDollars, setCounterDollars] = useState(
+    offeredCents != null ? String(offeredCents / 100) : ''
+  )
+  const negotiating = booking.status === 'negotiating'
 
   function openMaps(e: React.MouseEvent) {
     e.preventDefault()
@@ -525,21 +598,24 @@ function JobCard({
               flexWrap: 'nowrap',
             }}
           >
-            <button
-              type="button"
-              onClick={onViewDetails}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: TEXT_MUTED,
-                fontSize: 11,
-                textDecoration: 'underline',
-                padding: '6px 4px',
-                cursor: 'pointer',
-              }}
-            >
-              View details
-            </button>
+            {onCounter && !counterOpen && (
+              <button
+                type="button"
+                onClick={() => setCounterOpen(true)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: 'rgba(212,149,10,0.18)',
+                  color: '#F0A500',
+                  border: '1px solid rgba(212,149,10,0.35)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                ✎ Counter
+              </button>
+            )}
             <button
               type="button"
               onClick={onDecline}
@@ -575,6 +651,95 @@ function JobCard({
           </div>
         )}
       </div>
+
+      {isOffer && negotiating && ext.rate_negotiation_notes && (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
+            fontSize: 12,
+            color: '#F0A500',
+            background: 'rgba(212,149,10,0.08)',
+          }}
+        >
+          {ext.rate_negotiation_notes} — waiting for admin response.
+        </div>
+      )}
+
+      {isOffer && counterOpen && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!onCounter || !counterDollars) return
+            onCounter(counterDollars)
+            setCounterOpen(false)
+          }}
+          style={{
+            padding: '10px 14px',
+            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+          }}
+        >
+          <span style={{ fontSize: 12, color: TEXT_MUTED }}>$</span>
+          <input
+            type="number"
+            min={0}
+            step={25}
+            autoFocus
+            value={counterDollars}
+            onChange={(e) => setCounterDollars(e.target.value)}
+            placeholder="Your proposed rate"
+            style={{
+              flex: 1,
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid rgba(170,189,224,0.2)',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#fff',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          />
+          <span style={{ fontSize: 11, color: TEXT_MUTED }}>/day</span>
+          <button
+            type="button"
+            onClick={() => setCounterOpen(false)}
+            style={{
+              padding: '7px 10px',
+              borderRadius: 8,
+              background: 'transparent',
+              color: TEXT_MUTED,
+              border: '1px solid rgba(170,189,224,0.2)',
+              fontSize: 11,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!counterDollars}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 8,
+              background: '#F0A500',
+              color: '#1A3C6B',
+              border: 'none',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              opacity: counterDollars ? 1 : 0.6,
+            }}
+          >
+            Send counter
+          </button>
+        </form>
+      )}
     </article>
   )
 }

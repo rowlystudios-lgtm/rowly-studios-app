@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
+import { ShareCodeCard } from '@/components/ShareCodeCard'
 import { DEPARTMENT_LABELS, type Department, type TalentProfile } from '@/lib/types'
 
 const BG = '#1A3C6B'
@@ -229,6 +230,10 @@ export default function ProfilePage() {
         )}
 
         {/* Account & Security */}
+        <div className="mt-8">
+          <ShareCodeCard code={profile?.share_code ?? null} variant="dark" />
+        </div>
+
         <div style={{ borderTop: `1px solid ${CARD_BORDER}` }} className="mt-10 pt-6">
           <p
             className="text-[10px] uppercase tracking-wider font-semibold mb-2"

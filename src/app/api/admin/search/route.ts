@@ -47,6 +47,7 @@ export async function POST(request: Request) {
     .replace(/_/g, '\\_')
   const like = `%${q}%`
 
+  const codeLike = raw.toUpperCase()
   const [jobsRes, talentRes, clientsRes] = await Promise.all([
     supabase
       .from('jobs')
@@ -57,21 +58,25 @@ export async function POST(request: Request) {
     supabase
       .from('profiles')
       .select(
-        `id, full_name, first_name, last_name, avatar_url,
+        `id, full_name, first_name, last_name, avatar_url, share_code,
          talent_profiles (primary_role, department)`
       )
       .eq('role', 'talent')
-      .or(`full_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
+      .or(
+        `full_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},share_code.ilike.%${codeLike}%`
+      )
       .order('full_name')
       .limit(4),
     supabase
       .from('profiles')
       .select(
-        `id, full_name, first_name, last_name, email,
+        `id, full_name, first_name, last_name, email, share_code,
          client_profiles (company_name, industry)`
       )
       .eq('role', 'client')
-      .or(`full_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
+      .or(
+        `full_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like},share_code.ilike.%${codeLike}%`
+      )
       .order('full_name')
       .limit(8), // overfetch; filter below
   ])
@@ -93,6 +98,7 @@ export async function POST(request: Request) {
     first_name: string | null
     last_name: string | null
     email: string | null
+    share_code: string | null
     client_profiles: ClientProfileRow | ClientProfileRow[] | null
   }
   type ClientByCompany = {
@@ -122,12 +128,18 @@ export async function POST(request: Request) {
     id: string
     name: string
     industry: string | null
+    byCode: boolean
   }> = []
 
-  function pushClient(id: string, name: string, industry: string | null) {
+  function pushClient(
+    id: string,
+    name: string,
+    industry: string | null,
+    byCode: boolean
+  ) {
     if (!id || seen.has(id)) return
     seen.add(id)
-    mergedClients.push({ id, name, industry })
+    mergedClients.push({ id, name, industry, byCode })
   }
 
   for (const r of ((clientsRes.data ?? []) as unknown as ClientRow[])) {
@@ -140,12 +152,25 @@ export async function POST(request: Request) {
       r.full_name ||
       r.email ||
       'Unnamed'
-    pushClient(r.id, name, cp?.industry ?? null)
+    const byCode = Boolean(
+      r.share_code &&
+        r.share_code.toUpperCase().includes(codeLike) &&
+        !(
+          name.toLowerCase().includes(q.toLowerCase()) ||
+          (cp?.company_name ?? '').toLowerCase().includes(q.toLowerCase())
+        )
+    )
+    pushClient(r.id, name, cp?.industry ?? null, byCode)
   }
   for (const r of ((clientsByCompany ?? []) as unknown as ClientByCompany[])) {
     const p = Array.isArray(r.profiles) ? r.profiles[0] ?? null : r.profiles
     if (!p) continue
-    pushClient(p.id, r.company_name ?? p.full_name ?? 'Unnamed', r.industry)
+    pushClient(
+      p.id,
+      r.company_name ?? p.full_name ?? 'Unnamed',
+      r.industry,
+      false
+    )
   }
 
   type TalentRow = {
@@ -154,21 +179,29 @@ export async function POST(request: Request) {
     first_name: string | null
     last_name: string | null
     avatar_url: string | null
+    share_code: string | null
     talent_profiles: TalentProfileRow | TalentProfileRow[] | null
   }
   const talent = ((talentRes.data ?? []) as unknown as TalentRow[]).map((r) => {
     const tp = Array.isArray(r.talent_profiles)
       ? r.talent_profiles[0] ?? null
       : r.talent_profiles
+    const name =
+      [r.first_name, r.last_name].filter(Boolean).join(' ') ||
+      r.full_name ||
+      'Unnamed'
+    const byCode = Boolean(
+      r.share_code &&
+        r.share_code.toUpperCase().includes(codeLike) &&
+        !name.toLowerCase().includes(q.toLowerCase())
+    )
     return {
       id: r.id,
-      name:
-        [r.first_name, r.last_name].filter(Boolean).join(' ') ||
-        r.full_name ||
-        'Unnamed',
+      name,
       avatar_url: r.avatar_url,
       primary_role: tp?.primary_role ?? null,
       department: tp?.department ?? null,
+      byCode,
     }
   })
 

@@ -1,14 +1,9 @@
 import Link from 'next/link'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
-import {
-  confirmBooking,
-  declineBooking,
-  markBookingPaid,
-  markBookingCompleted,
-  generateInvoice,
-} from '../actions'
+import { generateInvoice } from '../actions'
 import { StatusActionButtons } from './StatusActionButtons'
+import { BookingAdminActions } from './BookingAdminActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,9 +92,16 @@ type Booking = {
   id: string
   status: string
   confirmed_rate_cents: number | null
+  offered_rate_cents: number | null
   paid: boolean | null
   paid_at: string | null
   created_at: string | null
+  talent_reviewed_at: string | null
+  response_deadline_at: string | null
+  nudge_count: number | null
+  nudged_at: string | null
+  declined_reason: string | null
+  rate_negotiation_notes: string | null
   profiles:
     | {
         id: string
@@ -171,7 +173,9 @@ export default async function AdminJobDetailPage({
     supabase
       .from('job_bookings')
       .select(
-        `id, status, confirmed_rate_cents, paid, paid_at, created_at,
+        `id, status, confirmed_rate_cents, offered_rate_cents, paid, paid_at,
+         created_at, talent_reviewed_at, response_deadline_at, nudge_count,
+         nudged_at, declined_reason, rate_negotiation_notes,
          profiles!job_bookings_talent_id_fkey (id, full_name, avatar_url, email, phone,
            talent_profiles (department, primary_role, day_rate_cents))`
       )
@@ -432,8 +436,13 @@ export default async function AdminJobDetailPage({
                     >
                       <StatusBadge status={b.status} size="sm" />
                       {b.confirmed_rate_cents != null && (
+                        <span style={{ fontSize: 12, color: '#4ADE80', fontWeight: 600 }}>
+                          Confirmed: {centsToUsd(b.confirmed_rate_cents)}/day
+                        </span>
+                      )}
+                      {b.confirmed_rate_cents == null && b.offered_rate_cents != null && (
                         <span style={{ fontSize: 12, color: '#AABDE0' }}>
-                          {centsToUsd(b.confirmed_rate_cents)}/day
+                          Offered: {centsToUsd(b.offered_rate_cents)}/day
                         </span>
                       )}
                       {b.paid && (
@@ -456,8 +465,66 @@ export default async function AdminJobDetailPage({
                     </div>
                   </div>
 
+                  {/* Read receipt + nudge log */}
+                  {(b.status === 'requested' ||
+                    b.status === 'negotiating') && (
+                    <div
+                      className="mt-2 flex items-center gap-2 flex-wrap"
+                      style={{ fontSize: 11, color: '#7A90AA' }}
+                    >
+                      <span
+                        aria-hidden
+                        style={{
+                          display: 'inline-block',
+                          width: 7,
+                          height: 7,
+                          borderRadius: 999,
+                          background: b.talent_reviewed_at
+                            ? 'rgba(170,189,224,0.4)'
+                            : '#F0A500',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span>
+                        {b.talent_reviewed_at
+                          ? `Viewed ${formatDate(b.talent_reviewed_at)}`
+                          : 'Not yet viewed'}
+                      </span>
+                      {b.nudge_count != null && b.nudge_count > 0 && (
+                        <span>
+                          · Nudged {b.nudge_count}x
+                          {b.nudged_at
+                            ? ` (last: ${formatDate(b.nudged_at)})`
+                            : ''}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {b.status === 'declined' && b.declined_reason && (
+                    <p
+                      className="mt-2 rounded-lg"
+                      style={{
+                        fontSize: 12,
+                        color: '#F87171',
+                        background: 'rgba(239,68,68,0.08)',
+                        border: '1px solid rgba(239,68,68,0.25)',
+                        padding: '6px 10px',
+                      }}
+                    >
+                      Reason: {b.declined_reason}
+                    </p>
+                  )}
+
                   {!isTerminal && (
-                    <BookingActions booking={b} jobId={job.id} />
+                    <BookingAdminActions
+                      bookingId={b.id}
+                      jobId={job.id}
+                      status={b.status}
+                      paid={Boolean(b.paid)}
+                      offeredRateCents={b.offered_rate_cents}
+                      responseDeadlineAt={b.response_deadline_at}
+                      negotiationNotes={b.rate_negotiation_notes}
+                    />
                   )}
                 </article>
               )
@@ -677,111 +744,3 @@ function NotesCard({
   )
 }
 
-function BookingActions({
-  booking,
-  jobId,
-}: {
-  booking: Booking
-  jobId: string
-}) {
-  const status = booking.status
-  if (status === 'requested') {
-    return (
-      <div className="mt-3 flex gap-2">
-        <form action={declineBooking} style={{ flex: 1 }}>
-          <input type="hidden" name="bookingId" value={booking.id} />
-          <input type="hidden" name="jobId" value={jobId} />
-          <button
-            type="submit"
-            className="w-full rounded-lg transition-colors"
-            style={{
-              padding: '9px 0',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              background: 'rgba(239,68,68,0.15)',
-              color: '#F87171',
-              border: '1px solid rgba(239,68,68,0.35)',
-              cursor: 'pointer',
-            }}
-          >
-            ✗ Decline
-          </button>
-        </form>
-        <form action={confirmBooking} style={{ flex: 2 }}>
-          <input type="hidden" name="bookingId" value={booking.id} />
-          <input type="hidden" name="jobId" value={jobId} />
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-[#F0A500] hover:bg-[#F5B733] text-[#0F1B2E] transition-colors"
-            style={{
-              padding: '9px 0',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            ✓ Confirm booking
-          </button>
-        </form>
-      </div>
-    )
-  }
-
-  if (status === 'confirmed') {
-    return (
-      <div className="mt-3 flex gap-2 flex-wrap">
-        {!booking.paid && (
-          <form action={markBookingPaid} style={{ flex: 1, minWidth: 140 }}>
-            <input type="hidden" name="bookingId" value={booking.id} />
-            <input type="hidden" name="jobId" value={jobId} />
-            <button
-              type="submit"
-              className="w-full rounded-lg transition-colors"
-              style={{
-                padding: '9px 0',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                background: 'rgba(16,185,129,0.15)',
-                color: '#10B981',
-                border: '1px solid rgba(16,185,129,0.35)',
-                cursor: 'pointer',
-              }}
-            >
-              Mark paid
-            </button>
-          </form>
-        )}
-        <form action={markBookingCompleted} style={{ flex: 1, minWidth: 140 }}>
-          <input type="hidden" name="bookingId" value={booking.id} />
-          <input type="hidden" name="jobId" value={jobId} />
-          <button
-            type="submit"
-            className="w-full rounded-lg transition-colors"
-            style={{
-              padding: '9px 0',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              background: 'rgba(168,85,247,0.15)',
-              color: '#C084FC',
-              border: '1px solid rgba(168,85,247,0.35)',
-              cursor: 'pointer',
-            }}
-          >
-            Mark completed
-          </button>
-        </form>
-      </div>
-    )
-  }
-
-  return null
-}

@@ -3,6 +3,14 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-auth'
+import {
+  notifyJobOffer,
+  notifyConfirmation,
+  notifyDecline,
+  notifyNudge,
+  notifyFullyCrewed,
+  notifyCounterOffer,
+} from '@/lib/notifications'
 
 type JobStatus = 'crewing' | 'submitted' | 'confirmed' | 'wrapped' | 'cancelled'
 
@@ -31,7 +39,12 @@ export async function updateJobStatus(formData: FormData) {
   revalidatePath('/admin/jobs')
 }
 
-/** Confirm a requested booking — copies job.day_rate_cents if no rate yet. */
+/**
+ * Confirm a booking. Copies offered_rate_cents (or falls back to the
+ * existing confirmed_rate_cents / job.day_rate_cents) into confirmed_rate_cents.
+ * After confirm we check whether the job is now fully crewed and, if so,
+ * stamp jobs.crewed_at and fan-out the "fully crewed" notifications.
+ */
 export async function confirmBooking(formData: FormData) {
   const { supabase } = await requireAdmin()
   const bookingId = (formData.get('bookingId') as string) ?? ''
@@ -40,36 +53,222 @@ export async function confirmBooking(formData: FormData) {
 
   const { data: existing } = await supabase
     .from('job_bookings')
-    .select('confirmed_rate_cents')
+    .select('confirmed_rate_cents, offered_rate_cents')
     .eq('id', bookingId)
     .maybeSingle()
 
   const patch: Record<string, unknown> = { status: 'confirmed' }
   if (existing && existing.confirmed_rate_cents == null) {
-    const { data: job } = await supabase
-      .from('jobs')
-      .select('day_rate_cents')
-      .eq('id', jobId)
-      .maybeSingle()
-    if (job?.day_rate_cents != null) {
-      patch.confirmed_rate_cents = job.day_rate_cents
+    if (existing.offered_rate_cents != null) {
+      patch.confirmed_rate_cents = existing.offered_rate_cents
+    } else {
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('day_rate_cents')
+        .eq('id', jobId)
+        .maybeSingle()
+      if (job?.day_rate_cents != null) {
+        patch.confirmed_rate_cents = job.day_rate_cents
+      }
     }
   }
 
   await supabase.from('job_bookings').update(patch).eq('id', bookingId)
+
+  // Fire the "you've been confirmed" notification (client + admin copy).
+  try {
+    await notifyConfirmation(bookingId)
+  } catch {
+    // non-fatal
+  }
+
+  // Check fully-crewed state — lightweight: count confirmed vs num_talent.
+  try {
+    const [{ data: job }, { count: confirmedCount }] = await Promise.all([
+      supabase
+        .from('jobs')
+        .select('num_talent, crewed_at')
+        .eq('id', jobId)
+        .maybeSingle(),
+      supabase
+        .from('job_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('job_id', jobId)
+        .eq('status', 'confirmed'),
+    ])
+    const needed = job?.num_talent ?? null
+    if (
+      needed != null &&
+      needed > 0 &&
+      (confirmedCount ?? 0) >= needed &&
+      !job?.crewed_at
+    ) {
+      await supabase
+        .from('jobs')
+        .update({ crewed_at: new Date().toISOString() })
+        .eq('id', jobId)
+      await notifyFullyCrewed(jobId)
+    }
+  } catch {
+    // non-fatal
+  }
+
   revalidatePath(`/admin/jobs/${jobId}`)
+  revalidatePath('/admin/jobs')
 }
 
 export async function declineBooking(formData: FormData) {
   const { supabase } = await requireAdmin()
   const bookingId = (formData.get('bookingId') as string) ?? ''
   const jobId = (formData.get('jobId') as string) ?? ''
+  const reason = ((formData.get('reason') as string) ?? '').trim() || null
   if (!bookingId || !jobId) return
   await supabase
     .from('job_bookings')
-    .update({ status: 'declined' })
+    .update({ status: 'declined', declined_reason: reason })
     .eq('id', bookingId)
+  try {
+    await notifyDecline(bookingId, reason)
+  } catch {
+    // non-fatal
+  }
   revalidatePath(`/admin/jobs/${jobId}`)
+}
+
+/**
+ * Nudge the talent on a requested booking. Disallowed before the
+ * 24-hour response_deadline_at. Bumps nudge_count / nudged_at and
+ * triggers in-app + email + SMS to the talent.
+ */
+export async function nudgeTalent(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const bookingId = (formData.get('bookingId') as string) ?? ''
+  const jobId = (formData.get('jobId') as string) ?? ''
+  if (!bookingId || !jobId) return
+
+  const { data: b } = await supabase
+    .from('job_bookings')
+    .select('status, response_deadline_at, nudge_count')
+    .eq('id', bookingId)
+    .maybeSingle()
+  if (!b) return
+
+  const now = new Date()
+  const deadline = b.response_deadline_at
+    ? new Date(b.response_deadline_at)
+    : null
+  if (b.status !== 'requested' && b.status !== 'negotiating') return
+  if (deadline && now < deadline) return
+
+  await supabase
+    .from('job_bookings')
+    .update({
+      nudge_count: (b.nudge_count ?? 0) + 1,
+      nudged_at: now.toISOString(),
+    })
+    .eq('id', bookingId)
+
+  try {
+    await notifyNudge(bookingId)
+  } catch {
+    // non-fatal
+  }
+  revalidatePath(`/admin/jobs/${jobId}`)
+}
+
+/**
+ * Admin updates the offered rate on an existing booking. If the booking
+ * was in negotiating / declined, we flip it back to requested so the
+ * talent sees a fresh offer to respond to.
+ */
+export async function updateOfferedRate(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const bookingId = (formData.get('bookingId') as string) ?? ''
+  const jobId = (formData.get('jobId') as string) ?? ''
+  const rateRaw = (formData.get('offered_rate') as string) ?? ''
+  const notes = ((formData.get('notes') as string) ?? '').trim() || null
+  if (!bookingId || !jobId || !rateRaw) return
+  const cents = Math.round(parseFloat(rateRaw) * 100)
+  if (!Number.isFinite(cents) || cents <= 0) return
+
+  await supabase
+    .from('job_bookings')
+    .update({
+      offered_rate_cents: cents,
+      status: 'requested',
+      rate_negotiation_notes: notes,
+      nudged_at: null,
+    })
+    .eq('id', bookingId)
+
+  try {
+    await notifyJobOffer(bookingId)
+  } catch {
+    // non-fatal
+  }
+  revalidatePath(`/admin/jobs/${jobId}`)
+}
+
+/**
+ * Admin accepts the talent's counter-offer. Confirms the booking at the
+ * counter amount and triggers the confirmation notification.
+ */
+export async function acceptCounterOffer(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const bookingId = (formData.get('bookingId') as string) ?? ''
+  const jobId = (formData.get('jobId') as string) ?? ''
+  const counterRaw = (formData.get('counter') as string) ?? ''
+  if (!bookingId || !jobId || !counterRaw) return
+  const cents = Math.round(parseFloat(counterRaw) * 100)
+  if (!Number.isFinite(cents) || cents <= 0) return
+
+  await supabase
+    .from('job_bookings')
+    .update({
+      status: 'confirmed',
+      offered_rate_cents: cents,
+      confirmed_rate_cents: cents,
+    })
+    .eq('id', bookingId)
+
+  // Mirror the post-confirm fan-out from confirmBooking.
+  try {
+    await notifyConfirmation(bookingId)
+  } catch {
+    // non-fatal
+  }
+  try {
+    const [{ data: job }, { count: confirmedCount }] = await Promise.all([
+      supabase
+        .from('jobs')
+        .select('num_talent, crewed_at')
+        .eq('id', jobId)
+        .maybeSingle(),
+      supabase
+        .from('job_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('job_id', jobId)
+        .eq('status', 'confirmed'),
+    ])
+    const needed = job?.num_talent ?? null
+    if (
+      needed != null &&
+      needed > 0 &&
+      (confirmedCount ?? 0) >= needed &&
+      !job?.crewed_at
+    ) {
+      await supabase
+        .from('jobs')
+        .update({ crewed_at: new Date().toISOString() })
+        .eq('id', jobId)
+      await notifyFullyCrewed(jobId)
+    }
+  } catch {
+    // non-fatal
+  }
+
+  revalidatePath(`/admin/jobs/${jobId}`)
+  revalidatePath('/admin/jobs')
 }
 
 export async function markBookingPaid(formData: FormData) {
@@ -218,10 +417,17 @@ export async function generateInvoice(formData: FormData) {
  * profile has a day rate, copy it into confirmed_rate_cents so the admin
  * sees a proposed rate immediately (it only becomes the "final" rate on confirm).
  */
+/**
+ * Admin adds a talent to a job. Caller supplies the offered rate (in
+ * dollars). If omitted we fall back to client_budget_cents → job day
+ * rate → talent day rate in that order. A 24-hour response deadline is
+ * stamped so the nudge button unlocks after it expires.
+ */
 export async function addTalentToJob(formData: FormData) {
   const { supabase } = await requireAdmin()
   const jobId = (formData.get('jobId') as string) ?? ''
   const talentId = (formData.get('talentId') as string) ?? ''
+  const offeredRaw = ((formData.get('offered_rate') as string) ?? '').trim()
   if (!jobId || !talentId) return
 
   const { data: existing } = await supabase
@@ -231,22 +437,58 @@ export async function addTalentToJob(formData: FormData) {
     .eq('talent_id', talentId)
     .maybeSingle()
   if (existing) {
-    // Already booked — nothing to do.
     redirect(`/admin/jobs/${jobId}`)
   }
 
-  const { data: tp } = await supabase
-    .from('talent_profiles')
-    .select('day_rate_cents')
-    .eq('id', talentId)
-    .maybeSingle()
+  const [{ data: tp }, { data: job }] = await Promise.all([
+    supabase
+      .from('talent_profiles')
+      .select('day_rate_cents')
+      .eq('id', talentId)
+      .maybeSingle(),
+    supabase
+      .from('jobs')
+      .select('day_rate_cents, client_budget_cents')
+      .eq('id', jobId)
+      .maybeSingle(),
+  ])
 
-  await supabase.from('job_bookings').insert({
-    job_id: jobId,
-    talent_id: talentId,
-    status: 'requested',
-    confirmed_rate_cents: tp?.day_rate_cents ?? null,
-  })
+  let offeredCents: number | null = null
+  if (offeredRaw) {
+    const parsed = Math.round(parseFloat(offeredRaw) * 100)
+    if (Number.isFinite(parsed) && parsed > 0) offeredCents = parsed
+  }
+  if (offeredCents == null) {
+    offeredCents =
+      job?.client_budget_cents ??
+      job?.day_rate_cents ??
+      tp?.day_rate_cents ??
+      null
+  }
+
+  const deadline = new Date()
+  deadline.setHours(deadline.getHours() + 24)
+
+  const { data: inserted } = await supabase
+    .from('job_bookings')
+    .insert({
+      job_id: jobId,
+      talent_id: talentId,
+      status: 'requested',
+      offered_rate_cents: offeredCents,
+      confirmed_rate_cents: null,
+      response_deadline_at: deadline.toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (inserted?.id) {
+    try {
+      await notifyJobOffer(inserted.id)
+    } catch {
+      // non-fatal
+    }
+  }
   redirect(`/admin/jobs/${jobId}`)
 }
 

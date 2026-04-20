@@ -2,6 +2,8 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { requireAdmin, formatDate } from '@/lib/admin-auth'
 import { isGoogleConfigured } from '@/lib/google'
+import { isEmailConfigured } from '@/lib/email'
+import { isSmsConfigured } from '@/lib/sms'
 import { saveNotionSettings } from './actions'
 import { SyncButton, SyncAllButton } from './SyncButtons'
 import { CalendarCopyField } from './CalendarCopyField'
@@ -424,6 +426,67 @@ export default async function AdminSettingsPage() {
         </div>
       </section>
 
+      {/* ─── Notifications ─── */}
+      <section
+        className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 20 }}
+      >
+        <p
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            color: '#7A90AA',
+            marginBottom: 8,
+          }}
+        >
+          Notifications
+        </p>
+        <p
+          className="text-white"
+          style={{ fontSize: 15, fontWeight: 600 }}
+        >
+          Email &amp; SMS delivery
+        </p>
+        <p
+          style={{
+            fontSize: 12,
+            color: '#AABDE0',
+            lineHeight: 1.5,
+            marginTop: 2,
+          }}
+        >
+          Transactional email is sent via Resend; SMS via Twilio. If either is
+          missing the booking actions still complete — we just skip that channel.
+        </p>
+        <div
+          className="mt-3 grid gap-2"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+        >
+          <ServiceChip
+            label="Resend (email)"
+            configured={isEmailConfigured()}
+            helpUrl="https://resend.com"
+          />
+          <ServiceChip
+            label="Twilio (SMS)"
+            configured={isSmsConfigured()}
+            helpUrl="https://www.twilio.com/console"
+          />
+        </div>
+        <p
+          className="mt-3"
+          style={{ fontSize: 11, color: '#7A90AA', lineHeight: 1.5 }}
+        >
+          Required env vars in Vercel:{' '}
+          <code style={{ color: '#C5D3E8' }}>RESEND_API_KEY</code>,{' '}
+          <code style={{ color: '#C5D3E8' }}>TWILIO_ACCOUNT_SID</code>,{' '}
+          <code style={{ color: '#C5D3E8' }}>TWILIO_AUTH_TOKEN</code>,{' '}
+          <code style={{ color: '#C5D3E8' }}>TWILIO_FROM_NUMBER</code>.
+        </p>
+      </section>
+
       {/* ─── App info ─── */}
       <section
         className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
@@ -523,6 +586,71 @@ function DarkField({
 
 const DARK_INPUT_CLS =
   'block w-full rounded-lg px-3 py-2.5 text-sm text-white bg-[rgba(255,255,255,0.05)] border border-[rgba(170,189,224,0.2)] focus:outline-none focus:ring-2 focus:ring-[#F0A500]/40 focus:border-[#F0A500]/50 transition'
+
+function ServiceChip({
+  label,
+  configured,
+  helpUrl,
+}: {
+  label: string
+  configured: boolean
+  helpUrl: string
+}) {
+  return (
+    <div
+      className="rounded-xl flex items-center gap-3"
+      style={{
+        background: '#253D5E',
+        padding: 12,
+        border: '1px solid rgba(255,255,255,0.05)',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: 999,
+          background: configured ? '#22C55E' : '#F0A500',
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p
+          className="text-white"
+          style={{ fontSize: 13, fontWeight: 500 }}
+        >
+          {label}
+        </p>
+        <p
+          style={{
+            fontSize: 11,
+            color: configured ? '#86EFAC' : '#F0A500',
+            marginTop: 1,
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {configured ? 'Configured ✓' : 'Not set'}
+        </p>
+      </div>
+      <a
+        href={helpUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          fontSize: 11,
+          color: '#F0A500',
+          textDecoration: 'underline',
+          flexShrink: 0,
+        }}
+      >
+        Setup ↗
+      </a>
+    </div>
+  )
+}
 
 function driveFolderUrl(id: string | null | undefined): string | null {
   if (!id) return null
