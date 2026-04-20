@@ -6,6 +6,7 @@ import {
   formatDate,
   formatDateShort,
 } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -366,21 +367,7 @@ export default async function AdminTalentDetailPage({
                       ` · ${centsToUsd(b.confirmed_rate_cents)}/day`}
                   </p>
                 </div>
-                <span
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: 999,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    background: 'rgba(170,189,224,0.12)',
-                    color: '#AABDE0',
-                    flexShrink: 0,
-                  }}
-                >
-                  {b.status}
-                </span>
+                <StatusBadge status={b.status} size="sm" />
               </Link>
               )
             })}

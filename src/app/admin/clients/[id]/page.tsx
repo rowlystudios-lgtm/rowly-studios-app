@@ -4,9 +4,8 @@ import {
   centsToUsd,
   formatDate,
   formatDateShort,
-  jobStatusStyle,
-  invoiceStatusStyle,
 } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -194,7 +193,6 @@ export default async function AdminClientDetailPage({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {jobs.map((j) => {
-              const s = jobStatusStyle(j.status)
               const range =
                 j.start_date && j.end_date && j.end_date !== j.start_date
                   ? `${formatDateShort(j.start_date)} – ${formatDateShort(j.end_date)}`
@@ -232,21 +230,7 @@ export default async function AdminClientDetailPage({
                       {range}
                     </p>
                   </div>
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: 999,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      background: s.bg,
-                      color: s.color,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {s.label}
-                  </span>
+                  <StatusBadge status={j.status} size="sm" />
                 </Link>
               )
             })}
@@ -286,7 +270,6 @@ export default async function AdminClientDetailPage({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {invoices.map((inv) => {
-              const s = invoiceStatusStyle(inv.status)
               return (
                 <Link
                   key={inv.id}
@@ -313,21 +296,7 @@ export default async function AdminClientDetailPage({
                       {inv.due_date && ` · due ${formatDate(inv.due_date)}`}
                     </p>
                   </div>
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: 999,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      background: s.bg,
-                      color: s.color,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {s.label}
-                  </span>
+                  <StatusBadge status={inv.status} size="sm" />
                 </Link>
               )
             })}

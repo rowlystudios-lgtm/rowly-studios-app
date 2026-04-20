@@ -1,12 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import {
-  requireAdmin,
-  centsToUsd,
-  formatDate,
-  jobStatusStyle,
-  invoiceStatusStyle,
-} from '@/lib/admin-auth'
+import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -156,7 +151,6 @@ export default async function AdminJobDetailPage({
     due_date: string | null
   } | null
 
-  const statusStyle = jobStatusStyle(job.status)
   const range =
     job.start_date && job.end_date && job.end_date !== job.start_date
       ? `${formatDate(job.start_date)} – ${formatDate(job.end_date)}`
@@ -245,21 +239,7 @@ export default async function AdminJobDetailPage({
             {loc && ` · ${loc}`}
           </p>
         </div>
-        <span
-          style={{
-            padding: '4px 10px',
-            borderRadius: 999,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            background: statusStyle.bg,
-            color: statusStyle.color,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {statusStyle.label}
-        </span>
+        <StatusBadge status={job.status} />
       </div>
 
       {/* Talent booked */}
@@ -362,7 +342,7 @@ export default async function AdminJobDetailPage({
                       flexShrink: 0,
                     }}
                   >
-                    <BookingStatusPill status={b.status} />
+                    <StatusBadge status={b.status} size="sm" />
                     {b.paid && (
                       <span
                         style={{
@@ -451,7 +431,7 @@ export default async function AdminJobDetailPage({
                 {invoice.due_date && ` · due ${formatDate(invoice.due_date)}`}
               </p>
             </div>
-            <InvoiceStatusPill status={invoice.status} />
+            <StatusBadge status={invoice.status} size="sm" />
           </Link>
         ) : (
           <form action={generateInvoice}>
@@ -557,52 +537,3 @@ function DetailRow({
   )
 }
 
-function BookingStatusPill({ status }: { status: string }) {
-  const colors: Record<string, { bg: string; color: string; label: string }> = {
-    requested: { bg: 'rgba(212,149,10,0.18)', color: '#F0A500', label: 'Requested' },
-    admin_approved: { bg: 'rgba(59,130,246,0.18)', color: '#60A5FA', label: 'Awaiting talent' },
-    confirmed: { bg: 'rgba(34,197,94,0.18)', color: '#4ADE80', label: 'Confirmed' },
-    declined: { bg: 'rgba(239,68,68,0.18)', color: '#F87171', label: 'Declined' },
-    cancelled: { bg: 'rgba(170,189,224,0.12)', color: '#7A90AA', label: 'Cancelled' },
-    completed: { bg: 'rgba(168,85,247,0.18)', color: '#C084FC', label: 'Completed' },
-  }
-  const s = colors[status] ?? colors.requested
-  return (
-    <span
-      style={{
-        padding: '3px 8px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        background: s.bg,
-        color: s.color,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {s.label}
-    </span>
-  )
-}
-
-function InvoiceStatusPill({ status }: { status: string }) {
-  const s = invoiceStatusStyle(status)
-  return (
-    <span
-      style={{
-        padding: '3px 8px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        background: s.bg,
-        color: s.color,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {s.label}
-    </span>
-  )
-}

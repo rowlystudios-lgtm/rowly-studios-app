@@ -1,11 +1,7 @@
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
-import {
-  requireAdmin,
-  centsToUsdPrecise,
-  formatDate,
-  invoiceStatusStyle,
-} from '@/lib/admin-auth'
+import { requireAdmin, centsToUsdPrecise, formatDate } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 
 export const dynamic = 'force-dynamic'
 
@@ -147,7 +143,6 @@ export default async function AdminInvoiceDetailPage({
     clientProfile?.full_name ||
     '—'
 
-  const statusStyle = invoiceStatusStyle(invoice.status)
   const total = (lineItems ?? []).reduce((s, r) => s + (r.total_cents ?? 0), 0)
 
   async function addLineItem(formData: FormData) {
@@ -245,21 +240,7 @@ export default async function AdminInvoiceDetailPage({
             </p>
           )}
         </div>
-        <span
-          style={{
-            padding: '4px 10px',
-            borderRadius: 999,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            background: statusStyle.bg,
-            color: statusStyle.color,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {statusStyle.label}
-        </span>
+        <StatusBadge status={invoice.status} />
       </div>
 
       {cp?.billing_email && (

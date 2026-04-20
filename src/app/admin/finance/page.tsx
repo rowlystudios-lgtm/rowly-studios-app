@@ -1,11 +1,6 @@
 import Link from 'next/link'
-import {
-  requireAdmin,
-  centsToUsd,
-  formatDate,
-  invoiceStatusStyle,
-  todayIso,
-} from '@/lib/admin-auth'
+import { requireAdmin, centsToUsd, formatDate, todayIso } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 import { FinanceFilterClient } from './FinanceFilterClient'
 
 export const dynamic = 'force-dynamic'
@@ -148,7 +143,6 @@ export default async function AdminFinancePage({
           }}
         >
           {shown.map((inv) => {
-            const s = invoiceStatusStyle(inv.status)
             const overdue =
               inv.status !== 'paid' && inv.due_date && inv.due_date < today
             return (
@@ -205,20 +199,10 @@ export default async function AdminFinancePage({
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
                     {centsToUsd(inv.total_cents)}
                   </span>
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: 999,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      background: s.bg,
-                      color: s.color,
-                    }}
-                  >
-                    {s.label}
-                  </span>
+                  <StatusBadge
+                    status={overdue ? 'overdue' : inv.status}
+                    size="sm"
+                  />
                 </div>
               </Link>
             )

@@ -1,9 +1,6 @@
 import Link from 'next/link'
-import {
-  requireAdmin,
-  formatDateShort,
-  jobStatusStyle,
-} from '@/lib/admin-auth'
+import { requireAdmin, formatDateShort } from '@/lib/admin-auth'
+import { StatusBadge } from '@/components/StatusBadge'
 import { JobsFilterClient } from './JobsFilterClient'
 
 export const dynamic = 'force-dynamic'
@@ -135,7 +132,6 @@ export default async function AdminJobsPage({
           }}
         >
           {shown.map((j) => {
-            const s = jobStatusStyle(j.status)
             const range =
               j.start_date && j.end_date && j.end_date !== j.start_date
                 ? `${formatDateShort(j.start_date)} – ${formatDateShort(j.end_date)}`
@@ -188,22 +184,7 @@ export default async function AdminJobsPage({
                     {range && ` · ${range}`}
                   </p>
                 </div>
-                <span
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: 999,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    background: s.bg,
-                    color: s.color,
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
-                >
-                  {s.label}
-                </span>
+                <StatusBadge status={j.status} size="sm" />
               </Link>
             )
           })}
