@@ -76,7 +76,10 @@ body {
   border: 0.5px solid rgba(30, 58, 107, 0.2);
   border-radius: 10px;
   padding: 10px 12px;
-  font-size: 14px;
+  /* 16px (1rem) prevents iOS Safari from zooming when the input is
+     focused. The visual size is controlled by padding / layout so the
+     font still reads at the intended scale. */
+  font-size: 16px;
   color: var(--rs-ink);
   font-family: inherit;
   transition: border-color 0.15s;

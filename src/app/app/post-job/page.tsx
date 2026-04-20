@@ -459,6 +459,7 @@ function PostJobInner() {
               onChange={(e) => update('title', e.target.value)}
               placeholder="Nike SS26 Campaign"
               className="rs-input"
+              style={{ fontSize: 16 }}
             />
           </Field>
           <Field label="Description">
@@ -468,6 +469,7 @@ function PostJobInner() {
               placeholder="Tell us about the project"
               rows={4}
               className="rs-input resize-none"
+              style={{ fontSize: 16 }}
             />
           </Field>
         </Section>
@@ -498,6 +500,7 @@ function PostJobInner() {
               placeholder="Los Angeles"
               className="rs-input"
               autoComplete="address-level2"
+              style={{ fontSize: 16 }}
             />
           </Field>
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 10 }}>
@@ -514,7 +517,7 @@ function PostJobInner() {
                 className="rs-input"
                 autoCapitalize="characters"
                 autoComplete="address-level1"
-                style={{ textTransform: 'uppercase' }}
+                style={{ textTransform: 'uppercase', fontSize: 16 }}
               />
             </Field>
             <Field label="Zip" required>
@@ -530,6 +533,7 @@ function PostJobInner() {
                 placeholder="90028"
                 className="rs-input"
                 autoComplete="postal-code"
+                style={{ fontSize: 16 }}
               />
             </Field>
           </div>
@@ -669,6 +673,7 @@ function PostJobInner() {
             placeholder="Anything else the crew should know: NDA, parking, dress code, key contact."
             rows={4}
             className="rs-input resize-none"
+            style={{ fontSize: 16 }}
           />
         </Section>
 
@@ -840,6 +845,10 @@ function ShootDayFields({
   const budgetBelowMin =
     Number.isFinite(budgetNum) && budgetNum > 0 && budgetNum < MIN_BUDGET_DOLLARS
 
+  // YYYY-MM-DD for today — used as the min on the date input so the
+  // native picker can't select a day that's already gone.
+  const todayStr = new Date().toISOString().split('T')[0]
+
   // Keep end_time sensible when call_time changes. If end was blank we
   // shift to call + 8h (a reasonable default); otherwise preserve the
   // existing span in minutes.
@@ -886,11 +895,13 @@ function ShootDayFields({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Date / call / end — three columns on wider screens, wraps cleanly on mobile */}
+      {/* Date / call / end — date gets more room (iOS renders
+          "Apr 19, 2026" which is wider than "08:00 AM"). */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)',
+          gridTemplateColumns:
+            'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr)',
           gap: 6,
         }}
       >
@@ -915,10 +926,13 @@ function ShootDayFields({
           <input
             type="date"
             required
+            min={todayStr}
             value={day.date}
             onChange={(e) => onChange({ date: e.target.value })}
             style={{
-              fontSize: 12,
+              // 16px keeps iOS from auto-zooming on focus; padding still
+              // controls the visual height of the field.
+              fontSize: 16,
               padding: '10px 8px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
@@ -950,7 +964,7 @@ function ShootDayFields({
             value={day.call_time}
             onChange={(e) => setCallTime(e.target.value)}
             style={{
-              fontSize: 12,
+              fontSize: 16,
               padding: '10px 8px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
@@ -989,7 +1003,7 @@ function ShootDayFields({
             value={day.end_time || ''}
             onChange={(e) => setEndTime(e.target.value)}
             style={{
-              fontSize: 12,
+              fontSize: 16,
               padding: '10px 8px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
@@ -1043,13 +1057,21 @@ function ShootDayFields({
               <button
                 key={opt.key}
                 type="button"
-                onClick={() =>
-                  onChange({
-                    duration_type: opt.key,
-                    duration_hours:
-                      opt.key === 'custom' ? day.duration_hours : '',
-                  })
-                }
+                onClick={() => {
+                  if (opt.key === 'custom') {
+                    // Seed the hours input from the current call→end gap so
+                    // the user doesn't have to retype what they already
+                    // picked. Falls back to an empty input if we can't
+                    // compute one (e.g. end_time missing).
+                    const computed = hoursBetween(day.call_time, day.end_time)
+                    const hours =
+                      day.duration_hours ||
+                      (computed != null ? String(computed) : '')
+                    onChange({ duration_type: 'custom', duration_hours: hours })
+                  } else {
+                    onChange({ duration_type: 'full_day', duration_hours: '' })
+                  }
+                }}
                 style={{
                   padding: '8px 6px',
                   borderRadius: 8,
@@ -1092,6 +1114,7 @@ function ShootDayFields({
               onChange={(e) => setCustomHours(e.target.value)}
               placeholder="Hours, e.g. 3"
               className="rs-input"
+              style={{ fontSize: 16 }}
             />
             {computedHours != null && (
               <p
@@ -1142,7 +1165,7 @@ function ShootDayFields({
             marginBottom: 4,
           }}
         >
-          Working budget · day {index + 1}
+          Budget
         </span>
         <div style={{ position: 'relative' }}>
           <span
@@ -1165,13 +1188,13 @@ function ShootDayFields({
             step={5}
             value={day.budget}
             onChange={(e) => onChange({ budget: e.target.value })}
-            placeholder="Enter your budget per person"
+            placeholder="e.g. 1500"
             className="rs-input"
             style={{
               paddingLeft: 24,
-              borderColor: budgetBelowMin
-                ? '#EF4444'
-                : undefined,
+              // 16px prevents iOS Safari zoom on focus.
+              fontSize: 16,
+              borderColor: budgetBelowMin ? '#EF4444' : undefined,
             }}
           />
         </div>
@@ -1185,7 +1208,7 @@ function ShootDayFields({
         >
           {budgetBelowMin
             ? `Minimum budget is $${MIN_BUDGET_DOLLARS}`
-            : "This is what you're offering for this shoot day."}
+            : 'This can be adjusted later.'}
         </p>
       </label>
     </div>
