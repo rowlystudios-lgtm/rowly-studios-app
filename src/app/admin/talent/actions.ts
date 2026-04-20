@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-auth'
+import { appendToSheet, overwriteSheet } from '@/lib/google'
 
 /* ─────────── Application review ─────────── */
 
@@ -275,6 +276,273 @@ export async function updateTalentProfile(formData: FormData) {
   revalidatePath(`/admin/talent/${id}`)
   revalidatePath('/admin/talent')
   redirect(`/admin/talent/${id}`)
+}
+
+/* ─────────── Payments ─────────── */
+
+export async function recordTalentPayment(formData: FormData) {
+  const { supabase, user } = await requireAdmin()
+
+  const talentId = ((formData.get('talent_id') as string) ?? '').trim()
+  const amountRaw = ((formData.get('amount') as string) ?? '').trim()
+  const paymentDate = ((formData.get('payment_date') as string) ?? '').trim()
+  const method = ((formData.get('method') as string) ?? '').trim() || 'Bank transfer'
+  const reference =
+    ((formData.get('reference') as string) ?? '').trim() || null
+  const bookingId =
+    ((formData.get('booking_id') as string) ?? '').trim() || null
+  const notes = ((formData.get('notes') as string) ?? '').trim() || null
+  if (!talentId || !amountRaw || !paymentDate) return
+
+  const amountCents = Math.round(parseFloat(amountRaw) * 100)
+  if (!Number.isFinite(amountCents) || amountCents <= 0) return
+
+  // Resolve job_id from booking if provided — lets the tax tracker filter
+  // payments by job and lets us mark the booking paid in one sweep.
+  let jobId: string | null = null
+  if (bookingId) {
+    const { data: b } = await supabase
+      .from('job_bookings')
+      .select('job_id')
+      .eq('id', bookingId)
+      .maybeSingle()
+    jobId = b?.job_id ?? null
+  }
+
+  const { error } = await supabase.from('talent_payments').insert({
+    talent_id: talentId,
+    booking_id: bookingId,
+    job_id: jobId,
+    amount_cents: amountCents,
+    payment_date: paymentDate,
+    payment_method: method,
+    reference,
+    notes,
+    created_by: user.id,
+  })
+  if (error) return
+
+  // Flip the associated booking to paid so the job / client views sync up.
+  if (bookingId) {
+    await supabase
+      .from('job_bookings')
+      .update({
+        paid: true,
+        paid_at: new Date(paymentDate + 'T00:00:00Z').toISOString(),
+      })
+      .eq('id', bookingId)
+  }
+
+  // Best-effort append to the Google Sheet payment ledger.
+  try {
+    const [{ data: talentRow }, { data: jobRow }, { data: ledgerSetting }] =
+      await Promise.all([
+        supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', talentId)
+          .maybeSingle(),
+        jobId
+          ? supabase
+              .from('jobs')
+              .select('title')
+              .eq('id', jobId)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase
+          .from('admin_settings')
+          .select('value')
+          .eq('key', 'drive_payment_ledger_id')
+          .maybeSingle(),
+      ])
+
+    if (ledgerSetting?.value) {
+      await appendToSheet(ledgerSetting.value, 'Sheet1!A:K', [
+        paymentDate,
+        talentRow?.full_name ?? '',
+        jobRow?.title ?? '',
+        amountCents / 100,
+        method,
+        reference ?? '',
+        new Date().toISOString(),
+        new Date(paymentDate).getFullYear(),
+        talentRow?.email ?? '',
+        talentId,
+        bookingId ?? '',
+      ])
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[payment] ledger sync failed', err)
+  }
+
+  revalidatePath(`/admin/talent/${talentId}`)
+  revalidatePath('/admin/finance')
+}
+
+/* ─────────── Tax records ─────────── */
+
+async function syncTaxTrackerSheet(): Promise<void> {
+  const { supabase } = await requireAdmin()
+
+  const year = new Date().getFullYear()
+  const [{ data: records }, { data: tracker }] = await Promise.all([
+    supabase
+      .from('talent_tax_records')
+      .select(
+        `talent_id, tax_year, total_paid_cents,
+         w9_received, legal_name, tax_id_last4, entity_type,
+         requires_1099, form_1099_sent,
+         profiles!talent_tax_records_talent_id_fkey (full_name, email,
+           talent_profiles (primary_role))`
+      )
+      .eq('tax_year', year)
+      .order('total_paid_cents', { ascending: false }),
+    supabase
+      .from('admin_settings')
+      .select('value')
+      .eq('key', 'drive_tax_tracker_id')
+      .maybeSingle(),
+  ])
+
+  if (!tracker?.value) return
+
+  type Row = {
+    talent_id: string
+    tax_year: number
+    total_paid_cents: number | null
+    w9_received: boolean | null
+    legal_name: string | null
+    tax_id_last4: string | null
+    entity_type: string | null
+    requires_1099: boolean | null
+    form_1099_sent: boolean | null
+    profiles:
+      | {
+          full_name: string | null
+          email: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }
+      | {
+          full_name: string | null
+          email: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }[]
+      | null
+  }
+
+  const header = [
+    'Name',
+    'Email',
+    'Role',
+    'Total Paid',
+    'W-9 Received',
+    'Legal Name',
+    'Tax ID Last 4',
+    'Entity',
+    '1099 Required',
+    '1099 Sent',
+  ]
+
+  const rows = ((records ?? []) as unknown as Row[]).map((r) => {
+    const p = Array.isArray(r.profiles) ? r.profiles[0] ?? null : r.profiles
+    const tp = p
+      ? Array.isArray(p.talent_profiles)
+        ? p.talent_profiles[0] ?? null
+        : p.talent_profiles
+      : null
+    return [
+      p?.full_name ?? '',
+      p?.email ?? '',
+      tp?.primary_role ?? '',
+      (r.total_paid_cents ?? 0) / 100,
+      r.w9_received ? 'Yes' : 'No',
+      r.legal_name ?? '',
+      r.tax_id_last4 ?? '',
+      r.entity_type ?? '',
+      r.requires_1099 ? 'Yes' : 'No',
+      r.form_1099_sent ? 'Yes' : 'No',
+    ]
+  })
+
+  try {
+    await overwriteSheet(tracker.value, 'Sheet1!A1', [header, ...rows])
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[tax] tracker sheet sync failed', err)
+  }
+}
+
+export async function markW9Received(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const talentId = ((formData.get('talent_id') as string) ?? '').trim()
+  if (!talentId) return
+  const driveUrl = ((formData.get('w9_drive_url') as string) ?? '').trim() || null
+  const legalName = ((formData.get('legal_name') as string) ?? '').trim() || null
+  const taxIdLast4 =
+    ((formData.get('tax_id_last4') as string) ?? '').trim().slice(0, 4) || null
+  const entityType =
+    ((formData.get('entity_type') as string) ?? '').trim() || null
+  const year = new Date().getFullYear()
+
+  await supabase.from('talent_tax_records').upsert(
+    {
+      talent_id: talentId,
+      tax_year: year,
+      w9_received: true,
+      w9_received_at: new Date().toISOString(),
+      w9_drive_url: driveUrl,
+      legal_name: legalName,
+      tax_id_last4: taxIdLast4,
+      entity_type: entityType,
+    },
+    { onConflict: 'talent_id,tax_year' }
+  )
+
+  try {
+    await syncTaxTrackerSheet()
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[w9] tracker sync failed', err)
+  }
+
+  revalidatePath(`/admin/talent/${talentId}`)
+  revalidatePath('/admin/finance')
+}
+
+export async function toggle1099Sent(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const talentId = ((formData.get('talent_id') as string) ?? '').trim()
+  const next = (formData.get('next') as string) === 'true'
+  if (!talentId) return
+  const year = new Date().getFullYear()
+
+  await supabase
+    .from('talent_tax_records')
+    .upsert(
+      {
+        talent_id: talentId,
+        tax_year: year,
+        form_1099_sent: next,
+        form_1099_sent_at: next ? new Date().toISOString() : null,
+      },
+      { onConflict: 'talent_id,tax_year' }
+    )
+
+  try {
+    await syncTaxTrackerSheet()
+  } catch {
+    // non-fatal
+  }
+
+  revalidatePath(`/admin/talent/${talentId}`)
+  revalidatePath('/admin/finance')
 }
 
 /** Soft remove — flips verified=false so they drop out of the active roster. */

@@ -62,7 +62,8 @@ export default async function AdminFinancePage({
 }) {
   const { supabase } = await requireAdmin()
 
-  const [invRes, uninvoicedBookingsRes] = await Promise.all([
+  const currentYear = new Date().getFullYear()
+  const [invRes, uninvoicedBookingsRes, taxRes, trackerRes] = await Promise.all([
     supabase
       .from('invoices')
       .select(
@@ -83,6 +84,16 @@ export default async function AdminFinancePage({
            invoices (status))`
       )
       .eq('status', 'confirmed'),
+    // Talent tax-year aggregate for the Tax Overview strip.
+    supabase
+      .from('talent_tax_records')
+      .select('w9_received, requires_1099, form_1099_sent, total_paid_cents')
+      .eq('tax_year', currentYear),
+    supabase
+      .from('admin_settings')
+      .select('value')
+      .eq('key', 'drive_tax_tracker_id')
+      .maybeSingle(),
   ])
 
   const rows = (invRes.data ?? []) as unknown as InvoiceRow[]
@@ -379,6 +390,105 @@ export default async function AdminFinancePage({
           })}
         </div>
       )}
+
+      {/* ─── Tax overview ─── */}
+      {(() => {
+        type TaxRow = {
+          w9_received: boolean | null
+          requires_1099: boolean | null
+          form_1099_sent: boolean | null
+          total_paid_cents: number | null
+        }
+        const taxRows = (taxRes.data ?? []) as TaxRow[]
+        const paid600Plus = taxRows.filter(
+          (r) => (r.total_paid_cents ?? 0) >= 60000
+        ).length
+        const sent1099 = taxRows.filter((r) => r.form_1099_sent).length
+        const w9OnFile = taxRows.filter((r) => r.w9_received).length
+        const missingW9 = taxRows.filter(
+          (r) => r.requires_1099 && !r.w9_received
+        ).length
+        const trackerId = trackerRes.data?.value ?? null
+        const trackerUrl = trackerId
+          ? `https://docs.google.com/spreadsheets/d/${trackerId}`
+          : null
+
+        if (taxRows.length === 0 && paid600Plus === 0) return null
+
+        return (
+          <section className="mt-6">
+            <div className="flex items-center justify-between mb-2">
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: '#7A90AA',
+                }}
+              >
+                Tax overview · {currentYear}
+              </p>
+              {trackerUrl && (
+                <a
+                  href={trackerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-400 hover:text-amber-300"
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    textDecoration: 'none',
+                  }}
+                >
+                  View Tax Tracker ↗
+                </a>
+              )}
+            </div>
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}
+            >
+              <SummaryChip
+                label="Paid $600+"
+                value={String(paid600Plus)}
+                tone={paid600Plus > 0 ? 'amber' : 'default'}
+              />
+              <SummaryChip
+                label="1099 issued"
+                value={String(sent1099)}
+                tone={sent1099 > 0 ? 'green' : 'default'}
+              />
+              <SummaryChip
+                label="W-9 on file"
+                value={String(w9OnFile)}
+                tone={w9OnFile > 0 ? 'green' : 'default'}
+              />
+              <SummaryChip
+                label="Missing W-9"
+                value={String(missingW9)}
+                tone={missingW9 > 0 ? 'red' : 'default'}
+              />
+            </div>
+            {missingW9 > 0 && (
+              <div
+                className="mt-3 rounded-xl"
+                style={{
+                  background: 'rgba(240,165,0,0.12)',
+                  border: '1px solid rgba(240,165,0,0.35)',
+                  padding: '10px 14px',
+                  color: '#F0A500',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                ⚠ {missingW9} talent need a W-9 on file before 1099 can be issued.
+              </div>
+            )}
+          </section>
+        )
+      })()}
     </div>
   )
 }

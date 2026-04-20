@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { requireAdmin, formatDate } from '@/lib/admin-auth'
+import { isGoogleConfigured } from '@/lib/google'
 import { saveNotionSettings } from './actions'
 import { SyncButton, SyncAllButton } from './SyncButtons'
 import { CalendarCopyField } from './CalendarCopyField'
@@ -34,6 +35,13 @@ export default async function AdminSettingsPage() {
       'notion_jobs_db',
       'notion_talent_db',
       'notion_clients_db',
+      'calendar_secret',
+      'drive_invoices_2026_id',
+      'drive_talent_folder_id',
+      'drive_tax_docs_folder_id',
+      'drive_payments_folder_id',
+      'drive_payment_ledger_id',
+      'drive_tax_tracker_id',
     ])
   const settings: Record<string, string> = {}
   for (const r of (settingsRows ?? []) as Array<{
@@ -44,6 +52,8 @@ export default async function AdminSettingsPage() {
   }
 
   const hasToken = Boolean(settings.notion_token)
+  const calendarSecret = settings.calendar_secret ?? ''
+  const driveConfigured = isGoogleConfigured()
 
   // Last-synced timestamps (max external_synced_at per table).
   const [jobsSyncRes, talentSyncRes, clientsSyncRes] = await Promise.all([
@@ -74,7 +84,9 @@ export default async function AdminSettingsPage() {
   const talentLast = relTime(talentSyncRes.data?.external_synced_at ?? null)
   const clientsLast = relTime(clientsSyncRes.data?.external_synced_at ?? null)
 
-  const calendarUrl = `${APP_URL}/api/admin/calendar`
+  const calendarUrl = calendarSecret
+    ? `${APP_URL}/api/calendar/admin/${calendarSecret}`
+    : `${APP_URL}/api/admin/calendar`
   const googleAddUrl = 'https://www.google.com/calendar/r/settings/addbyurl'
 
   return (
@@ -166,13 +178,116 @@ export default async function AdminSettingsPage() {
             Open .ics file
           </a>
         </div>
-        <p
-          className="mt-3"
-          style={{ fontSize: 11, color: '#7A90AA', lineHeight: 1.5 }}
+        <div
+          className="mt-3 rounded-lg"
+          style={{
+            background: 'rgba(59,130,246,0.10)',
+            border: '1px solid rgba(59,130,246,0.25)',
+            padding: 12,
+            fontSize: 12,
+            color: '#C5D3E8',
+            lineHeight: 1.6,
+          }}
         >
-          Google: paste the URL into the &quot;Add calendar → From URL&quot; form.
-          Apple: tap &quot;Open .ics file&quot; on iOS and confirm the subscription.
+          <p style={{ fontWeight: 600, color: '#93C5FD', marginBottom: 4 }}>
+            In Google Calendar on desktop:
+          </p>
+          <ol style={{ paddingLeft: 18, listStyle: 'decimal' }}>
+            <li>Click the <strong>+</strong> next to &quot;Other calendars&quot;</li>
+            <li>Select &quot;From URL&quot;</li>
+            <li>Paste the URL above</li>
+            <li>Click &quot;Add calendar&quot;</li>
+          </ol>
+          <p className="mt-2" style={{ color: '#7A90AA' }}>
+            Google Calendar refreshes every few hours — new jobs appear
+            automatically. On iOS, tap &quot;Open .ics file&quot; and confirm the
+            subscription.
+          </p>
+        </div>
+      </section>
+
+      {/* ─── Google Drive ─── */}
+      <section
+        className="mt-4 rounded-xl bg-[#1A2E4A] border border-white/5"
+        style={{ padding: 20 }}
+      >
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: '#7A90AA',
+            }}
+          >
+            Google Drive
+          </p>
+          <span
+            className="rounded-full"
+            style={{
+              padding: '2px 8px',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              background: driveConfigured
+                ? 'rgba(34,197,94,0.18)'
+                : 'rgba(240,165,0,0.18)',
+              color: driveConfigured ? '#86EFAC' : '#F0A500',
+              border: driveConfigured
+                ? '1px solid rgba(34,197,94,0.35)'
+                : '1px solid rgba(240,165,0,0.35)',
+            }}
+          >
+            {driveConfigured
+              ? 'Drive sync active ✓'
+              : 'Drive sync not configured'}
+          </span>
+        </div>
+        <p
+          style={{
+            fontSize: 12,
+            color: '#AABDE0',
+            lineHeight: 1.5,
+            marginBottom: 12,
+          }}
+        >
+          Paid invoices auto-upload to the 2026 invoices folder. Payments
+          append to the ledger sheet; W-9s land in Tax Documents.
         </p>
+        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <DriveLink
+            icon="📁"
+            label="Invoices 2026"
+            href={driveFolderUrl(settings.drive_invoices_2026_id)}
+          />
+          <DriveLink
+            icon="📁"
+            label="Talent Documents"
+            href={driveFolderUrl(settings.drive_talent_folder_id)}
+          />
+          <DriveLink
+            icon="📁"
+            label="Tax Documents"
+            href={driveFolderUrl(settings.drive_tax_docs_folder_id)}
+          />
+          <DriveLink
+            icon="📁"
+            label="Payment Records"
+            href={driveFolderUrl(settings.drive_payments_folder_id)}
+          />
+          <DriveLink
+            icon="📄"
+            label="Payment Ledger 2026"
+            href={driveSheetUrl(settings.drive_payment_ledger_id)}
+          />
+          <DriveLink
+            icon="📄"
+            label="Tax Tracker 2026"
+            href={driveSheetUrl(settings.drive_tax_tracker_id)}
+          />
+        </div>
       </section>
 
       {/* ─── Notion ─── */}
@@ -408,3 +523,57 @@ function DarkField({
 
 const DARK_INPUT_CLS =
   'block w-full rounded-lg px-3 py-2.5 text-sm text-white bg-[rgba(255,255,255,0.05)] border border-[rgba(170,189,224,0.2)] focus:outline-none focus:ring-2 focus:ring-[#F0A500]/40 focus:border-[#F0A500]/50 transition'
+
+function driveFolderUrl(id: string | null | undefined): string | null {
+  if (!id) return null
+  return `https://drive.google.com/drive/folders/${id}`
+}
+
+function driveSheetUrl(id: string | null | undefined): string | null {
+  if (!id) return null
+  return `https://docs.google.com/spreadsheets/d/${id}`
+}
+
+function DriveLink({
+  icon,
+  label,
+  href,
+}: {
+  icon: string
+  label: string
+  href: string | null
+}) {
+  const disabled = !href
+  const content = (
+    <span
+      className="flex items-center gap-2"
+      style={{
+        padding: '10px 12px',
+        borderRadius: 10,
+        background: '#253D5E',
+        color: disabled ? '#7A90AA' : '#fff',
+        border: '1px solid rgba(255,255,255,0.06)',
+        fontSize: 13,
+        fontWeight: 500,
+        textDecoration: 'none',
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      <span aria-hidden style={{ fontSize: 16 }}>
+        {icon}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <span style={{ color: disabled ? '#7A90AA' : '#F0A500', fontSize: 12 }}>
+        {disabled ? '—' : '↗'}
+      </span>
+    </span>
+  )
+  if (disabled) return content
+  return (
+    <a href={href!} target="_blank" rel="noopener noreferrer">
+      {content}
+    </a>
+  )
+}

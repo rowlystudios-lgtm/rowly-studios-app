@@ -1,7 +1,9 @@
 import Link from 'next/link'
-import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
+import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TalentAdminControls } from './TalentAdminControls'
+import { PaymentForm, type UnpaidBooking } from './PaymentForm'
+import { W9Form, Toggle1099SentButton } from './TaxControls'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,7 +147,15 @@ export default async function AdminTalentDetailPage({
   const today = todayIsoLA()
   const fortyFiveOut = addDaysIso(today, 45)
 
-  const [profileRes, talentRes, availabilityRes, bookingsRes] = await Promise.all([
+  const currentYear = new Date().getFullYear()
+  const [
+    profileRes,
+    talentRes,
+    availabilityRes,
+    bookingsRes,
+    paymentsRes,
+    taxRes,
+  ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', params.id).maybeSingle(),
     supabase.from('talent_profiles').select('*').eq('id', params.id).maybeSingle(),
     supabase
@@ -165,6 +175,21 @@ export default async function AdminTalentDetailPage({
       )
       .eq('talent_id', params.id)
       .order('created_at', { ascending: false }),
+    supabase
+      .from('talent_payments')
+      .select(
+        `id, amount_cents, payment_date, payment_method, reference, notes,
+         booking_id, job_id, created_at,
+         jobs (title)`
+      )
+      .eq('talent_id', params.id)
+      .order('payment_date', { ascending: false }),
+    supabase
+      .from('talent_tax_records')
+      .select('*')
+      .eq('talent_id', params.id)
+      .eq('tax_year', currentYear)
+      .maybeSingle(),
   ])
 
   const profile = profileRes.data as unknown as Profile | null
@@ -798,6 +823,315 @@ export default async function AdminTalentDetailPage({
           adminNotes={tp?.admin_notes ?? null}
         />
       </section>
+
+      {/* ─── Payments ─── */}
+      {(() => {
+        type PaymentRow = {
+          id: string
+          amount_cents: number | null
+          payment_date: string
+          payment_method: string | null
+          reference: string | null
+          notes: string | null
+          booking_id: string | null
+          job_id: string | null
+          created_at: string | null
+          jobs: { title: string | null } | { title: string | null }[] | null
+        }
+        const payments = (paymentsRes.data ?? []) as unknown as PaymentRow[]
+        const totalPaidOut = payments.reduce(
+          (s, p) => s + (p.amount_cents ?? 0),
+          0
+        )
+
+        // Bookings eligible for direct linkage: confirmed + unpaid + no booking_id already matched.
+        const unpaidBookings: UnpaidBooking[] = bookings
+          .filter((b) => b.status === 'confirmed' && !b.paid)
+          .map((b) => {
+            const j = unwrap(b.jobs)
+            return {
+              id: b.id,
+              amountCents: b.confirmed_rate_cents,
+              jobTitle: j?.title ?? null,
+              jobStart: j?.start_date ?? null,
+            }
+          })
+
+        return (
+          <section className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: '#7A90AA',
+                }}
+              >
+                Payments
+              </p>
+              <span style={{ fontSize: 11, color: '#7A90AA' }}>
+                Total paid out: {centsToUsd(totalPaidOut)}
+              </span>
+            </div>
+            <div
+              className="rounded-xl bg-[#1A2E4A] border border-white/5"
+              style={{ padding: 14 }}
+            >
+              <PaymentForm
+                talentId={profile.id}
+                unpaidBookings={unpaidBookings}
+              />
+
+              {payments.length === 0 ? (
+                <p
+                  className="mt-3"
+                  style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}
+                >
+                  No payments recorded yet.
+                </p>
+              ) : (
+                <div
+                  className="mt-3 flex flex-col"
+                  style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+                >
+                  {payments.map((p) => {
+                    const j = unwrap(p.jobs)
+                    return (
+                      <div
+                        key={p.id}
+                        className="flex items-start gap-3"
+                        style={{
+                          padding: '10px 0',
+                          borderBottom: '1px solid rgba(255,255,255,0.04)',
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p
+                            className="text-white"
+                            style={{ fontSize: 13, fontWeight: 500 }}
+                          >
+                            {j?.title ?? 'Payment'}
+                          </p>
+                          <p
+                            style={{
+                              fontSize: 11,
+                              color: '#7A90AA',
+                              marginTop: 2,
+                            }}
+                          >
+                            {formatDate(p.payment_date)} · {p.payment_method ?? '—'}
+                            {p.reference ? ` · ${p.reference}` : ''}
+                          </p>
+                        </div>
+                        <span
+                          className="text-white"
+                          style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}
+                        >
+                          {centsToUsd(p.amount_cents)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        )
+      })()}
+
+      {/* ─── Tax & compliance ─── */}
+      {(() => {
+        const tax = taxRes.data as unknown as {
+          tax_year: number
+          w9_received: boolean | null
+          w9_drive_url: string | null
+          legal_name: string | null
+          tax_id_last4: string | null
+          entity_type: string | null
+          total_paid_cents: number | null
+          requires_1099: boolean | null
+          form_1099_sent: boolean | null
+        } | null
+
+        const totalPaid = tax?.total_paid_cents ?? 0
+        const requires1099 = Boolean(tax?.requires_1099) || totalPaid >= 60000
+        const w9 = Boolean(tax?.w9_received)
+        const sent1099 = Boolean(tax?.form_1099_sent)
+
+        return (
+          <section className="mt-4">
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: '#7A90AA',
+                marginBottom: 8,
+              }}
+            >
+              Tax &amp; compliance
+            </p>
+            <div
+              className="rounded-xl bg-[#1A2E4A] border border-white/5"
+              style={{ padding: 16 }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: '#7A90AA',
+                    }}
+                  >
+                    {currentYear} tax year
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: totalPaid >= 60000 ? '#4ADE80' : '#C5D3E8',
+                      marginTop: 2,
+                    }}
+                  >
+                    {centsToUsd(totalPaid)}
+                  </p>
+                  <p style={{ fontSize: 11, color: '#7A90AA', marginTop: 2 }}>
+                    Total paid this year
+                  </p>
+                </div>
+                {requires1099 && (
+                  <span
+                    className="rounded-full"
+                    style={{
+                      padding: '3px 10px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      background: 'rgba(240,165,0,0.18)',
+                      color: '#F0A500',
+                      border: '1px solid rgba(240,165,0,0.35)',
+                    }}
+                  >
+                    1099-NEC required
+                  </span>
+                )}
+              </div>
+
+              {/* W-9 row */}
+              <div
+                className="mt-4 pt-4"
+                style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+              >
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
+                        color: '#7A90AA',
+                      }}
+                    >
+                      W-9
+                    </p>
+                    {w9 ? (
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: '#4ADE80',
+                          fontWeight: 600,
+                          marginTop: 2,
+                        }}
+                      >
+                        ✓ On file
+                        {tax?.legal_name ? ` — ${tax.legal_name}` : ''}
+                        {tax?.tax_id_last4 ? ` (•••${tax.tax_id_last4})` : ''}
+                      </p>
+                    ) : (
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: '#F0A500',
+                          fontWeight: 600,
+                          marginTop: 2,
+                        }}
+                      >
+                        Not received
+                      </p>
+                    )}
+                  </div>
+                  {w9 && tax?.w9_drive_url && (
+                    <a
+                      href={tax.w9_drive_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: 12,
+                        color: '#F0A500',
+                        fontWeight: 600,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      View in Drive ↗
+                    </a>
+                  )}
+                </div>
+                {!w9 && (
+                  <div className="mt-3">
+                    <W9Form talentId={profile.id} />
+                  </div>
+                )}
+              </div>
+
+              {/* 1099 row */}
+              {requires1099 && (
+                <div
+                  className="mt-4 pt-4"
+                  style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+                >
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: '0.14em',
+                          textTransform: 'uppercase',
+                          color: '#7A90AA',
+                        }}
+                      >
+                        1099-NEC
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: sent1099 ? '#4ADE80' : '#F0A500',
+                          fontWeight: 600,
+                          marginTop: 2,
+                        }}
+                      >
+                        {sent1099 ? 'Sent' : 'Not yet sent'}
+                      </p>
+                    </div>
+                    <Toggle1099SentButton
+                      talentId={profile.id}
+                      sent={sent1099}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )
+      })()}
 
       <div className="mt-6 text-center">
         <Link

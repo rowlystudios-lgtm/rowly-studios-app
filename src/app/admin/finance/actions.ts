@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-auth'
+import { createServiceClient } from '@/lib/supabase-service'
 
 type ParsedLineItem = {
   description: string
@@ -230,7 +231,125 @@ async function updateStatus(
 }
 
 export async function markAsSent(formData: FormData) {
+  const invoiceId = ((formData.get('invoiceId') as string) ?? '').trim()
   await updateStatus(formData, 'sent')
+  if (!invoiceId) return
+  // Fire-and-forget the Drive upload — the main action has already
+  // completed and revalidated, and Drive is allowed to fail soft.
+  try {
+    await uploadInvoiceToDrive(invoiceId)
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[invoice] Drive upload failed for', invoiceId, err)
+  }
+  revalidatePath(`/admin/finance/${invoiceId}`)
+}
+
+/**
+ * Generate a PDF for this invoice and upload it into the 2026 invoices
+ * Drive folder. Best-effort: every failure is logged and returned as null
+ * so status transitions never block on Drive.
+ */
+async function uploadInvoiceToDrive(invoiceId: string) {
+  const supabase = createServiceClient()
+
+  const { data: invoice } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('id', invoiceId)
+    .maybeSingle()
+  if (!invoice) return null
+
+  const { data: lineItems } = await supabase
+    .from('invoice_line_items')
+    .select('description, quantity, unit_price_cents, total_cents')
+    .eq('invoice_id', invoiceId)
+    .order('created_at', { ascending: true })
+
+  const { data: clientProfile } = await supabase
+    .from('profiles')
+    .select(
+      `id, full_name, email,
+       client_profiles (company_name, billing_email)`
+    )
+    .eq('id', invoice.client_id)
+    .maybeSingle()
+
+  const { data: job } = invoice.job_id
+    ? await supabase
+        .from('jobs')
+        .select('title, start_date, end_date')
+        .eq('id', invoice.job_id)
+        .maybeSingle()
+    : { data: null }
+
+  const { data: folderSetting } = await supabase
+    .from('admin_settings')
+    .select('value')
+    .eq('key', 'drive_invoices_2026_id')
+    .maybeSingle()
+  if (!folderSetting?.value) return null
+
+  type CP = {
+    company_name: string | null
+    billing_email: string | null
+  } | null
+  const rawCp = (clientProfile as unknown as {
+    client_profiles?: CP | CP[]
+  } | null)?.client_profiles
+  const cp: CP = Array.isArray(rawCp) ? rawCp[0] ?? null : rawCp ?? null
+
+  const client = {
+    full_name: (clientProfile as unknown as { full_name?: string | null } | null)?.full_name ?? null,
+    email: (clientProfile as unknown as { email?: string | null } | null)?.email ?? null,
+    company_name: cp?.company_name ?? null,
+    billing_email: cp?.billing_email ?? null,
+  }
+
+  const { generateInvoiceHTML, generateInvoicePDF } = await import(
+    '@/lib/invoice-pdf'
+  )
+  const html = generateInvoiceHTML(
+    {
+      invoice_number: invoice.invoice_number,
+      created_at: invoice.created_at,
+      due_date: invoice.due_date,
+      total_cents: invoice.total_cents,
+      tax_cents: invoice.tax_cents,
+      notes: invoice.notes,
+    },
+    (lineItems ?? []) as Array<{
+      description: string | null
+      quantity: number | null
+      unit_price_cents: number | null
+      total_cents: number | null
+    }>,
+    client,
+    job ?? null
+  )
+
+  const pdf = await generateInvoicePDF(html)
+  if (!pdf) return null
+
+  const safeName = (client.company_name ?? client.full_name ?? 'client')
+    .replace(/[^\w\d]+/g, '_')
+    .slice(0, 40)
+  const fileName = `${invoice.invoice_number ?? invoiceId}_${safeName}.pdf`
+
+  const { uploadToDrive } = await import('@/lib/google')
+  const result = await uploadToDrive({
+    fileName,
+    mimeType: 'application/pdf',
+    content: pdf,
+    folderId: folderSetting.value,
+  })
+  if (!result) return null
+
+  await supabase
+    .from('invoices')
+    .update({ drive_file_id: result.id, drive_file_url: result.url })
+    .eq('id', invoiceId)
+  return result
 }
 
 export async function markAsPaid(formData: FormData) {

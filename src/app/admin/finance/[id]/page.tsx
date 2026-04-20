@@ -62,6 +62,8 @@ type Invoice = {
   created_at: string | null
   client_id: string | null
   job_id: string | null
+  drive_file_id: string | null
+  drive_file_url: string | null
   jobs:
     | {
         id: string
@@ -157,6 +159,7 @@ export default async function AdminInvoiceDetailPage({
       .select(
         `id, invoice_number, status, total_cents, tax_cents, due_date,
          sent_at, paid_at, voided_at, notes, created_at, client_id, job_id,
+         drive_file_id, drive_file_url,
          jobs (id, title, start_date, end_date, location),
          profiles!invoices_client_id_fkey (full_name, email,
            client_profiles (company_name, billing_email, website, entity_type))`
@@ -454,6 +457,21 @@ export default async function AdminInvoiceDetailPage({
             <span style={{ color: '#7A90AA' }}>
               Voided {formatDate(invoice.voided_at)}
             </span>
+          )}
+          {invoice.drive_file_url && (
+            <a
+              href={invoice.drive_file_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: '#F0A500',
+                fontWeight: 600,
+                textDecoration: 'underline',
+                fontSize: 12,
+              }}
+            >
+              View in Drive ↗
+            </a>
           )}
         </div>
       </section>
