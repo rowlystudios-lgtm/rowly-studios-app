@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 // formatDate used in ApplicationCard below.
 import { StatusBadge } from '@/components/StatusBadge'
@@ -6,6 +7,10 @@ import { approveApplication, declineApplication } from './actions'
 import { TalentFilterClient } from './TalentFilterClient'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'Talent — RS Admin',
+}
 
 type TalentProfileJoin = {
   department: string | null

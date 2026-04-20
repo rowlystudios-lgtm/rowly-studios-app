@@ -1,9 +1,14 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { FinanceFilterClient } from './FinanceFilterClient'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'Finance — RS Admin',
+}
 
 function todayIsoLA(): string {
   return new Intl.DateTimeFormat('en-CA', {

@@ -1,9 +1,14 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DashboardRefreshButton } from '@/components/DashboardRefreshButton'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'Dashboard — RS Admin',
+}
 
 /** Today (YYYY-MM-DD) in LA time, independent of server TZ. */
 function laToday(): string {

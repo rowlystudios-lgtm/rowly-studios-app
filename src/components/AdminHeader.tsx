@@ -4,10 +4,12 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { AdminSearch } from '@/components/AdminSearch'
 
 type Props = {
   displayName: string | null
   avatarUrl: string | null
+  unreadCount: number
 }
 
 function initials(name: string | null): string {
@@ -16,7 +18,11 @@ function initials(name: string | null): string {
   return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || 'RS'
 }
 
-export function AdminHeader({ displayName, avatarUrl }: Props) {
+export function AdminHeader({
+  displayName,
+  avatarUrl,
+  unreadCount,
+}: Props) {
   const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
 
@@ -34,20 +40,28 @@ export function AdminHeader({ displayName, avatarUrl }: Props) {
       style={{
         flexShrink: 0,
         background: '#0F1B2E',
-        height: 64,
+        minHeight: 64,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 20px',
+        gap: 10,
+        padding: '10px 16px',
         color: '#fff',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Left: wordmark + client view link */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          flexShrink: 0,
+        }}
+      >
         <span
           style={{
             fontFamily: 'Georgia, "Playfair Display", serif',
             fontStyle: 'italic',
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: 400,
             letterSpacing: '0.01em',
             lineHeight: 1,
@@ -55,24 +69,52 @@ export function AdminHeader({ displayName, avatarUrl }: Props) {
         >
           Rowly Studios
         </span>
-        <span
-          style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: '0.2em',
-            textTransform: 'uppercase',
-            color: '#F0A500',
-          }}
-        >
-          Admin
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: '#F0A500',
+            }}
+          >
+            Admin
+          </span>
+          <Link
+            href="/app"
+            className="hover:text-[#AABDE0] transition-colors"
+            style={{
+              fontSize: 10,
+              color: '#7A90AA',
+              textDecoration: 'none',
+              letterSpacing: '0.04em',
+            }}
+          >
+            · ← Client view
+          </Link>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* Middle: search */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+        <AdminSearch />
+      </div>
+
+      {/* Right: bell + settings + avatar + sign out */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexShrink: 0,
+        }}
+      >
         <Link
-          href="/admin"
-          aria-label="Notifications"
+          href="/admin/notifications"
+          aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
           style={{
+            position: 'relative',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -96,6 +138,60 @@ export function AdminHeader({ displayName, avatarUrl }: Props) {
           >
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          {unreadCount > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: 2,
+                right: 2,
+                minWidth: 16,
+                height: 16,
+                padding: '0 4px',
+                borderRadius: 999,
+                background: '#EF4444',
+                color: '#fff',
+                fontSize: 9,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 1,
+                boxShadow: '0 0 0 2px #0F1B2E',
+              }}
+            >
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </Link>
+
+        <Link
+          href="/admin/settings"
+          aria-label="Settings"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 36,
+            height: 36,
+            borderRadius: 999,
+            color: 'rgba(255,255,255,0.7)',
+            background: 'rgba(255,255,255,0.04)',
+          }}
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
         </Link>
 
@@ -131,11 +227,13 @@ export function AdminHeader({ displayName, avatarUrl }: Props) {
           type="button"
           onClick={handleSignOut}
           disabled={signingOut}
+          aria-label="Sign out"
+          className="hidden sm:inline-block"
           style={{
             background: 'transparent',
             border: 'none',
             color: 'rgba(255,255,255,0.5)',
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 600,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',

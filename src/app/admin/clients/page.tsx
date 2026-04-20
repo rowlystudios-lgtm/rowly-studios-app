@@ -1,9 +1,14 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
 import { approveClient } from './actions'
 import { ClientsFilterClient } from './ClientsFilterClient'
 
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'Clients — RS Admin',
+}
 
 type ClientProfileJoin = {
   company_name: string | null

@@ -7,12 +7,19 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { profile } = await requireAdmin()
+  const { supabase, profile } = await requireAdmin()
   const displayName =
     [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
     profile.full_name ||
     profile.email ||
     null
+
+  // Admin oversight: count every unread notification across all users.
+  const { count } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .is('read_at', null)
+  const unreadCount = count ?? 0
 
   return (
     <div
@@ -29,7 +36,11 @@ export default async function AdminLayout({
         overflow: 'hidden',
       }}
     >
-      <AdminHeader displayName={displayName} avatarUrl={profile.avatar_url} />
+      <AdminHeader
+        displayName={displayName}
+        avatarUrl={profile.avatar_url}
+        unreadCount={unreadCount}
+      />
       <main
         style={{
           flex: 1,
