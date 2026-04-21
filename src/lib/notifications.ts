@@ -24,7 +24,7 @@ export type NotificationPayload = {
 }
 
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? 'https://rowly-studios-app.vercel.app'
+  process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.rowlystudios.com'
 
 function absolute(actionUrl: string | null | undefined): string | null {
   if (!actionUrl) return null

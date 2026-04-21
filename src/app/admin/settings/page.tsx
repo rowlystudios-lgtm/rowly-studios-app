@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 }
 
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? 'https://rowly-studios-app.vercel.app'
+  process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.rowlystudios.com'
 const SUPABASE_PROJECT = 'vmsgainaazabertluxbo'
 
 function relTime(iso: string | null): string | null {
