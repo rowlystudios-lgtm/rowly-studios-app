@@ -22,6 +22,13 @@ export default async function AdminLayout({
     .is('read_at', null)
   const unreadCount = count ?? 0
 
+  // Pending applications count for the tab-bar badge
+  const { count: pendingApps } = await supabase
+    .from('talent_applications')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending')
+  const pendingApplicationsCount = pendingApps ?? 0
+
   return (
     <div
       style={{
@@ -55,7 +62,7 @@ export default async function AdminLayout({
           {children}
         </ErrorBoundary>
       </main>
-      <AdminTabBar />
+      <AdminTabBar pendingApplicationsCount={pendingApplicationsCount} />
     </div>
   )
 }

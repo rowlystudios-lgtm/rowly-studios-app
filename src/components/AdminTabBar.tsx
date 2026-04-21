@@ -49,15 +49,24 @@ const ReceiptIcon = (
   </svg>
 )
 
+const ClipboardIcon = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+    <rect x="6" y="4" width="12" height="17" rx="2" />
+    <path d="M9 4V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1" />
+    <path d="M9 11h6M9 15h4" />
+  </svg>
+)
+
 const TABS: Tab[] = [
   { href: '/admin', label: 'Dashboard', match: (p) => p === '/admin', icon: GridIcon },
   { href: '/admin/jobs', label: 'Jobs', match: (p) => p.startsWith('/admin/jobs'), icon: BriefcaseIcon },
   { href: '/admin/talent', label: 'Talent', match: (p) => p.startsWith('/admin/talent'), icon: UsersIcon },
   { href: '/admin/clients', label: 'Clients', match: (p) => p.startsWith('/admin/clients'), icon: BuildingIcon },
+  { href: '/admin/applications', label: 'Applications', match: (p) => p.startsWith('/admin/applications'), icon: ClipboardIcon },
   { href: '/admin/finance', label: 'Finance', match: (p) => p.startsWith('/admin/finance'), icon: ReceiptIcon },
 ]
 
-export function AdminTabBar() {
+export function AdminTabBar({ pendingApplicationsCount = 0 }: { pendingApplicationsCount?: number } = {}) {
   const pathname = usePathname()
 
   return (
@@ -75,6 +84,7 @@ export function AdminTabBar() {
       {TABS.map((tab) => {
         const active = tab.match(pathname)
         const color = active ? '#F0A500' : 'rgba(255,255,255,0.45)'
+        const showBadge = tab.href === '/admin/applications' && pendingApplicationsCount > 0
         return (
           <Link
             key={tab.href}
@@ -84,12 +94,39 @@ export function AdminTabBar() {
               flexDirection: 'column',
               alignItems: 'center',
               gap: 4,
-              padding: '4px 12px',
+              padding: '4px 10px',
               color,
               textDecoration: 'none',
+              position: 'relative',
             }}
           >
-            {tab.icon}
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {tab.icon}
+              {showBadge && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -4,
+                    right: -8,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 8,
+                    background: '#E23B3B',
+                    color: '#fff',
+                    fontSize: 9,
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1,
+                    boxShadow: '0 0 0 1.5px #0F1B2E',
+                  }}
+                >
+                  {pendingApplicationsCount > 99 ? '99+' : pendingApplicationsCount}
+                </span>
+              )}
+            </span>
             <span
               style={{
                 fontSize: 9,
