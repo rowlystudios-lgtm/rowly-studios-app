@@ -169,3 +169,81 @@ export async function updateAdminJobBudget(
   revalidatePath(`/admin/jobs/${jobId}`)
   return {}
 }
+
+/**
+ * Client re-offers a previously-declined booking (or adds a brand-new
+ * one) on one of their own jobs. Routed through the service client so
+ * RLS quirks don't silently swallow the write — there is NO client
+ * UPDATE policy on job_bookings, so a browser-side update would 0-row
+ * no-op and leave the row stuck at 'declined'. This action enforces
+ * ownership manually and then either UPDATEs the existing declined row
+ * (respecting the unique (job_id, talent_id) constraint) or INSERTs a
+ * fresh one.
+ */
+export async function reofferClientBooking(
+  formData: FormData
+): Promise<{ error?: string; reoffered?: boolean; added?: boolean }> {
+  const jobId = ((formData.get('jobId') as string) ?? '').trim()
+  const talentId = ((formData.get('talentId') as string) ?? '').trim()
+  const rateRaw = ((formData.get('rateCents') as string) ?? '').trim()
+  const rateCents =
+    rateRaw && /^\d+$/.test(rateRaw) ? parseInt(rateRaw, 10) : null
+  if (!jobId || !talentId) return { error: 'Missing fields' }
+
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not signed in' }
+
+  // Ownership gate: only the client who posted the job can book on it.
+  // The service client below bypasses RLS, so we have to enforce this
+  // ourselves.
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('id, client_id')
+    .eq('id', jobId)
+    .maybeSingle()
+  if (!job || job.client_id !== user.id) return { error: 'Not authorised' }
+
+  const svc = createServiceClient()
+  const { data: existing } = await svc
+    .from('job_bookings')
+    .select('id, status')
+    .eq('job_id', jobId)
+    .eq('talent_id', talentId)
+    .maybeSingle()
+
+  if (existing) {
+    if (existing.status === 'declined') {
+      const { error: updateError } = await svc
+        .from('job_bookings')
+        .update({
+          status: 'requested',
+          offered_rate_cents: rateCents,
+          confirmed_rate_cents: null,
+          declined_reason: null,
+          talent_reviewed_at: null,
+        })
+        .eq('id', existing.id)
+      if (updateError) return { error: updateError.message }
+      revalidatePath('/app/roster')
+      return { reoffered: true }
+    }
+    return {
+      error: `Talent is already on this job (${existing.status}).`,
+    }
+  }
+
+  const { error: insertError } = await svc.from('job_bookings').insert({
+    job_id: jobId,
+    talent_id: talentId,
+    status: 'requested',
+    notes: null,
+    offered_rate_cents: rateCents,
+    confirmed_rate_cents: null,
+  })
+  if (insertError) return { error: insertError.message }
+  revalidatePath('/app/roster')
+  return { added: true }
+}

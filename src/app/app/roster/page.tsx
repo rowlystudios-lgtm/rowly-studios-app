@@ -327,11 +327,16 @@ function RosterInner() {
   }, [talent, side, dept, query])
 
   /**
-   * Insert a booking with status='requested'. Shared by:
-   *   - direct add when ?jobId= is present (jobContext mode) — uses the
-   *     talent's day_rate_cents as the opening offer.
-   *   - "Add to job" picker when no jobId (opens a sheet first, then a
-   *     rate-choice step that passes an explicit rateCents here).
+   * Insert (or reset) a booking with status='requested'. Routed through
+   * the reofferClientBooking server action so it runs against the
+   * service client — there's no client UPDATE policy on job_bookings,
+   * so a browser-side update would silently 0-row no-op and leave a
+   * declined row stuck. The action also handles the INSERT path so the
+   * two flows share one ownership gate + one unique-constraint guard.
+   *
+   * Shared by:
+   *   - direct add when ?jobId= is present (jobContext mode)
+   *   - "Add to job" picker when no jobId
    */
   async function handleAddToJob(
     jobId: string,
@@ -341,73 +346,30 @@ function RosterInner() {
     setAddError('')
     setAddSuccess('')
 
-    const { data: existing } = await supabase
-      .from('job_bookings')
-      .select('id, status')
-      .eq('job_id', jobId)
-      .eq('talent_id', t.id)
-      .maybeSingle()
+    const { reofferClientBooking } = await import('@/app/actions/jobs')
+    const fd = new FormData()
+    fd.set('jobId', jobId)
+    fd.set('talentId', t.id)
+    if (rateCents != null) fd.set('rateCents', String(rateCents))
+    const result = await reofferClientBooking(fd)
 
-    if (existing) {
-      if (existing.status === 'declined') {
-        // Re-offer — UPDATE the existing row in place instead of
-        // delete+insert. The unique (job_id, talent_id) constraint makes
-        // delete+insert racy (the delete may not commit before the insert)
-        // so we reuse the same row. Clear the talent-side fields so the
-        // talent sees it as a fresh offer, not a stale decline.
-        const { error: updateError } = await supabase
-          .from('job_bookings')
-          .update({
-            status: 'requested',
-            offered_rate_cents: rateCents ?? null,
-            confirmed_rate_cents: null,
-            declined_reason: null,
-            talent_reviewed_at: null,
-          })
-          .eq('id', existing.id)
-
-        if (updateError) {
-          setAddError(
-            `Could not re-offer ${t.name}: ${updateError.message}`
-          )
-          return false
-        }
-
-        setAddSuccess(`${t.name} re-offered — pending their response`)
-        setTimeout(() => setAddSuccess(''), 4000)
-
-        // Flip the card to "✓ Added" now that the row is live again.
-        setAddedTalentIds((prev) => {
-          const next = new Set(prev)
-          next.add(t.id)
-          return next
-        })
-        return true
-      }
-      setAddError(`${t.name} is already on this job (${existing.status}).`)
+    if (result.error) {
+      setAddError(`Could not add ${t.name}: ${result.error}`)
       return false
     }
 
-    // No existing booking — insert fresh. offered_rate_cents captures
-    // the opening number; confirmed_rate_cents stays null until talent
-    // accepts.
-    const { error } = await supabase.from('job_bookings').insert({
-      job_id: jobId,
-      talent_id: t.id,
-      status: 'requested',
-      notes: null,
-      offered_rate_cents: rateCents ?? null,
-      confirmed_rate_cents: null,
-    })
-
-    if (error) {
-      setAddError(`Could not add ${t.name}: ${error.message}`)
-      return false
+    if (result.reoffered) {
+      setAddSuccess(`${t.name} re-offered — pending their response`)
+    } else {
+      setAddSuccess(`${t.name} added — pending admin review`)
     }
-
-    setAddSuccess(`${t.name} added — pending admin review`)
-    // Dismiss success after a few seconds.
     setTimeout(() => setAddSuccess(''), 4000)
+    // Flip the card to "✓ Added" regardless of insert vs. re-offer.
+    setAddedTalentIds((prev) => {
+      const next = new Set(prev)
+      next.add(t.id)
+      return next
+    })
     return true
   }
 
