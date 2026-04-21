@@ -1,5 +1,7 @@
 'use client'
 
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/AppHeader'
 import { TabBar } from '@/components/TabBar'
 import { AuthGate } from '@/components/AuthGate'
@@ -17,8 +19,19 @@ export default function AppLayout({
 }
 
 function LayoutInner({ children }: { children: React.ReactNode }) {
-  const { profile } = useAuth()
+  const { user, profile, loading } = useAuth()
+  const router = useRouter()
   const isAdmin = profile?.role === 'admin'
+
+  // First-login redirect: talent who haven't finished onboarding go
+  // to the wizard. A missing `onboarded` column reads as `undefined`,
+  // which deliberately doesn't trigger the redirect.
+  useEffect(() => {
+    if (loading || !user || !profile) return
+    if (profile.role === 'talent' && profile.onboarded === false) {
+      router.replace('/onboarding')
+    }
+  }, [loading, user, profile, router])
 
   return (
     <AuthGate>

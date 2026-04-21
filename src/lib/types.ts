@@ -26,6 +26,7 @@ export type Profile = {
   last_view_mode: ViewMode | null
   pin_verified_at: string | null
   share_code: string | null
+  onboarded: boolean | null
   created_at: string
   updated_at: string
 }
