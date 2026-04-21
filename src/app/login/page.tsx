@@ -15,7 +15,6 @@ type AdminStep = 'password' | 'pin'
 type AdminStatus = 'idle' | 'submitting' | 'error'
 type Mode = 'signin' | 'signup'
 
-const RESET_REDIRECT = 'https://rowly-studios-app.vercel.app/reset-password'
 const PIN_LENGTH = 6
 const MAX_PIN_ATTEMPTS = 3
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -578,7 +577,7 @@ function LoginInner() {
     setErrorMsg('')
 
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: RESET_REDIRECT,
+      redirectTo: window.location.origin + '/reset-password',
     })
 
     if (error) {

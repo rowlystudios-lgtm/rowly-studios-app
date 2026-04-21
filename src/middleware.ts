@@ -42,7 +42,13 @@ export async function middleware(request: NextRequest) {
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/')
   const isAppRoute = pathname === '/app' || pathname.startsWith('/app/')
 
-  // Only do role-based routing for signed-in users hitting /app or /admin.
+  if (isAdminRoute && !user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = ''
+    return NextResponse.redirect(url)
+  }
+
   if (user && (isAdminRoute || isAppRoute)) {
     const { data: profile } = await supabase
       .from('profiles')
@@ -53,10 +59,7 @@ export async function middleware(request: NextRequest) {
     const role = profile?.role ?? null
 
     if (isAdminRoute && role !== 'admin') {
-      const url = request.nextUrl.clone()
-      url.pathname = '/app'
-      url.search = ''
-      return NextResponse.redirect(url)
+      return NextResponse.redirect(new URL('/', request.url))
     }
 
     if (isAppRoute && role === 'admin') {
