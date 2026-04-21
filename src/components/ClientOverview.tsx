@@ -580,15 +580,19 @@ function ClientJobRow({
   const locationSubtitle = collapsedLocation(job)
   const shootDays = resolveShootDays(job)
   // Keep declined rows visible so the client sees who bowed out and can
-  // jump to finding a replacement via the inline CTA. Only cancelled
-  // bookings are filtered out.
-  const bookings = (job.job_bookings ?? []).filter(
-    (b) => b.status !== 'cancelled'
+  // Split bookings so the assigned-crew section stays focused on who's
+  // actually on the job. Declined bookings are rendered separately below
+  // with a "re-offer" prompt; cancelled bookings are dropped entirely.
+  const activeBookings = (job.job_bookings ?? []).filter(
+    (b) => b.status !== 'declined' && b.status !== 'cancelled'
+  )
+  const declinedBookings = (job.job_bookings ?? []).filter(
+    (b) => b.status === 'declined'
   )
 
   const onSet: JobBooking[] = []
   const post: JobBooking[] = []
-  for (const b of bookings) {
+  for (const b of activeBookings) {
     const p = unwrap(b.profiles)
     const tp = unwrap(p?.talent_profiles)
     if (tp?.department === 'post') post.push(b)
@@ -597,7 +601,7 @@ function ClientJobRow({
 
   const hasLockedCrew =
     job.status !== 'cancelled' &&
-    bookings.some(
+    activeBookings.some(
       (b) => b.status === 'admin_approved' || b.status === 'confirmed'
     )
 
@@ -797,7 +801,7 @@ function ClientJobRow({
           </ExpandedSection>
 
           <ExpandedSection label="Assigned crew" divider>
-            {bookings.length === 0 ? (
+            {activeBookings.length === 0 && declinedBookings.length === 0 ? (
               <p style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
                 Crew being assigned by Rowly Studios
               </p>
@@ -837,6 +841,83 @@ function ClientJobRow({
                   <p style={{ fontSize: 11, color: '#fca5a5', marginTop: 4 }}>
                     {removeError}
                   </p>
+                )}
+
+                {/* Declined — rendered separately below active crew, with
+                    a single "re-offer" CTA that deep-links back into the
+                    roster for this job. */}
+                {declinedBookings.length > 0 && (
+                  <div
+                    style={{
+                      borderTop: '1px solid rgba(170,189,224,0.1)',
+                      paddingTop: 10,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    {declinedBookings.map((b) => {
+                      const p = unwrap(b.profiles)
+                      const tp = unwrap(p?.talent_profiles)
+                      const name = fullName(p)
+                      const role =
+                        tp?.primary_role ??
+                        (tp?.department
+                          ? DEPARTMENT_LABELS[tp.department as Department]
+                          : '')
+                      return (
+                        <div
+                          key={b.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ opacity: 0.4, flexShrink: 0 }}>
+                            <Avatar
+                              url={p?.avatar_url ?? null}
+                              name={name}
+                              size={32}
+                            />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: 'rgba(255,255,255,0.4)',
+                              }}
+                            >
+                              {name}
+                              {role ? ` · ${role}` : ''}
+                            </p>
+                            <p
+                              style={{
+                                fontSize: 11,
+                                color: '#fca5a5',
+                                lineHeight: 1.4,
+                                marginTop: 2,
+                              }}
+                            >
+                              Declined this offer —{' '}
+                              <Link
+                                href={`/app/roster?jobId=${job.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  color: '#AABDE0',
+                                  textDecoration: 'underline',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                edit crew in roster to make a new offer
+                              </Link>
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
             )}
@@ -1429,8 +1510,10 @@ function CrewGroup({
               )}
             </div>
             {/* Secondary line — money + in-flight state. Declined rows
-                get their own line below so the CTA has breathing room. */}
-            {(moneyLabel || overdue) && b.status !== 'declined' && (
+                never reach CrewGroup (they're filtered out of
+                activeBookings and rendered separately), so we don't need
+                a decline branch here. */}
+            {(moneyLabel || overdue) && (
               <div
                 style={{
                   marginLeft: 42, // align with the avatar + gap
@@ -1451,43 +1534,6 @@ function CrewGroup({
                     24hrs passed · Rowly Studios is following up
                   </span>
                 )}
-              </div>
-            )}
-
-            {/* Declined row — inline CTA to deep-link into the roster so
-                the client can pick a replacement without leaving their job. */}
-            {b.status === 'declined' && (
-              <div
-                style={{
-                  marginLeft: 42,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  marginTop: 4,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: '#fca5a5',
-                    fontWeight: 600,
-                  }}
-                >
-                  Declined this offer
-                </span>
-                <Link
-                  href={`/app/roster?jobId=${job.id}`}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: '#AABDE0',
-                    textDecoration: 'underline',
-                  }}
-                >
-                  Add someone else →
-                </Link>
               </div>
             )}
             </div>

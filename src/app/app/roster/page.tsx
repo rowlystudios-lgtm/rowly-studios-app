@@ -90,7 +90,7 @@ type ClientJob = {
 
 type JobBookingRow = {
   id: string
-  status: 'requested' | 'confirmed' | 'declined'
+  status: 'requested' | 'confirmed' | 'declined' | 'cancelled'
   talent_id: string | null
 }
 
@@ -278,10 +278,15 @@ function RosterInner() {
       }
       const rows = (bookingsRes.data ?? []) as JobBookingRow[]
       setTeamBookings(rows)
+      // Declined and cancelled bookings shouldn't mark the talent as
+      // "✓ Added" on the roster — the client may want to re-offer, and
+      // handleAddToJob will delete+recreate the row when they do.
       setAddedTalentIds(
         new Set(
           rows
-            .filter((b) => b.status !== 'declined')
+            .filter(
+              (b) => b.status !== 'declined' && b.status !== 'cancelled'
+            )
             .map((b) => b.talent_id)
             .filter((id): id is string => id !== null)
         )
@@ -344,8 +349,31 @@ function RosterInner() {
       .maybeSingle()
 
     if (existing) {
-      setAddError(`${t.name} is already on this job (${existing.status}).`)
-      return false
+      if (existing.status === 'declined') {
+        // Declined — clear the old row so the client can re-offer with a
+        // fresh booking. Delete instead of update so the RLS + audit
+        // story stays clean: the new booking_events row will mark a
+        // brand-new offer_sent timeline.
+        const { error: deleteError } = await supabase
+          .from('job_bookings')
+          .delete()
+          .eq('id', existing.id)
+        if (deleteError) {
+          setAddError(`Could not re-offer ${t.name}: ${deleteError.message}`)
+          return false
+        }
+        // Reset the card's "✓ Added" state so the button reads "Add to
+        // job" again immediately — it'll be re-added below.
+        setAddedTalentIds((prev) => {
+          const next = new Set(prev)
+          next.delete(t.id)
+          return next
+        })
+        // Fall through to the insert below.
+      } else {
+        setAddError(`${t.name} is already on this job (${existing.status}).`)
+        return false
+      }
     }
 
     // offered_rate_cents captures the opening number; confirmed_rate_cents

@@ -399,15 +399,18 @@ function JobCard({
     ext.shoot_duration_hours != null
       ? Number(ext.shoot_duration_hours)
       : null
-  // Talent-facing label — always prefixed with "Your" so it's clear
-  // whose number this is (the talent's net take).
+  // Talent-facing label. Short-shoot offers drop the word "Your" since
+  // "Flat fee offered" reads better than "Your flat fee offered" above a
+  // FLAT FEE pill. When nothing is on the booking yet we just say "Rate".
   const rateLabel = isShortShoot
     ? variant === 'confirmed'
       ? 'Your confirmed rate'
-      : 'Flat fee (your rate)'
+      : 'Flat fee offered'
     : variant === 'confirmed'
     ? 'Your confirmed rate'
-    : 'Your offered rate'
+    : offeredCents
+    ? 'Rate offered'
+    : 'Rate'
   // Talent's own day rate, for the contextual "Your full day rate is $X" note.
   const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
@@ -606,16 +609,24 @@ function JobCard({
                       marginRight: 4,
                     }}
                   >
-                    FLAT FEE:
+                    FLAT FEE
                   </span>
                   {formatMoney(rateCents)}
                 </>
               ) : (
                 <>
-                  {formatMoney(rateCents)}
-                  <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>
+                  <span style={{ fontSize: 20, fontWeight: 700 }}>
+                    {formatMoney(rateCents)}
+                  </span>
+                  <span
+                    style={{
+                      color: TEXT_MUTED,
+                      fontWeight: 400,
+                      fontSize: 13,
+                    }}
+                  >
                     {' '}
-                    / day
+                    /day
                   </span>
                 </>
               )
@@ -624,28 +635,13 @@ function JobCard({
                 style={{
                   color: TEXT_MUTED,
                   fontWeight: 400,
-                  fontSize: 12,
+                  fontSize: 13,
                 }}
               >
                 Rate to be confirmed
               </span>
             )}
           </p>
-          {/* Day-rate offers: make it explicit this is net-of-fee so talent
-              never wonder whether the 15% comes out of this figure. Short
-              shoots get their own contextual note below. */}
-          {rateCents && !isShortShoot && (
-            <p
-              style={{
-                fontSize: 10,
-                color: 'rgba(170,189,224,0.5)',
-                marginTop: 3,
-                fontWeight: 400,
-              }}
-            >
-              Your take after Rowly Studios fee
-            </p>
-          )}
           {isShortShoot && talentDayRateCents && (
             <p
               style={{
