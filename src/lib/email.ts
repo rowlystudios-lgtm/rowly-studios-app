@@ -254,20 +254,66 @@ export const EmailTemplates = {
     callTime: string | null
     actionUrl: string
   }) {
-    const detailsList = [
-      `Rate: <strong>${rateLabel}</strong>`,
-      location ? `Location: ${location}` : null,
-      callTime ? `Call time: ${callTime}` : null,
-    ]
-      .filter(Boolean)
-      .join('<br/>')
-    return wrap(
-      `You're confirmed for ${jobTitle}`,
-      `<p>You&rsquo;re confirmed for <strong>${jobTitle}</strong> on ${dateLabel}.</p>
-       <p style="font-size:14px;color:#374151;margin-top:10px;line-height:1.7">${detailsList}</p>
-       <p style="color:#7A90AA;margin-top:8px">See the full brief and call sheet in your app.</p>`,
-      { label: 'Open booking', url: actionUrl }
-    )
+    void actionUrl
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:40px 0;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:560px;width:100%;">
+
+        <tr><td style="background:#0f1f3d;padding:28px 40px;">
+          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.08em;">ROWLY STUDIOS</p>
+          <p style="margin:4px 0 0;color:#7a9fd4;font-size:11px;letter-spacing:0.12em;">rowlystudios.com</p>
+        </td></tr>
+
+        <tr><td style="padding:40px 40px 32px;border-bottom:1px solid #f0f0f0;">
+          <p style="margin:0 0 8px;font-size:28px;font-weight:700;color:#0f1f3d;">You're booked.</p>
+          <p style="margin:0;font-size:15px;color:#666666;">Here are your confirmed job details.</p>
+        </td></tr>
+
+        <tr><td style="padding:32px 40px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;width:140px;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Job</td>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;font-weight:600;">${jobTitle}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Date</td>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${dateLabel}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Call time</td>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${callTime ?? 'TBC'}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Location</td>
+              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${location ?? 'TBC'}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Your rate</td>
+              <td style="padding:10px 0;font-size:16px;color:#0f1f3d;font-weight:700;">${rateLabel}</td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <tr><td style="padding:0 40px 32px;">
+          <p style="margin:0;font-size:13px;color:#888888;line-height:1.6;">
+            Your availability calendar updates automatically.
+            Questions? Reply to this email or message admin in the app.
+          </p>
+        </td></tr>
+
+        <tr><td style="background:#f8f8f8;padding:20px 40px;border-top:1px solid #eeeeee;">
+          <p style="margin:0;font-size:11px;color:#aaaaaa;">Rowly Studios · Los Angeles, CA · rowlystudios.com</p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
   },
   /**
    * Admin status digest — a management-brief style email for every booking
