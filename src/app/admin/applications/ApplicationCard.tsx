@@ -7,7 +7,7 @@ import {
   saveApplicationNotes,
 } from './actions'
 
-type Application = {
+export type Application = {
   id: string
   email: string
   first_name: string | null
@@ -115,12 +115,14 @@ export function ApplicationCard({ app, reviewerName }: Props) {
   return (
     <article
       style={{
-        background: '#132542',
+        background: isActioned ? '#0F1B2E' : '#132542',
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 12,
-        padding: 18,
+        padding: isActioned ? 14 : 18,
         marginBottom: 14,
         color: '#E8EEF7',
+        opacity: isActioned ? 0.65 : 1,
+        transition: 'opacity .2s',
       }}
     >
       {/* header: name + badges */}

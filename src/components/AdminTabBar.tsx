@@ -104,27 +104,18 @@ export function AdminTabBar({ pendingApplicationsCount = 0 }: { pendingApplicati
               {tab.icon}
               {showBadge && (
                 <span
+                  aria-label={`${pendingApplicationsCount} pending`}
                   style={{
                     position: 'absolute',
-                    top: -4,
-                    right: -8,
-                    minWidth: 16,
-                    height: 16,
-                    padding: '0 4px',
-                    borderRadius: 8,
+                    top: -2,
+                    right: -3,
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
                     background: '#E23B3B',
-                    color: '#fff',
-                    fontSize: 9,
-                    fontWeight: 800,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    lineHeight: 1,
                     boxShadow: '0 0 0 1.5px #0F1B2E',
                   }}
-                >
-                  {pendingApplicationsCount > 99 ? '99+' : pendingApplicationsCount}
-                </span>
+                />
               )}
             </span>
             <span
