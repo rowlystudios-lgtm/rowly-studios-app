@@ -846,14 +846,8 @@ function ShootDayFields({
   const budgetBelowMin =
     Number.isFinite(budgetNum) && budgetNum > 0 && budgetNum < MIN_BUDGET_DOLLARS
 
-  // YYYY-MM-DD for today in the user's LOCAL timezone — used as the min
-  // on the date input so the native picker can't select a past day.
-  // toISOString() returns UTC, which reads as yesterday in LA before 5pm,
-  // so we build the string from the local-calendar getters instead.
-  const now = new Date()
-  const todayStr = `${now.getFullYear()}-${String(
-    now.getMonth() + 1
-  ).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  // Past-date exclusion now lives inside the custom DatePicker
+  // component, so no local todayStr is needed here.
 
   // Keep end_time sensible when call_time changes. If end was blank we
   // shift to call + 8h (a reasonable default); otherwise preserve the
@@ -901,48 +895,30 @@ function ShootDayFields({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Row 1 — Date on its own row. The native iOS date chrome needs
-          a full-width field so "Apr 19, 2026" doesn't overflow into the
-          Call select. */}
-      <label
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 3,
-        }}
-      >
+      {/* Row 1 — Date on its own row. Uses a custom three-select picker
+          so the control is identical on every platform (no iOS date
+          chrome quirks, no UTC vs. local-time regressions, no past
+          dates). DatePicker emits 'YYYY-MM-DD' or '' — same shape the
+          rest of the form already expects. */}
+      <div>
         <span
           style={{
+            display: 'block',
             fontSize: 10,
             fontWeight: 600,
             color: TEXT_MUTED,
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
+            marginBottom: 5,
           }}
         >
           Date *
         </span>
-        <input
-          type="date"
-          required
-          min={todayStr}
+        <DatePicker
           value={day.date}
-          onChange={(e) => onChange({ date: e.target.value })}
-          style={{
-            // 16px keeps iOS from auto-zooming on focus.
-            fontSize: 16,
-            padding: '10px 12px',
-            background: 'rgba(255,255,255,0.92)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 8,
-            color: '#1A3C6B',
-            fontWeight: 500,
-            outline: 'none',
-            width: '100%',
-            boxSizing: 'border-box',
-          }}
+          onChange={(val) => onChange({ date: val })}
         />
-      </label>
+      </div>
 
       {/* Row 2 — Call and End in a clean 1:1 grid underneath. */}
       <div
@@ -1216,6 +1192,212 @@ function ShootDayFields({
             : 'Total budget for this shoot day. Can be adjusted later.'}
         </p>
       </label>
+    </div>
+  )
+}
+
+/* ─────────── Custom date picker ─────────── */
+
+const MONTHS = [
+  { value: '01', label: 'January' },
+  { value: '02', label: 'February' },
+  { value: '03', label: 'March' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'June' },
+  { value: '07', label: 'July' },
+  { value: '08', label: 'August' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'October' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'December' },
+]
+
+/**
+ * How many days in the given month — defaults to 31 if either arg is
+ * missing so the Day select has something sensible to render before the
+ * user has picked Month + Year.
+ */
+function getDaysInMonth(month: string, year: string): number {
+  const m = parseInt(month, 10)
+  const y = parseInt(year, 10)
+  if (!m || !y) return 31
+  return new Date(y, m, 0).getDate()
+}
+
+/**
+ * Three-select date picker (Month / Day / Year). Replaces <input
+ * type="date"> so we get the same control on every platform, with
+ * past dates excluded at the option level. Emits a valid 'YYYY-MM-DD'
+ * string only when all three selects are filled; otherwise emits ''.
+ */
+function DatePicker({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (val: string) => void
+}) {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() + 1 // 1-12
+  const currentDay = now.getDate()
+
+  // Parse whatever the caller gave us. Either 'YYYY-MM-DD' or ''.
+  const parts = value ? value.split('-') : []
+  const selYear = parts[0] ?? ''
+  const selMonth = parts[1] ?? ''
+  const selDay = parts[2] ?? ''
+
+  // Available years: current + 2 future. Keeps the dropdown short and
+  // avoids the UX trap where a user accidentally picks 2019.
+  const years = [currentYear, currentYear + 1, currentYear + 2].map((y) => ({
+    value: String(y),
+    label: String(y),
+  }))
+
+  // When the current year is selected, hide months that have already passed.
+  const months = MONTHS.filter((m) => {
+    if (selYear && parseInt(selYear) === currentYear) {
+      return parseInt(m.value) >= currentMonth
+    }
+    return true
+  })
+
+  // Days respect the selected month/year length + exclude past days
+  // when the current month is selected.
+  const totalDays = getDaysInMonth(selMonth, selYear)
+  const days = Array.from({ length: totalDays }, (_, i) => {
+    const d = i + 1
+    return { value: String(d).padStart(2, '0'), label: String(d) }
+  }).filter((d) => {
+    if (
+      selYear &&
+      selMonth &&
+      parseInt(selYear) === currentYear &&
+      parseInt(selMonth) === currentMonth
+    ) {
+      return parseInt(d.value) >= currentDay
+    }
+    return true
+  })
+
+  function emit(y: string, m: string, d: string) {
+    if (y && m && d) onChange(`${y}-${m}-${d}`)
+    else onChange('')
+  }
+
+  function handleYear(y: string) {
+    // If the user picks the current year and the previously selected
+    // month is now in the past, reset month + day.
+    let newMonth = selMonth
+    let newDay = selDay
+    if (y && parseInt(y) === currentYear) {
+      if (selMonth && parseInt(selMonth) < currentMonth) {
+        newMonth = ''
+        newDay = ''
+      }
+    }
+    emit(y, newMonth, newDay)
+  }
+
+  function handleMonth(m: string) {
+    // Reset day if it's out of range for the new month…
+    let newDay = selDay
+    const maxDays = getDaysInMonth(m, selYear)
+    if (newDay && parseInt(newDay) > maxDays) newDay = ''
+    // …or in the past relative to today's date in the current month.
+    if (
+      selYear &&
+      parseInt(selYear) === currentYear &&
+      m &&
+      parseInt(m) === currentMonth
+    ) {
+      if (newDay && parseInt(newDay) < currentDay) newDay = ''
+    }
+    emit(selYear, m, newDay)
+  }
+
+  function handleDay(d: string) {
+    emit(selYear, selMonth, d)
+  }
+
+  // Common select chrome — ink text when populated, muted when blank so
+  // the "Month/Day/Year" placeholders read as hints rather than values.
+  const selectStyle: React.CSSProperties = {
+    flex: 1,
+    fontSize: 16,
+    padding: '10px 6px',
+    background: 'rgba(255,255,255,0.92)',
+    border: 'none',
+    borderRadius: 0,
+    color: selYear ? '#1A3C6B' : '#999',
+    fontWeight: 500,
+    outline: 'none',
+    cursor: 'pointer',
+    minWidth: 0,
+    width: '100%',
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.2)',
+        overflow: 'hidden',
+        background: 'rgba(255,255,255,0.92)',
+      }}
+    >
+      {/* Month */}
+      <select
+        value={selMonth}
+        onChange={(e) => handleMonth(e.target.value)}
+        style={{
+          ...selectStyle,
+          flex: 1.4,
+          borderRight: '1px solid rgba(26,60,107,0.12)',
+        }}
+      >
+        <option value="">Month</option>
+        {months.map((m) => (
+          <option key={m.value} value={m.value}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+
+      {/* Day */}
+      <select
+        value={selDay}
+        onChange={(e) => handleDay(e.target.value)}
+        style={{
+          ...selectStyle,
+          flex: 0.8,
+          borderRight: '1px solid rgba(26,60,107,0.12)',
+        }}
+      >
+        <option value="">Day</option>
+        {days.map((d) => (
+          <option key={d.value} value={d.value}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+
+      {/* Year */}
+      <select
+        value={selYear}
+        onChange={(e) => handleYear(e.target.value)}
+        style={{ ...selectStyle, flex: 0.9 }}
+      >
+        <option value="">Year</option>
+        {years.map((y) => (
+          <option key={y.value} value={y.value}>
+            {y.label}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
