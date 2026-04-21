@@ -161,15 +161,16 @@ export async function declineBookingOffer(formData: FormData) {
     .eq('id', bookingId)
 
   // Passive audit log for admin timelines.
+  const svc = createServiceClient()
+  const { data: jobRow } = existing?.job_id
+    ? await svc
+        .from('jobs')
+        .select('client_id, title')
+        .eq('id', existing.job_id)
+        .maybeSingle()
+    : { data: null }
+
   try {
-    const svc = createServiceClient()
-    const { data: jobRow } = existing?.job_id
-      ? await svc
-          .from('jobs')
-          .select('client_id')
-          .eq('id', existing.job_id)
-          .maybeSingle()
-      : { data: null }
     await svc.from('booking_events').insert({
       booking_id: bookingId,
       job_id: existing?.job_id ?? null,
@@ -182,6 +183,66 @@ export async function declineBookingOffer(formData: FormData) {
     })
   } catch {
     // non-fatal
+  }
+
+  // Direct in-app notifications for the client (so they see the decline
+  // the moment it happens) and every admin (so the ops surface lights
+  // up). These live alongside the notifyDecline()-driven email flow.
+  try {
+    const { data: talentRow } = existing?.talent_id
+      ? await svc
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', existing.talent_id)
+          .maybeSingle()
+      : { data: null }
+    const talentName =
+      [talentRow?.first_name, talentRow?.last_name]
+        .filter(Boolean)
+        .join(' ') || 'A talent'
+    const jobTitle = jobRow?.title ?? 'a job'
+    const rosterLink = `/app/roster?jobId=${existing?.job_id ?? ''}`
+
+    if (jobRow?.client_id) {
+      await svc.from('notifications').insert({
+        user_id: jobRow.client_id,
+        type: 'booking_declined',
+        title: 'Offer declined',
+        body: `${talentName} has declined your offer for "${jobTitle}". Go to the roster to make a new offer.`,
+        link: rosterLink,
+        action_url: rosterLink,
+        metadata: {
+          booking_id: bookingId,
+          job_id: existing?.job_id,
+          talent_id: existing?.talent_id,
+          talent_name: talentName,
+        },
+      })
+    }
+
+    const { data: adminRows } = await svc
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin')
+    if (adminRows && adminRows.length > 0) {
+      await svc.from('notifications').insert(
+        adminRows.map((a: { id: string }) => ({
+          user_id: a.id,
+          type: 'booking_declined',
+          title: 'Offer declined by talent',
+          body: `${talentName} declined an offer for "${jobTitle}".`,
+          link: `/app/jobs`,
+          action_url: `/app/jobs`,
+          metadata: {
+            booking_id: bookingId,
+            job_id: existing?.job_id,
+            talent_id: existing?.talent_id,
+          },
+        }))
+      )
+    }
+  } catch {
+    // notifications are advisory — never block the decline on them
   }
 
   try {

@@ -350,34 +350,47 @@ function RosterInner() {
 
     if (existing) {
       if (existing.status === 'declined') {
-        // Declined — clear the old row so the client can re-offer with a
-        // fresh booking. Delete instead of update so the RLS + audit
-        // story stays clean: the new booking_events row will mark a
-        // brand-new offer_sent timeline.
-        const { error: deleteError } = await supabase
+        // Re-offer — UPDATE the existing row in place instead of
+        // delete+insert. The unique (job_id, talent_id) constraint makes
+        // delete+insert racy (the delete may not commit before the insert)
+        // so we reuse the same row. Clear the talent-side fields so the
+        // talent sees it as a fresh offer, not a stale decline.
+        const { error: updateError } = await supabase
           .from('job_bookings')
-          .delete()
+          .update({
+            status: 'requested',
+            offered_rate_cents: rateCents ?? null,
+            confirmed_rate_cents: null,
+            declined_reason: null,
+            talent_reviewed_at: null,
+          })
           .eq('id', existing.id)
-        if (deleteError) {
-          setAddError(`Could not re-offer ${t.name}: ${deleteError.message}`)
+
+        if (updateError) {
+          setAddError(
+            `Could not re-offer ${t.name}: ${updateError.message}`
+          )
           return false
         }
-        // Reset the card's "✓ Added" state so the button reads "Add to
-        // job" again immediately — it'll be re-added below.
+
+        setAddSuccess(`${t.name} re-offered — pending their response`)
+        setTimeout(() => setAddSuccess(''), 4000)
+
+        // Flip the card to "✓ Added" now that the row is live again.
         setAddedTalentIds((prev) => {
           const next = new Set(prev)
-          next.delete(t.id)
+          next.add(t.id)
           return next
         })
-        // Fall through to the insert below.
-      } else {
-        setAddError(`${t.name} is already on this job (${existing.status}).`)
-        return false
+        return true
       }
+      setAddError(`${t.name} is already on this job (${existing.status}).`)
+      return false
     }
 
-    // offered_rate_cents captures the opening number; confirmed_rate_cents
-    // stays null until admin/talent lock it in.
+    // No existing booking — insert fresh. offered_rate_cents captures
+    // the opening number; confirmed_rate_cents stays null until talent
+    // accepts.
     const { error } = await supabase.from('job_bookings').insert({
       job_id: jobId,
       talent_id: t.id,

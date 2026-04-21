@@ -589,6 +589,14 @@ function ClientJobRow({
   const declinedBookings = (job.job_bookings ?? []).filter(
     (b) => b.status === 'declined'
   )
+  // Dedupe by talent id — unique (job_id, talent_id) constraint means
+  // this is a safety net for any legacy rows where the same talent
+  // declined more than once.
+  const uniqueDeclined = declinedBookings.filter((b, i, arr) => {
+    const p = unwrap(b.profiles)
+    if (!p?.id) return true
+    return arr.findIndex((x) => unwrap(x.profiles)?.id === p.id) === i
+  })
 
   const onSet: JobBooking[] = []
   const post: JobBooking[] = []
@@ -846,7 +854,7 @@ function ClientJobRow({
                 {/* Declined — rendered separately below active crew, with
                     a single "re-offer" CTA that deep-links back into the
                     roster for this job. */}
-                {declinedBookings.length > 0 && (
+                {uniqueDeclined.length > 0 && (
                   <div
                     style={{
                       borderTop: '1px solid rgba(170,189,224,0.1)',
@@ -856,7 +864,7 @@ function ClientJobRow({
                       gap: 8,
                     }}
                   >
-                    {declinedBookings.map((b) => {
+                    {uniqueDeclined.map((b) => {
                       const p = unwrap(b.profiles)
                       const tp = unwrap(p?.talent_profiles)
                       const name = fullName(p)
