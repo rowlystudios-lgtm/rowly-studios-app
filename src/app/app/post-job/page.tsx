@@ -50,14 +50,18 @@ type FormState = {
 const MIN_BUDGET_DOLLARS = 350
 
 // Pre-computed 00:00 → 23:30 half-hour slots for both call/end selects.
-// Pure 24hr labels — AM/PM was redundant on a 24hr clock and overflowed
-// the select box on mobile.
+// Call/End now sit on their own full-width row (2×1fr grid) so there's
+// room for an AM/PM suffix, which makes the value easier to scan.
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   const opts: { value: string; label: string }[] = []
   for (let h = 0; h < 24; h++) {
     for (const m of [0, 30]) {
       const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-      opts.push({ value: v, label: v })
+      const suffix = h < 12 ? 'AM' : 'PM'
+      opts.push({
+        value: v,
+        label: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${suffix}`,
+      })
     }
   }
   return opts
@@ -1198,206 +1202,279 @@ function ShootDayFields({
 
 /* ─────────── Custom date picker ─────────── */
 
-const MONTHS = [
-  { value: '01', label: 'January' },
-  { value: '02', label: 'February' },
-  { value: '03', label: 'March' },
-  { value: '04', label: 'April' },
-  { value: '05', label: 'May' },
-  { value: '06', label: 'June' },
-  { value: '07', label: 'July' },
-  { value: '08', label: 'August' },
-  { value: '09', label: 'September' },
-  { value: '10', label: 'October' },
-  { value: '11', label: 'November' },
-  { value: '12', label: 'December' },
-]
-
 /**
- * How many days in the given month — defaults to 31 if either arg is
- * missing so the Day select has something sensible to render before the
- * user has picked Month + Year.
- */
-function getDaysInMonth(month: string, year: string): number {
-  const m = parseInt(month, 10)
-  const y = parseInt(year, 10)
-  if (!m || !y) return 31
-  return new Date(y, m, 0).getDate()
-}
-
-/**
- * Three-select date picker (Month / Day / Year). Replaces <input
- * type="date"> so we get the same control on every platform, with
- * past dates excluded at the option level. Emits a valid 'YYYY-MM-DD'
- * string only when all three selects are filled; otherwise emits ''.
+ * Calendar-grid date picker. Renders the month the caller is looking at
+ * (initialised from `value` or today) with Sun-first weekday labels, and
+ * emits the selected day as a 'YYYY-MM-DD' string. Past dates are visible
+ * but muted + non-clickable; today gets a ring, the selected day is
+ * filled solid navy. Navigation caps at the current month going back so
+ * clients can't accidentally post a shoot in the past.
  */
 function DatePicker({
   value,
   onChange,
 }: {
-  value: string
+  value: string // 'YYYY-MM-DD' or ''
   onChange: (val: string) => void
 }) {
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1 // 1-12
-  const currentDay = now.getDate()
+  // Use midnight-today as the floor — comparing via Date objects is cleaner
+  // than juggling year/month/day integers once we get into "is this day
+  // before today?" territory.
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
 
-  // Parse whatever the caller gave us. Either 'YYYY-MM-DD' or ''.
-  const parts = value ? value.split('-') : []
-  const selYear = parts[0] ?? ''
-  const selMonth = parts[1] ?? ''
-  const selDay = parts[2] ?? ''
+  // Parse the current value (if any) so we can highlight it in the grid
+  // and seed the initial month/year. Passing "T00:00:00" keeps us in the
+  // user's local timezone rather than UTC.
+  const selected = value ? new Date(value + 'T00:00:00') : null
 
-  // Available years: current + 2 future. Keeps the dropdown short and
-  // avoids the UX trap where a user accidentally picks 2019.
-  const years = [currentYear, currentYear + 1, currentYear + 2].map((y) => ({
-    value: String(y),
-    label: String(y),
-  }))
+  const [viewYear, setViewYear] = useState(
+    selected ? selected.getFullYear() : today.getFullYear()
+  )
+  const [viewMonth, setViewMonth] = useState(
+    selected ? selected.getMonth() : today.getMonth()
+  )
 
-  // When the current year is selected, hide months that have already passed.
-  const months = MONTHS.filter((m) => {
-    if (selYear && parseInt(selYear) === currentYear) {
-      return parseInt(m.value) >= currentMonth
+  const MONTH_NAMES = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ]
+  const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+
+  // How much leading whitespace the first row needs so the 1st of the
+  // month lines up under its correct weekday column.
+  const firstDay = new Date(viewYear, viewMonth, 1)
+  const startOffset = firstDay.getDay() // 0 = Sunday
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+
+  // Grid cells: leading empties + each day + trailing empties to fill
+  // out the last row. Simpler than a 6×7 two-dim array and renders in a
+  // single flex-free CSS grid.
+  const cells: (number | null)[] = [
+    ...Array(startOffset).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ]
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  function prevMonth() {
+    if (viewMonth === 0) {
+      setViewMonth(11)
+      setViewYear((y) => y - 1)
+    } else {
+      setViewMonth((m) => m - 1)
     }
-    return true
-  })
-
-  // Days respect the selected month/year length + exclude past days
-  // when the current month is selected.
-  const totalDays = getDaysInMonth(selMonth, selYear)
-  const days = Array.from({ length: totalDays }, (_, i) => {
-    const d = i + 1
-    return { value: String(d).padStart(2, '0'), label: String(d) }
-  }).filter((d) => {
-    if (
-      selYear &&
-      selMonth &&
-      parseInt(selYear) === currentYear &&
-      parseInt(selMonth) === currentMonth
-    ) {
-      return parseInt(d.value) >= currentDay
-    }
-    return true
-  })
-
-  function emit(y: string, m: string, d: string) {
-    if (y && m && d) onChange(`${y}-${m}-${d}`)
-    else onChange('')
   }
 
-  function handleYear(y: string) {
-    // If the user picks the current year and the previously selected
-    // month is now in the past, reset month + day.
-    let newMonth = selMonth
-    let newDay = selDay
-    if (y && parseInt(y) === currentYear) {
-      if (selMonth && parseInt(selMonth) < currentMonth) {
-        newMonth = ''
-        newDay = ''
-      }
+  function nextMonth() {
+    if (viewMonth === 11) {
+      setViewMonth(0)
+      setViewYear((y) => y + 1)
+    } else {
+      setViewMonth((m) => m + 1)
     }
-    emit(y, newMonth, newDay)
   }
 
-  function handleMonth(m: string) {
-    // Reset day if it's out of range for the new month…
-    let newDay = selDay
-    const maxDays = getDaysInMonth(m, selYear)
-    if (newDay && parseInt(newDay) > maxDays) newDay = ''
-    // …or in the past relative to today's date in the current month.
-    if (
-      selYear &&
-      parseInt(selYear) === currentYear &&
-      m &&
-      parseInt(m) === currentMonth
-    ) {
-      if (newDay && parseInt(newDay) < currentDay) newDay = ''
-    }
-    emit(selYear, m, newDay)
+  // Only allow navigating backwards if the viewed month is still in the
+  // future relative to today.
+  const canGoPrev =
+    viewYear > today.getFullYear() ||
+    (viewYear === today.getFullYear() && viewMonth > today.getMonth())
+
+  function selectDay(day: number) {
+    const d = new Date(viewYear, viewMonth, day)
+    d.setHours(0, 0, 0, 0)
+    if (d < today) return // past days are inert
+    const yyyy = viewYear
+    const mm = String(viewMonth + 1).padStart(2, '0')
+    const dd = String(day).padStart(2, '0')
+    onChange(`${yyyy}-${mm}-${dd}`)
   }
 
-  function handleDay(d: string) {
-    emit(selYear, selMonth, d)
+  function isDayPast(day: number): boolean {
+    const d = new Date(viewYear, viewMonth, day)
+    d.setHours(0, 0, 0, 0)
+    return d < today
   }
 
-  // Common select chrome — ink text when populated, muted when blank so
-  // the "Month/Day/Year" placeholders read as hints rather than values.
-  const selectStyle: React.CSSProperties = {
-    flex: 1,
-    fontSize: 16,
-    padding: '10px 6px',
-    background: 'rgba(255,255,255,0.92)',
-    border: 'none',
-    borderRadius: 0,
-    color: selYear ? '#1A3C6B' : '#999',
-    fontWeight: 500,
-    outline: 'none',
-    cursor: 'pointer',
-    minWidth: 0,
-    width: '100%',
+  function isDayToday(day: number): boolean {
+    return (
+      viewYear === today.getFullYear() &&
+      viewMonth === today.getMonth() &&
+      day === today.getDate()
+    )
+  }
+
+  function isDaySelected(day: number): boolean {
+    if (!selected) return false
+    return (
+      viewYear === selected.getFullYear() &&
+      viewMonth === selected.getMonth() &&
+      day === selected.getDate()
+    )
   }
 
   return (
     <div
       style={{
-        display: 'flex',
-        borderRadius: 8,
+        background: 'rgba(255,255,255,0.95)',
+        borderRadius: 10,
         border: '1px solid rgba(255,255,255,0.2)',
         overflow: 'hidden',
-        background: 'rgba(255,255,255,0.92)',
+        padding: '12px 10px 10px',
       }}
     >
-      {/* Month */}
-      <select
-        value={selMonth}
-        onChange={(e) => handleMonth(e.target.value)}
+      {/* Month navigation */}
+      <div
         style={{
-          ...selectStyle,
-          flex: 1.4,
-          borderRight: '1px solid rgba(26,60,107,0.12)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 10,
+          padding: '0 2px',
         }}
       >
-        <option value="">Month</option>
-        {months.map((m) => (
-          <option key={m.value} value={m.value}>
-            {m.label}
-          </option>
-        ))}
-      </select>
+        <button
+          type="button"
+          onClick={prevMonth}
+          disabled={!canGoPrev}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            cursor: canGoPrev ? 'pointer' : 'default',
+            color: canGoPrev ? '#1A3C6B' : 'rgba(26,60,107,0.25)',
+            fontSize: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+          }}
+        >
+          ‹
+        </button>
 
-      {/* Day */}
-      <select
-        value={selDay}
-        onChange={(e) => handleDay(e.target.value)}
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: '#1A3C6B',
+          }}
+        >
+          {MONTH_NAMES[viewMonth]} {viewYear}
+        </span>
+
+        <button
+          type="button"
+          onClick={nextMonth}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: '#1A3C6B',
+            fontSize: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+          }}
+        >
+          ›
+        </button>
+      </div>
+
+      {/* Weekday labels */}
+      <div
         style={{
-          ...selectStyle,
-          flex: 0.8,
-          borderRight: '1px solid rgba(26,60,107,0.12)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          marginBottom: 4,
         }}
       >
-        <option value="">Day</option>
-        {days.map((d) => (
-          <option key={d.value} value={d.value}>
-            {d.label}
-          </option>
+        {DAY_LABELS.map((d) => (
+          <div
+            key={d}
+            style={{
+              textAlign: 'center',
+              fontSize: 10,
+              fontWeight: 600,
+              color: 'rgba(26,60,107,0.4)',
+              padding: '2px 0 4px',
+            }}
+          >
+            {d}
+          </div>
         ))}
-      </select>
+      </div>
 
-      {/* Year */}
-      <select
-        value={selYear}
-        onChange={(e) => handleYear(e.target.value)}
-        style={{ ...selectStyle, flex: 0.9 }}
+      {/* Day grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          gap: 2,
+        }}
       >
-        <option value="">Year</option>
-        {years.map((y) => (
-          <option key={y.value} value={y.value}>
-            {y.label}
-          </option>
-        ))}
-      </select>
+        {cells.map((day, i) => {
+          if (!day) return <div key={`e-${i}`} />
+
+          const past = isDayPast(day)
+          const isToday = isDayToday(day)
+          const isSel = isDaySelected(day)
+
+          return (
+            <button
+              key={day}
+              type="button"
+              disabled={past}
+              onClick={() => selectDay(day)}
+              style={{
+                width: '100%',
+                aspectRatio: '1',
+                borderRadius: '50%',
+                border: 'none',
+                background: isSel
+                  ? '#1A3C6B'
+                  : isToday
+                  ? 'rgba(26,60,107,0.12)'
+                  : 'transparent',
+                color: isSel
+                  ? '#ffffff'
+                  : past
+                  ? 'rgba(26,60,107,0.2)'
+                  : '#1A3C6B',
+                fontSize: 13,
+                fontWeight: isSel || isToday ? 700 : 400,
+                cursor: past ? 'default' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                // Ring around today when it's not the currently selected day.
+                outline:
+                  isToday && !isSel ? '1.5px solid #1A3C6B' : 'none',
+                outlineOffset: -1,
+              }}
+            >
+              {day}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
