@@ -781,24 +781,9 @@ function ClientJobRow({
             </ExpandedSection>
           )}
 
-          {/* Read-only total budget — the snapshot written at job creation.
-              Edits still happen via the Working budget section below. */}
-          {job.total_budget_cents != null && (
-            <ExpandedSection label="Budget" divider>
-              <p
-                style={{ fontSize: 16, fontWeight: 700, color: TEXT_PRIMARY }}
-              >
-                ${(job.total_budget_cents / 100).toLocaleString()}
-              </p>
-              <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
-                Total budget per shoot day
-              </p>
-            </ExpandedSection>
-          )}
-
-          {/* Working budget — client-facing language only. No fees, no day rates. */}
-          <ExpandedSection label="Working budget" divider>
-            <WorkingBudgetCard job={job} onRefresh={onRefresh} />
+          {/* Total budget — single source of truth, client editable. */}
+          <ExpandedSection label="Total budget" divider>
+            <TotalBudgetCard job={job} onRefresh={onRefresh} />
           </ExpandedSection>
 
           <ExpandedSection label="Full address" divider>
@@ -1078,50 +1063,34 @@ function CrewProgressStrip({ job }: { job: JobRow }) {
  * the headline per-person budget with an inline edit flow. If shoot days
  * carry mixed budgets, each day is listed individually below the header.
  */
-function WorkingBudgetCard({
+/**
+ * Total-budget card — single section, no "per person" copy, no per-day
+ * breakdown. Reads total_budget_cents first and falls back to
+ * client_budget_cents; saves through updateClientJobBudget which writes
+ * both columns in lockstep.
+ */
+function TotalBudgetCard({
   job,
   onRefresh,
 }: {
   job: JobRow
   onRefresh: () => void | Promise<void>
 }) {
-  const [editing, setEditing] = useState(false)
-  const startDollars = job.client_budget_cents
-    ? String(job.client_budget_cents / 100)
+  const displayCents =
+    job.total_budget_cents ?? job.client_budget_cents
+  const startDollars = displayCents
+    ? String(Math.round(displayCents / 100))
     : ''
+  const [editing, setEditing] = useState(false)
   const [dollars, setDollars] = useState(startDollars)
   const [saving, setSaving] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
-  // Per-day breakdown: each shoot day might carry its own budget_cents.
-  type PerDay = {
-    date: string
-    cents: number | null
-  }
-  const perDay: PerDay[] = []
-  const rawDays = Array.isArray(job.shoot_days) ? job.shoot_days : []
-  for (const d of rawDays) {
-    const obj = d as {
-      date?: string | null
-      budget_cents?: number | null
-    }
-    if (obj?.date) {
-      perDay.push({
-        date: obj.date,
-        cents: typeof obj.budget_cents === 'number' ? obj.budget_cents : null,
-      })
-    }
-  }
-  const budgetsVary =
-    perDay.length > 1 &&
-    perDay.some(
-      (d, _, arr) =>
-        d.cents != null && arr[0].cents != null && d.cents !== arr[0].cents
-    )
-
   const isTerminal =
-    job.status === 'cancelled' || job.status === 'wrapped' ||
-    !!job.cancelled_at || !!job.wrapped_at
+    job.status === 'cancelled' ||
+    job.status === 'wrapped' ||
+    !!job.cancelled_at ||
+    !!job.wrapped_at
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -1162,44 +1131,17 @@ function WorkingBudgetCard({
       {!editing ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {job.client_budget_cents != null ? (
-              <>
-                <p
-                  style={{
-                    fontSize: 20,
-                    fontWeight: 700,
-                    color: TEXT_PRIMARY,
-                    lineHeight: 1.1,
-                  }}
-                >
-                  ${Math.round(job.client_budget_cents / 100).toLocaleString()}
-                  <span style={{ fontSize: 13, color: TEXT_MUTED, fontWeight: 400 }}>
-                    {' '}
-                    per person
-                  </span>
-                </p>
-                {budgetsVary && (
-                  <ul
-                    style={{
-                      marginTop: 8,
-                      fontSize: 12,
-                      color: TEXT_MUTED,
-                      lineHeight: 1.5,
-                      paddingLeft: 14,
-                      listStyle: 'disc',
-                    }}
-                  >
-                    {perDay.map((d) => (
-                      <li key={d.date}>
-                        {d.date} —{' '}
-                        {d.cents != null
-                          ? `$${Math.round(d.cents / 100).toLocaleString()}/person`
-                          : 'no budget set'}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
+            {displayCents != null ? (
+              <p
+                style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: TEXT_PRIMARY,
+                  lineHeight: 1.1,
+                }}
+              >
+                ${Math.round(displayCents / 100).toLocaleString()}
+              </p>
             ) : (
               <p style={{ fontSize: 14, color: '#F0A500', fontWeight: 600 }}>
                 No budget set
@@ -1246,7 +1188,7 @@ function WorkingBudgetCard({
                 textTransform: 'uppercase',
               }}
             >
-              Budget per person
+              Total budget
             </span>
             <div style={{ position: 'relative', marginTop: 4 }}>
               <span
@@ -1283,8 +1225,7 @@ function WorkingBudgetCard({
             </div>
           </label>
           <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.4 }}>
-            This updates every shoot day on this job and lets Rowly Studios
-            know to re-check any in-flight offers.
+            Total budget for this shoot day. Can be adjusted later.
           </p>
           {errorMsg && (
             <p style={{ fontSize: 11, color: '#fca5a5' }}>{errorMsg}</p>
@@ -1328,7 +1269,7 @@ function WorkingBudgetCard({
                 opacity: saving ? 0.6 : 1,
               }}
             >
-              {saving ? 'Saving…' : 'Save budget'}
+              {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </form>

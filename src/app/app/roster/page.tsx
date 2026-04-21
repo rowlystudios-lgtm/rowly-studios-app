@@ -32,6 +32,7 @@ type TalentProfileLite = {
   department: Department | null
   primary_role: string | null
   day_rate_cents: number | null
+  rate_floor_cents: number | null
   showreel_url: string | null
   bio: string | null
   equipment: string | null
@@ -60,6 +61,7 @@ type Talent = {
   department: Department | null
   primary_role: string | null
   day_rate_cents: number | null
+  rate_floor_cents: number | null
   showreel_url: string | null
   bio: string | null
   equipment: string | null
@@ -106,6 +108,7 @@ function normaliseTalent(row: TalentRow): Talent {
     department: tp?.department ?? null,
     primary_role: tp?.primary_role ?? null,
     day_rate_cents: tp?.day_rate_cents ?? null,
+    rate_floor_cents: tp?.rate_floor_cents ?? null,
     showreel_url: tp?.showreel_url ?? null,
     bio: tp?.bio ?? null,
     equipment: tp?.equipment ?? null,
@@ -186,7 +189,7 @@ function RosterInner() {
           `id, first_name, last_name, full_name, avatar_url, city, available,
            verified, role,
            talent_profiles (department, primary_role, day_rate_cents,
-             showreel_url, bio, equipment)`
+             rate_floor_cents, showreel_url, bio, equipment)`
         )
         .eq('role', 'talent')
         .eq('verified', true)
@@ -658,15 +661,22 @@ function JobPickerSheet({
   const offerNumeric = parseFloat(offerAmount)
   const offerValid = Number.isFinite(offerNumeric) && offerNumeric > 0
 
+  // Custom offers must clear the talent's own rate floor. The day-rate
+  // mode always uses the talent's published rate, so it doesn't need a
+  // floor check.
+  const rateLow =
+    rateMode === 'offer' &&
+    offerValid &&
+    talent.rate_floor_cents != null &&
+    Math.round(offerNumeric * 100) < talent.rate_floor_cents
+
   function submit() {
     if (!selectedJobId) return
+    if (rateMode === 'offer' && (!offerValid || rateLow)) return
     const rateCents =
       rateMode === 'day_rate'
         ? talentDayRateCents
-        : offerValid
-        ? Math.round(offerNumeric * 100)
-        : null
-    if (rateMode === 'offer' && !offerValid) return
+        : Math.round(offerNumeric * 100)
     onConfirm(selectedJobId, rateCents)
   }
 
@@ -985,12 +995,39 @@ function JobPickerSheet({
                 </div>
               )}
 
+              {/* Silent rate-floor guard — appears only when the custom
+                  offer is below the talent's own floor. */}
+              {rateMode === 'offer' && rateLow && (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: '#fca5a5',
+                    background: 'rgba(248,113,113,0.10)',
+                    border: '1px solid rgba(248,113,113,0.25)',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    marginTop: -4,
+                    marginBottom: 12,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Rate is below talent rate floor
+                  {talent.rate_floor_cents
+                    ? ` ($${Math.round(
+                        talent.rate_floor_cents / 100
+                      ).toLocaleString()}/day minimum)`
+                    : ''}
+                  . Try a higher amount.
+                </p>
+              )}
+
               <button
                 type="button"
                 onClick={submit}
                 disabled={
                   busy ||
                   (rateMode === 'offer' && !offerValid) ||
+                  (rateMode === 'offer' && rateLow) ||
                   (rateMode === 'day_rate' && talentDayRateCents == null)
                 }
                 style={{
@@ -1005,12 +1042,14 @@ function JobPickerSheet({
                   cursor:
                     busy ||
                     (rateMode === 'offer' && !offerValid) ||
+                    (rateMode === 'offer' && rateLow) ||
                     (rateMode === 'day_rate' && talentDayRateCents == null)
                       ? 'not-allowed'
                       : 'pointer',
                   opacity:
                     busy ||
                     (rateMode === 'offer' && !offerValid) ||
+                    (rateMode === 'offer' && rateLow) ||
                     (rateMode === 'day_rate' && talentDayRateCents == null)
                       ? 0.55
                       : 1,
@@ -1275,6 +1314,26 @@ function TalentCard({
           >
             {clientRate}
           </p>
+          {/* Rate-floor hint so the client knows the minimum they can offer
+              before they ever open the rate picker. Only shown when it
+              differs from the standard day rate. */}
+          {talent.rate_floor_cents &&
+            talent.day_rate_cents &&
+            talent.rate_floor_cents < talent.day_rate_cents && (
+              <p
+                style={{
+                  fontSize: 10,
+                  color: 'rgba(170,189,224,0.5)',
+                  marginTop: 1,
+                }}
+              >
+                Min offer $
+                {Math.round(
+                  talent.rate_floor_cents / 100
+                ).toLocaleString()}
+                /day
+              </p>
+            )}
         </div>
         <span
           aria-hidden

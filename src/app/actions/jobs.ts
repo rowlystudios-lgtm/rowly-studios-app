@@ -65,6 +65,9 @@ export async function updateClientJobBudget(
     .from('jobs')
     .update({
       client_budget_cents: cents,
+      // Keep total_budget_cents in lockstep — the client UI reads
+      // total_budget_cents first and falls back to client_budget_cents.
+      total_budget_cents: cents,
       shoot_days: nextDays,
       updated_at: new Date().toISOString(),
     })
@@ -156,6 +159,8 @@ export async function updateAdminJobBudget(
     .from('jobs')
     .update({
       client_budget_cents: cents,
+      // Same lockstep as updateClientJobBudget above.
+      total_budget_cents: cents,
       shoot_days: nextDays,
       updated_at: new Date().toISOString(),
     })
