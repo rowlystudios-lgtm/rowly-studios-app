@@ -75,7 +75,7 @@ function LoginInner() {
   const [email, setEmail] = useState('')
   const [resetEmail, setResetEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [status, setStatus] = useState<Status>('checking')
+  const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [selectedRole, setSelectedRole] = useState<'talent' | 'client'>('talent')
@@ -104,53 +104,58 @@ function LoginInner() {
 
   useEffect(() => {
     async function check() {
-      const wantsAdminPin =
-        searchParams.get('admin') === '1' && searchParams.get('reason') === 'pin'
+      setStatus('checking')
+      try {
+        const wantsAdminPin =
+          searchParams.get('admin') === '1' && searchParams.get('reason') === 'pin'
 
-      const { data: { user } } = await supabase.auth.getUser()
+        const { data: { user } } = await supabase.auth.getUser()
 
-      if (!user) {
-        setStatus('idle')
-        if (searchParams.get('admin') === '1') {
-          setShowAdminForm(true)
-        }
-        return
-      }
-
-      if (wantsAdminPin) {
-        const { data: profileRow } = await supabase
-          .from('profiles')
-          .select('role, email')
-          .eq('id', user.id)
-          .maybeSingle()
-
-        if (profileRow?.role === 'admin') {
-          setAdminEmail(profileRow.email ?? user.email ?? '')
-          setShowAdminForm(true)
-          setAdminStep('pin')
-          setPin('')
-          setPinAttempts(0)
-          setPinStatus('idle')
-          setPinErrorMsg('')
-          setAdminStatus('idle')
-          setAdminErrorMsg('')
-          setStatus('idle')
+        if (!user) {
+          if (searchParams.get('admin') === '1') {
+            setShowAdminForm(true)
+          }
           return
         }
 
-        // Session exists but this isn't an admin account — sign out and show login
-        await supabase.auth.signOut()
-        setStatus('idle')
-        return
-      }
+        if (wantsAdminPin) {
+          const { data: profileRow } = await supabase
+            .from('profiles')
+            .select('role, email')
+            .eq('id', user.id)
+            .maybeSingle()
 
-      // Role-based redirect for pre-authenticated visitors.
-      const { data: profileRow } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle()
-      router.replace(profileRow?.role === 'admin' ? '/admin' : '/app')
+          if (profileRow?.role === 'admin') {
+            setAdminEmail(profileRow.email ?? user.email ?? '')
+            setShowAdminForm(true)
+            setAdminStep('pin')
+            setPin('')
+            setPinAttempts(0)
+            setPinStatus('idle')
+            setPinErrorMsg('')
+            setAdminStatus('idle')
+            setAdminErrorMsg('')
+            return
+          }
+
+          // Session exists but this isn't an admin account — sign out and show login
+          await supabase.auth.signOut()
+          return
+        }
+
+        // Role-based redirect for pre-authenticated visitors.
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle()
+        router.replace(profileRow?.role === 'admin' ? '/admin' : '/app')
+      } catch (err) {
+        // Swallow — the button must not be stuck if auth is unreachable.
+        console.warn('[login] session check failed', err)
+      } finally {
+        setStatus('idle')
+      }
     }
     check()
   }, [router, supabase, searchParams])
@@ -466,7 +471,18 @@ function LoginInner() {
 
     if (authError) {
       setAdminStatus('error')
-      setAdminErrorMsg(friendlyError(authError.message))
+      const m = authError.message.toLowerCase()
+      if (
+        m.includes('invalid') ||
+        m.includes('credential') ||
+        m.includes('password') ||
+        m.includes('user not found') ||
+        m.includes('no user found')
+      ) {
+        setAdminErrorMsg('Incorrect email or password')
+      } else {
+        setAdminErrorMsg(friendlyError(authError.message))
+      }
       return
     }
 
@@ -615,6 +631,8 @@ function LoginInner() {
         setAdminStatus('idle')
         setAdminErrorMsg('')
       } else {
+        // Opening — pre-fill a default admin email if none has been entered yet.
+        setAdminEmail((cur) => cur || 'rowlystudios@gmail.com')
         setTimeout(() => {
           adminFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
           adminEmailRef.current?.focus()
@@ -635,7 +653,7 @@ function LoginInner() {
           </span>
         </Link>
 
-        {status !== 'reset-sent' && !showReset && !showWebsiteRedirect && (
+        {status !== 'reset-sent' && !showReset && !showWebsiteRedirect && !showAdminForm && (
           <div className="w-full max-w-sm">
             <p
               style={{
@@ -929,6 +947,7 @@ function LoginInner() {
             </form>
           ) : (
             <>
+              {!showAdminForm && (<>
               <div
                 role="tablist"
                 style={{
@@ -1211,15 +1230,16 @@ function LoginInner() {
                 </span>
                 Admin access
               </button>
+              </>)}
 
               {showAdminForm && (
                 <div
                   ref={adminFormRef}
                   style={{
-                    background: '#1A3C6B',
+                    background: '#0F1B2E',
                     borderRadius: 16,
                     padding: 20,
-                    marginTop: 12,
+                    marginTop: 0,
                     transition: 'all 160ms ease',
                   }}
                 >
@@ -1234,7 +1254,8 @@ function LoginInner() {
                           fontWeight: 700,
                           color: '#AABDE0',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
+                          letterSpacing: '0.12em',
+                          marginBottom: 4,
                         }}
                       >
                         Admin sign in
@@ -1301,6 +1322,25 @@ function LoginInner() {
                           {adminErrorMsg}
                         </p>
                       )}
+                      <button
+                        type="button"
+                        onClick={toggleAdminForm}
+                        disabled={adminStatus === 'submitting'}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#AABDE0',
+                          fontSize: 11,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.08em',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          alignSelf: 'center',
+                          marginTop: 4,
+                        }}
+                      >
+                        ← Back to sign in
+                      </button>
                     </form>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
