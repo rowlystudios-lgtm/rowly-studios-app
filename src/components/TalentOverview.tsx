@@ -16,7 +16,6 @@ import {
 } from '@/lib/jobs'
 import {
   acceptBookingOffer,
-  counterBookingOffer,
   declineBookingOffer,
   markBookingViewed,
 } from '@/app/actions/bookings'
@@ -66,7 +65,7 @@ export function TalentOverview() {
         .from('job_bookings')
         .select(
           `id, status, confirmed_rate_cents, offered_rate_cents,
-           talent_reviewed_at, rate_negotiation_notes,
+           talent_reviewed_at,
            is_short_shoot, shoot_duration_hours,
            jobs (
              id, title, description, location,
@@ -76,14 +75,10 @@ export function TalentOverview() {
            )`
         )
         .eq('talent_id', uid)
-        // Talent sees every actionable booking — requested offers, active
-        // negotiations, already-confirmed jobs, and legacy admin_approved rows.
-        .in('status', [
-          'requested',
-          'negotiating',
-          'admin_approved',
-          'confirmed',
-        ])
+        // Talent sees actionable offers (requested) plus already-confirmed
+        // jobs. admin_approved is kept for any legacy rows — new bookings
+        // go straight to 'requested' with no admin gate.
+        .in('status', ['requested', 'admin_approved', 'confirmed'])
         .order('created_at', { ascending: false })
 
       if (cancelled) return
@@ -114,10 +109,7 @@ export function TalentOverview() {
 
   const upcoming = bookings.filter((b) => b.status === 'confirmed')
   const offers = bookings.filter(
-    (b) =>
-      b.status === 'requested' ||
-      b.status === 'negotiating' ||
-      b.status === 'admin_approved'
+    (b) => b.status === 'requested' || b.status === 'admin_approved'
   )
 
   // Mark each visible offer as viewed once per session. Server idempotently
@@ -178,28 +170,6 @@ export function TalentOverview() {
     } catch (err) {
       setBookings(snapshot)
       const msg = err instanceof Error ? err.message : 'Could not decline'
-      setBookingError(booking.id, msg)
-      return { ok: false as const, error: msg }
-    }
-  }
-
-  async function counterBooking(booking: Booking, dollars: string) {
-    const snapshot = bookings
-    clearBookingError(booking.id)
-    setBookings((b) =>
-      b.map((x) =>
-        x.id === booking.id ? { ...x, status: 'negotiating' as const } : x
-      )
-    )
-    try {
-      const fd = new FormData()
-      fd.set('bookingId', booking.id)
-      fd.set('counter', dollars)
-      await counterBookingOffer(fd)
-      return { ok: true as const }
-    } catch (err) {
-      setBookings(snapshot)
-      const msg = err instanceof Error ? err.message : 'Could not send counter'
       setBookingError(booking.id, msg)
       return { ok: false as const, error: msg }
     }
@@ -321,7 +291,6 @@ export function TalentOverview() {
                   onDecline={() => {
                     declineBooking(b)
                   }}
-                  onCounter={(dollars) => counterBooking(b, dollars)}
                 />
               ))
             )}
@@ -386,7 +355,6 @@ type JobCardProps = {
   onViewDetails?: () => void
   onConfirm?: () => void
   onDecline?: () => void
-  onCounter?: (dollars: string) => void
 }
 
 function JobCard({
@@ -397,7 +365,6 @@ function JobCard({
   onViewDetails,
   onConfirm,
   onDecline,
-  onCounter,
 }: JobCardProps) {
   const job = booking.job
   const dateStr = summariseShootDays(job)
@@ -405,7 +372,6 @@ function JobCard({
   // without polluting the shared Booking type.
   const ext = booking as unknown as {
     offered_rate_cents: number | null
-    rate_negotiation_notes: string | null
     is_short_shoot: boolean | null
     shoot_duration_hours: number | null
   }
@@ -422,21 +388,20 @@ function JobCard({
       ? Number(ext.shoot_duration_hours)
       : null
   // Label varies by whether this is a flat-fee short shoot vs. a day rate.
+  // Non-short offers where no rate is on the booking yet just say "Rate"
+  // — the card still renders a calm "Rate to be confirmed" caption below.
   const rateLabel = isShortShoot
     ? variant === 'confirmed'
       ? 'Confirmed flat fee'
       : 'Flat fee offered'
     : variant === 'confirmed'
     ? 'Confirmed rate'
-    : 'Offered rate'
+    : offeredCents
+    ? 'Offered rate'
+    : 'Rate'
   // Talent's own day rate, for the contextual "Your full day rate is $X" note.
   const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
-  const [counterOpen, setCounterOpen] = useState(false)
-  const [counterDollars, setCounterDollars] = useState(
-    offeredCents != null ? String(offeredCents / 100) : ''
-  )
-  const negotiating = booking.status === 'negotiating'
 
   function openMaps(e: React.MouseEvent) {
     e.preventDefault()
@@ -646,7 +611,15 @@ function JobCard({
                 </>
               )
             ) : (
-              <span style={{ color: '#F0A500', fontWeight: 600 }}>Rate TBD</span>
+              <span
+                style={{
+                  color: TEXT_MUTED,
+                  fontWeight: 400,
+                  fontSize: 12,
+                }}
+              >
+                Rate to be confirmed
+              </span>
             )}
           </p>
           {isShortShoot && talentDayRateCents && (
@@ -703,24 +676,6 @@ function JobCard({
               flexWrap: 'nowrap',
             }}
           >
-            {onCounter && !counterOpen && (
-              <button
-                type="button"
-                onClick={() => setCounterOpen(true)}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 10,
-                  background: 'rgba(212,149,10,0.18)',
-                  color: '#F0A500',
-                  border: '1px solid rgba(212,149,10,0.35)',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                }}
-              >
-                ✎ Counter
-              </button>
-            )}
             <button
               type="button"
               onClick={onDecline}
@@ -756,95 +711,6 @@ function JobCard({
           </div>
         )}
       </div>
-
-      {isOffer && negotiating && ext.rate_negotiation_notes && (
-        <div
-          style={{
-            padding: '10px 14px',
-            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
-            fontSize: 12,
-            color: '#F0A500',
-            background: 'rgba(212,149,10,0.08)',
-          }}
-        >
-          {ext.rate_negotiation_notes} — waiting for admin response.
-        </div>
-      )}
-
-      {isOffer && counterOpen && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!onCounter || !counterDollars) return
-            onCounter(counterDollars)
-            setCounterOpen(false)
-          }}
-          style={{
-            padding: '10px 14px',
-            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-          }}
-        >
-          <span style={{ fontSize: 12, color: TEXT_MUTED }}>$</span>
-          <input
-            type="number"
-            min={0}
-            step={25}
-            autoFocus
-            value={counterDollars}
-            onChange={(e) => setCounterDollars(e.target.value)}
-            placeholder="Your proposed rate"
-            style={{
-              flex: 1,
-              padding: '8px 10px',
-              borderRadius: 8,
-              border: '1px solid rgba(170,189,224,0.2)',
-              background: 'rgba(255,255,255,0.05)',
-              color: '#fff',
-              fontSize: 13,
-              outline: 'none',
-            }}
-          />
-          <span style={{ fontSize: 11, color: TEXT_MUTED }}>/day</span>
-          <button
-            type="button"
-            onClick={() => setCounterOpen(false)}
-            style={{
-              padding: '7px 10px',
-              borderRadius: 8,
-              background: 'transparent',
-              color: TEXT_MUTED,
-              border: '1px solid rgba(170,189,224,0.2)',
-              fontSize: 11,
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!counterDollars}
-            style={{
-              padding: '7px 12px',
-              borderRadius: 8,
-              background: '#F0A500',
-              color: '#1A3C6B',
-              border: 'none',
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-              opacity: counterDollars ? 1 : 0.6,
-            }}
-          >
-            Send counter
-          </button>
-        </form>
-      )}
     </article>
   )
 }

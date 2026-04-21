@@ -52,13 +52,15 @@ type JobBooking = {
   profiles: BookingProfile | BookingProfile[] | null
 }
 
-// Client-facing booking-status copy + colours.
+// Client-facing booking-status copy + colours. Since the admin-approval
+// step is gone, both `requested` and the legacy `admin_approved` now
+// read the same to the client: the offer is in the talent's hands.
 const BOOKING_STATUS_META: Record<
   BookingStatus,
   { label: string; color: string }
 > = {
-  requested: { label: 'Pending review', color: '#d4950a' },
-  admin_approved: { label: 'Sent to talent', color: '#AABDE0' },
+  requested: { label: 'Offer sent to talent', color: '#AABDE0' },
+  admin_approved: { label: 'Offer sent to talent', color: '#AABDE0' },
   confirmed: { label: 'Confirmed', color: '#22c55e' },
   declined: { label: 'Declined', color: '#ef4444' },
   cancelled: { label: 'Cancelled', color: '#6b7280' },
@@ -265,12 +267,13 @@ function StatusDot({ job }: { job: JobRow }) {
 }
 
 /**
- * A client can remove a booking iff it's still in the 'requested' state
- * (admin hasn't approved yet) OR the job has been cancelled (cleanup path).
+ * A client can remove a booking while it's still open-ended — requested
+ * offers the talent hasn't accepted yet, declined offers the client is
+ * cleaning up, and anything on a cancelled job.
  */
 function canRemove(booking: JobBooking, job: JobRow): boolean {
   if (job.status === 'cancelled') return true
-  return booking.status === 'requested'
+  return booking.status === 'requested' || booking.status === 'declined'
 }
 
 const STATUS_ORDER: Record<JobStatus, number> = {
@@ -576,8 +579,11 @@ function ClientJobRow({
 
   const locationSubtitle = collapsedLocation(job)
   const shootDays = resolveShootDays(job)
+  // Keep declined rows visible so the client sees who bowed out and can
+  // jump to finding a replacement via the inline CTA. Only cancelled
+  // bookings are filtered out.
   const bookings = (job.job_bookings ?? []).filter(
-    (b) => b.status !== 'declined' && b.status !== 'cancelled'
+    (b) => b.status !== 'cancelled'
   )
 
   const onSet: JobBooking[] = []
@@ -1422,8 +1428,9 @@ function CrewGroup({
                 </button>
               )}
             </div>
-            {/* Secondary line — tuned to booking status */}
-            {(moneyLabel || overdue || b.status === 'declined') && (
+            {/* Secondary line — money + in-flight state. Declined rows
+                get their own line below so the CTA has breathing room. */}
+            {(moneyLabel || overdue) && b.status !== 'declined' && (
               <div
                 style={{
                   marginLeft: 42, // align with the avatar + gap
@@ -1444,24 +1451,43 @@ function CrewGroup({
                     24hrs passed · Rowly Studios is following up
                   </span>
                 )}
-                {b.status === 'declined' && (
-                  <>
-                    <span style={{ color: '#F87171' }}>Declined</span>
-                    <a
-                      href={`mailto:rowlystudios@gmail.com?subject=Replacement%20needed%20for%20${encodeURIComponent(
-                        job.title ?? 'job'
-                      )}`}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        color: '#AABDE0',
-                        textDecoration: 'underline',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Find replacement →
-                    </a>
-                  </>
-                )}
+              </div>
+            )}
+
+            {/* Declined row — inline CTA to deep-link into the roster so
+                the client can pick a replacement without leaving their job. */}
+            {b.status === 'declined' && (
+              <div
+                style={{
+                  marginLeft: 42,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  marginTop: 4,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: '#fca5a5',
+                    fontWeight: 600,
+                  }}
+                >
+                  Declined this offer
+                </span>
+                <Link
+                  href={`/app/roster?jobId=${job.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#AABDE0',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Add someone else →
+                </Link>
               </div>
             )}
             </div>

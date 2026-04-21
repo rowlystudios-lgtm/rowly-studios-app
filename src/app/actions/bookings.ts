@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase-server'
 import {
   notifyConfirmation,
   notifyDecline,
-  notifyCounterOffer,
   notifyFullyCrewed,
 } from '@/lib/notifications'
 import { createServiceClient } from '@/lib/supabase-service'
@@ -49,7 +48,9 @@ export async function acceptBookingOffer(formData: FormData) {
 
   const { data: existing } = await ctx.supabase
     .from('job_bookings')
-    .select('offered_rate_cents, talent_reviewed_at, job_id')
+    .select(
+      'offered_rate_cents, confirmed_rate_cents, status, talent_reviewed_at, job_id, talent_id'
+    )
     .eq('id', bookingId)
     .maybeSingle()
   if (!existing) return
@@ -62,6 +63,33 @@ export async function acceptBookingOffer(formData: FormData) {
       talent_reviewed_at: existing.talent_reviewed_at ?? new Date().toISOString(),
     })
     .eq('id', bookingId)
+
+  // Activity log — admin surfaces read booking_events to show a timeline
+  // of what happened without polling every booking row. Fire-and-forget;
+  // the event log is passive audit, not a gate on the flow.
+  try {
+    const svc = createServiceClient()
+    const { data: jobRow } = existing.job_id
+      ? await svc
+          .from('jobs')
+          .select('client_id')
+          .eq('id', existing.job_id)
+          .maybeSingle()
+      : { data: null }
+    await svc.from('booking_events').insert({
+      booking_id: bookingId,
+      job_id: existing.job_id,
+      talent_id: existing.talent_id,
+      client_id: jobRow?.client_id ?? null,
+      event_type: 'offer_accepted',
+      old_status: existing.status,
+      new_status: 'confirmed',
+      rate_cents:
+        existing.offered_rate_cents ?? existing.confirmed_rate_cents,
+    })
+  } catch {
+    // non-fatal — the log is advisory
+  }
 
   try {
     await notifyConfirmation(bookingId)
@@ -106,44 +134,6 @@ export async function acceptBookingOffer(formData: FormData) {
   revalidatePath('/app')
 }
 
-/** Talent proposes a different rate — status → negotiating. */
-export async function counterBookingOffer(formData: FormData) {
-  const bookingId = ((formData.get('bookingId') as string) ?? '').trim()
-  const counterRaw = ((formData.get('counter') as string) ?? '').trim()
-  if (!bookingId || !counterRaw) return
-  const ctx = await requireTalent(bookingId)
-  if (!ctx) return
-  const cents = Math.round(parseFloat(counterRaw) * 100)
-  if (!Number.isFinite(cents) || cents <= 0) return
-
-  const { data: existing } = await ctx.supabase
-    .from('job_bookings')
-    .select('talent_reviewed_at')
-    .eq('id', bookingId)
-    .maybeSingle()
-
-  const note = `Talent proposed: $${(cents / 100).toLocaleString('en-US', {
-    maximumFractionDigits: 0,
-  })}/day`
-  await ctx.supabase
-    .from('job_bookings')
-    .update({
-      status: 'negotiating',
-      rate_negotiation_notes: note,
-      talent_reviewed_at:
-        existing?.talent_reviewed_at ?? new Date().toISOString(),
-    })
-    .eq('id', bookingId)
-
-  try {
-    await notifyCounterOffer(bookingId, note)
-  } catch {
-    // non-fatal
-  }
-
-  revalidatePath('/app')
-}
-
 /** Talent declines the offer. Optional reason stored on the booking. */
 export async function declineBookingOffer(formData: FormData) {
   const bookingId = ((formData.get('bookingId') as string) ?? '').trim()
@@ -154,7 +144,9 @@ export async function declineBookingOffer(formData: FormData) {
 
   const { data: existing } = await ctx.supabase
     .from('job_bookings')
-    .select('talent_reviewed_at')
+    .select(
+      'offered_rate_cents, status, talent_reviewed_at, job_id, talent_id'
+    )
     .eq('id', bookingId)
     .maybeSingle()
 
@@ -167,6 +159,30 @@ export async function declineBookingOffer(formData: FormData) {
         existing?.talent_reviewed_at ?? new Date().toISOString(),
     })
     .eq('id', bookingId)
+
+  // Passive audit log for admin timelines.
+  try {
+    const svc = createServiceClient()
+    const { data: jobRow } = existing?.job_id
+      ? await svc
+          .from('jobs')
+          .select('client_id')
+          .eq('id', existing.job_id)
+          .maybeSingle()
+      : { data: null }
+    await svc.from('booking_events').insert({
+      booking_id: bookingId,
+      job_id: existing?.job_id ?? null,
+      talent_id: existing?.talent_id ?? null,
+      client_id: jobRow?.client_id ?? null,
+      event_type: 'offer_declined',
+      old_status: existing?.status ?? null,
+      new_status: 'declined',
+      rate_cents: existing?.offered_rate_cents ?? null,
+    })
+  } catch {
+    // non-fatal
+  }
 
   try {
     await notifyDecline(bookingId, reason)
