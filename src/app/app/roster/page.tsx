@@ -115,13 +115,6 @@ function normaliseTalent(row: TalentRow): Talent {
   }
 }
 
-/** 15% markup the client sees on top of the talent's day rate. */
-function markedUpRate(cents: number | null | undefined): string {
-  if (!cents) return '—'
-  const marked = Math.round(cents * 1.15)
-  return `$${(marked / 100).toLocaleString()} / day`
-}
-
 function getVimeoId(url: string): string | null {
   const m = url.match(/vimeo\.com\/(?:video\/|channels\/\w+\/)?(\d+)/)
   return m ? m[1] : null
@@ -172,6 +165,9 @@ function RosterInner() {
   const [addSuccess, setAddSuccess] = useState('')
   const [pickerTalent, setPickerTalent] = useState<Talent | null>(null)
   const [pickerBusy, setPickerBusy] = useState(false)
+  // Rate chosen on the talent card before the job picker opens. Null
+  // means "no custom rate" — fall back to the talent's day_rate_cents.
+  const [pickerRateCents, setPickerRateCents] = useState<number | null>(null)
 
   // Reset department when side changes and current dept isn't on the new side.
   useEffect(() => {
@@ -362,21 +358,23 @@ function RosterInner() {
     return true
   }
 
-  async function addToTeam(t: Talent) {
+  async function addToTeam(t: Talent, rateCents: number | null) {
     if (!jobContext) {
-      // No ?jobId= in URL — open the job picker sheet.
+      // No ?jobId= in URL — store the rate chosen on the card and open
+      // the job picker sheet so the client can pick which job this is for.
+      setPickerRateCents(rateCents)
       setPickerTalent(t)
       return
     }
     if (addedTalentIds.has(t.id)) return
     if (addingTalentId) return
     setAddingTalentId(t.id)
-    // With a jobContext URL we skip the picker's rate step and default
-    // to the talent's own day rate as the opening offer.
+    // With ?jobId= the rate was already chosen on the card — use it (or
+    // fall back to the talent's own day rate if nothing was entered).
     const ok = await handleAddToJob(
       jobContext.id,
       t,
-      t.day_rate_cents ?? null
+      rateCents ?? t.day_rate_cents ?? null
     )
     if (ok) {
       setAddedTalentIds((prev) => {
@@ -391,9 +389,16 @@ function RosterInner() {
   async function onPickerConfirm(jobId: string, rateCents: number | null) {
     if (!pickerTalent) return
     setPickerBusy(true)
-    const ok = await handleAddToJob(jobId, pickerTalent, rateCents)
+    // The sheet passes null now — rate was set on the card. Fall back to
+    // the talent's day rate if no custom rate was entered.
+    const finalRate =
+      rateCents ?? pickerRateCents ?? pickerTalent.day_rate_cents ?? null
+    const ok = await handleAddToJob(jobId, pickerTalent, finalRate)
     setPickerBusy(false)
-    if (ok) setPickerTalent(null)
+    if (ok) {
+      setPickerTalent(null)
+      setPickerRateCents(null)
+    }
   }
 
   const hasJob = Boolean(jobContext)
@@ -588,7 +593,7 @@ function RosterInner() {
             canPickJob={pickableJobs.length > 0 || !user}
             added={addedTalentIds.has(t.id)}
             adding={addingTalentId === t.id}
-            onAdd={() => addToTeam(t)}
+            onAdd={(rateCents) => addToTeam(t, rateCents)}
           />
         ))}
       </div>
@@ -598,9 +603,13 @@ function RosterInner() {
           talent={pickerTalent}
           jobs={pickableJobs}
           busy={pickerBusy}
+          pickerRateCents={pickerRateCents}
           onConfirm={onPickerConfirm}
           onClose={() => {
-            if (!pickerBusy) setPickerTalent(null)
+            if (!pickerBusy) {
+              setPickerTalent(null)
+              setPickerRateCents(null)
+            }
           }}
         />
       )}
@@ -611,8 +620,9 @@ function RosterInner() {
 /**
  * Two-step "Add to job" sheet:
  *   Step 1 — pick the job.
- *   Step 2 — choose a rate (accept the talent's day rate or make a
- *            custom offer), then confirm the add.
+ *   Step 2 — confirm the booking at the rate the client already entered
+ *            on the talent card (or the talent's day rate if nothing was
+ *            entered).
  *
  * Closing the sheet at any point resets back to step 1.
  */
@@ -620,18 +630,19 @@ function JobPickerSheet({
   talent,
   jobs,
   busy,
+  pickerRateCents,
   onConfirm,
   onClose,
 }: {
   talent: Talent
   jobs: ClientJob[]
   busy: boolean
+  /** Rate set on the talent card before the sheet opened. */
+  pickerRateCents: number | null
   onConfirm: (jobId: string, rateCents: number | null) => void
   onClose: () => void
 }) {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
-  const [rateMode, setRateMode] = useState<'day_rate' | 'offer'>('day_rate')
-  const [offerAmount, setOfferAmount] = useState('')
 
   useEffect(() => {
     const prev = document.body.style.overflow
@@ -641,44 +652,16 @@ function JobPickerSheet({
     }
   }, [])
 
-  // Reset rate state whenever a new job is picked so one client's "offer"
-  // never leaks into the next one's confirmation.
   function pickJob(id: string) {
     setSelectedJobId(id)
-    setRateMode('day_rate')
-    setOfferAmount('')
   }
 
   function backToJobs() {
     if (busy) return
     setSelectedJobId(null)
-    setOfferAmount('')
   }
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId) ?? null
-  const talentDayRateCents = talent.day_rate_cents ?? null
-  const selectedJobBudget = selectedJob?.total_budget_cents ?? null
-  const offerNumeric = parseFloat(offerAmount)
-  const offerValid = Number.isFinite(offerNumeric) && offerNumeric > 0
-
-  // Custom offers must clear the talent's own rate floor. The day-rate
-  // mode always uses the talent's published rate, so it doesn't need a
-  // floor check.
-  const rateLow =
-    rateMode === 'offer' &&
-    offerValid &&
-    talent.rate_floor_cents != null &&
-    Math.round(offerNumeric * 100) < talent.rate_floor_cents
-
-  function submit() {
-    if (!selectedJobId) return
-    if (rateMode === 'offer' && (!offerValid || rateLow)) return
-    const rateCents =
-      rateMode === 'day_rate'
-        ? talentDayRateCents
-        : Math.round(offerNumeric * 100)
-    onConfirm(selectedJobId, rateCents)
-  }
 
   return (
     <div
@@ -720,7 +703,7 @@ function JobPickerSheet({
           </h2>
           <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: 4 }}>
             {selectedJob
-              ? `Set a rate for ${selectedJob.title}`
+              ? `Confirm booking for ${selectedJob.title}`
               : jobs.length === 0
               ? 'You don\u2019t have any active jobs yet.'
               : 'Pick the job you want to request them for.'}
@@ -829,207 +812,72 @@ function JobPickerSheet({
             </>
           )}
 
-          {/* Step 2 — rate selection */}
+          {/* Step 2 — simple confirmation. Rate was already chosen on the
+              talent card; the picker just shows what's about to happen. */}
           {selectedJob && (
             <div style={{ padding: '16px 0' }}>
               <p
                 style={{
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: 600,
                   color: TEXT_PRIMARY,
-                  marginBottom: 12,
+                  marginBottom: 8,
                 }}
               >
-                Set a rate for this booking
+                Confirm booking request
               </p>
-
-              {/* Talent's day rate */}
-              {talentDayRateCents != null && (
-                <div
+              <div
+                style={{
+                  background: CARD_BG,
+                  border: `1px solid ${CARD_BORDER}`,
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  marginBottom: 16,
+                }}
+              >
+                <p
                   style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(170,189,224,0.15)',
-                    borderRadius: 10,
-                    padding: '12px 14px',
-                    marginBottom: 12,
+                    fontSize: 12,
+                    color: TEXT_MUTED,
+                    marginBottom: 4,
                   }}
                 >
-                  <p
-                    style={{
-                      fontSize: 11,
-                      color: TEXT_MUTED,
-                      marginBottom: 2,
-                    }}
-                  >
-                    {talent.name}&rsquo;s day rate
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                      color: TEXT_PRIMARY,
-                    }}
-                  >
-                    ${(talentDayRateCents / 100).toLocaleString()}
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 400,
-                        color: TEXT_MUTED,
-                      }}
-                    >
-                      {' '}
-                      /day
-                    </span>
-                  </p>
-                </div>
-              )}
-
-              {/* Budget context */}
-              {selectedJobBudget != null && (
+                  {talent.name} · {selectedJob.title}
+                </p>
+                <p
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: TEXT_PRIMARY,
+                  }}
+                >
+                  {pickerRateCents
+                    ? `$${(pickerRateCents / 100).toLocaleString()}/day`
+                    : talent.day_rate_cents
+                    ? `$${(talent.day_rate_cents / 100).toLocaleString()}/day`
+                    : 'Rate TBC'}
+                </p>
                 <p
                   style={{
                     fontSize: 11,
                     color: TEXT_MUTED,
-                    marginBottom: 10,
+                    marginTop: 2,
                   }}
                 >
-                  Your job budget:{' '}
-                  ${(selectedJobBudget / 100).toLocaleString()} per day
+                  {pickerRateCents &&
+                  talent.day_rate_cents &&
+                  pickerRateCents !== talent.day_rate_cents
+                    ? 'Custom rate offered'
+                    : 'Day rate accepted'}
                 </p>
-              )}
-
-              {/* Rate choice — two-up toggle */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 8,
-                  marginBottom: 12,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setRateMode('day_rate')}
-                  disabled={talentDayRateCents == null}
-                  style={{
-                    padding: '12px 8px',
-                    borderRadius: 10,
-                    textAlign: 'center',
-                    border: `1px solid ${
-                      rateMode === 'day_rate' ? '#fff' : 'rgba(170,189,224,0.2)'
-                    }`,
-                    background:
-                      rateMode === 'day_rate'
-                        ? '#fff'
-                        : 'rgba(255,255,255,0.06)',
-                    color:
-                      rateMode === 'day_rate' ? '#1A3C6B' : TEXT_MUTED,
-                    fontSize: 12,
-                    fontWeight: rateMode === 'day_rate' ? 600 : 500,
-                    cursor:
-                      talentDayRateCents == null ? 'not-allowed' : 'pointer',
-                    opacity: talentDayRateCents == null ? 0.5 : 1,
-                  }}
-                >
-                  Accept day rate
-                  <br />
-                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>
-                    {talentDayRateCents != null
-                      ? `$${(talentDayRateCents / 100).toLocaleString()}`
-                      : '—'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRateMode('offer')}
-                  style={{
-                    padding: '12px 8px',
-                    borderRadius: 10,
-                    textAlign: 'center',
-                    border: `1px solid ${
-                      rateMode === 'offer' ? '#fff' : 'rgba(170,189,224,0.2)'
-                    }`,
-                    background:
-                      rateMode === 'offer' ? '#fff' : 'rgba(255,255,255,0.06)',
-                    color: rateMode === 'offer' ? '#1A3C6B' : TEXT_MUTED,
-                    fontSize: 12,
-                    fontWeight: rateMode === 'offer' ? 600 : 500,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Make an offer
-                </button>
               </div>
-
-              {rateMode === 'offer' && (
-                <div
-                  style={{
-                    position: 'relative',
-                    marginBottom: 12,
-                  }}
-                >
-                  <span
-                    style={{
-                      position: 'absolute',
-                      left: 12,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: '#888',
-                      fontSize: 14,
-                    }}
-                  >
-                    $
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={100}
-                    step={50}
-                    value={offerAmount}
-                    onChange={(e) => setOfferAmount(e.target.value)}
-                    placeholder="Your offer per day"
-                    className="rs-input"
-                    style={{ paddingLeft: 24, fontSize: 16 }}
-                  />
-                </div>
-              )}
-
-              {/* Silent rate-floor guard — appears only when the custom
-                  offer is below the talent's own floor. */}
-              {rateMode === 'offer' && rateLow && (
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: '#fca5a5',
-                    background: 'rgba(248,113,113,0.10)',
-                    border: '1px solid rgba(248,113,113,0.25)',
-                    borderRadius: 8,
-                    padding: '8px 12px',
-                    marginTop: -4,
-                    marginBottom: 12,
-                    lineHeight: 1.4,
-                  }}
-                >
-                  Rate is below talent rate floor
-                  {talent.rate_floor_cents
-                    ? ` ($${Math.round(
-                        talent.rate_floor_cents / 100
-                      ).toLocaleString()}/day minimum)`
-                    : ''}
-                  . Try a higher amount.
-                </p>
-              )}
-
               <button
                 type="button"
-                onClick={submit}
-                disabled={
-                  busy ||
-                  (rateMode === 'offer' && !offerValid) ||
-                  (rateMode === 'offer' && rateLow) ||
-                  (rateMode === 'day_rate' && talentDayRateCents == null)
-                }
+                // The RosterInner handler falls back to pickerRateCents /
+                // talent.day_rate_cents when this arg is null, so we pass
+                // null and let the single source of truth resolve it.
+                onClick={() => onConfirm(selectedJob.id, null)}
+                disabled={busy}
                 style={{
                   width: '100%',
                   padding: '14px 0',
@@ -1039,33 +887,12 @@ function JobPickerSheet({
                   border: 'none',
                   fontSize: 14,
                   fontWeight: 700,
-                  cursor:
-                    busy ||
-                    (rateMode === 'offer' && !offerValid) ||
-                    (rateMode === 'offer' && rateLow) ||
-                    (rateMode === 'day_rate' && talentDayRateCents == null)
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity:
-                    busy ||
-                    (rateMode === 'offer' && !offerValid) ||
-                    (rateMode === 'offer' && rateLow) ||
-                    (rateMode === 'day_rate' && talentDayRateCents == null)
-                      ? 0.55
-                      : 1,
+                  cursor: busy ? 'wait' : 'pointer',
+                  opacity: busy ? 0.6 : 1,
                 }}
               >
-                {busy
-                  ? 'Adding…'
-                  : rateMode === 'day_rate'
-                  ? talentDayRateCents != null
-                    ? `Add at $${(talentDayRateCents / 100).toLocaleString()}/day`
-                    : 'No day rate on file'
-                  : offerValid
-                  ? `Offer $${offerAmount}/day`
-                  : 'Enter an offer'}
+                {busy ? 'Requesting…' : 'Confirm booking request'}
               </button>
-
               <button
                 type="button"
                 onClick={backToJobs}
@@ -1244,20 +1071,36 @@ function TalentCard({
   canPickJob: boolean
   added: boolean
   adding: boolean
-  onAdd: () => void
+  onAdd: (rateCents: number | null) => void
 }) {
   const vimeoId = talent.showreel_url ? getVimeoId(talent.showreel_url) : null
-  const clientRate = markedUpRate(talent.day_rate_cents)
   const deptLabel = talent.department ? DEPARTMENT_LABELS[talent.department] : null
 
   // With ?jobId= → direct add. Without → open picker (allowed as long as
   // the client has at least one active job).
   const canClickAdd = hasJob || canPickJob
-  const addLabel = hasJob ? 'Add to team' : 'Add to job'
 
-  let addButtonLabel = addLabel
-  if (added) addButtonLabel = '✓ Added'
-  else if (adding) addButtonLabel = 'Adding…'
+  // Optional custom rate — when empty we fall back to the talent's own
+  // day rate at add-time.
+  const [customRate, setCustomRate] = useState('')
+  const customRateCents = customRate
+    ? Math.round(parseFloat(customRate) * 100)
+    : null
+  // Silent floor guard — disables Add when a custom rate is below the
+  // talent's floor.
+  const rateLow = Boolean(
+    customRateCents &&
+      talent.rate_floor_cents &&
+      customRateCents < talent.rate_floor_cents
+  )
+
+  function handleAdd() {
+    if (!canClickAdd || added || adding || rateLow) return
+    // Prefer the custom rate if set, else the talent's day rate.
+    const effectiveRate =
+      customRateCents ?? talent.day_rate_cents ?? null
+    onAdd(effectiveRate)
+  }
 
   return (
     <article
@@ -1304,36 +1147,8 @@ function TalentCard({
             {talent.primary_role && deptLabel && ` · ${deptLabel}`}
             {talent.city && ` · ${talent.city}`}
           </p>
-          <p
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: TEXT_PRIMARY,
-              marginTop: 4,
-            }}
-          >
-            {clientRate}
-          </p>
-          {/* Rate-floor hint so the client knows the minimum they can offer
-              before they ever open the rate picker. Only shown when it
-              differs from the standard day rate. */}
-          {talent.rate_floor_cents &&
-            talent.day_rate_cents &&
-            talent.rate_floor_cents < talent.day_rate_cents && (
-              <p
-                style={{
-                  fontSize: 10,
-                  color: 'rgba(170,189,224,0.5)',
-                  marginTop: 1,
-                }}
-              >
-                Min offer $
-                {Math.round(
-                  talent.rate_floor_cents / 100
-                ).toLocaleString()}
-                /day
-              </p>
-            )}
+          {/* Rate moved below into the dedicated day-rate badge + custom
+              rate input row, so this slot now carries no rate copy. */}
         </div>
         <span
           aria-hidden
@@ -1351,6 +1166,142 @@ function TalentCard({
         />
       </div>
 
+      {/* Rate row — day-rate reference badge on the left, optional custom
+          rate input on the right. Clients accept the day rate by leaving
+          the input blank; typing a number opts into a custom offer. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '0 12px',
+          marginBottom: 6,
+        }}
+      >
+        <div
+          style={{
+            flex: '0 0 auto',
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(170,189,224,0.2)',
+            borderRadius: 8,
+            padding: '6px 10px',
+          }}
+        >
+          <p
+            style={{
+              fontSize: 9,
+              color: TEXT_MUTED,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 1,
+            }}
+          >
+            Day rate
+          </p>
+          <p
+            style={{ fontSize: 14, fontWeight: 700, color: TEXT_PRIMARY }}
+          >
+            {talent.day_rate_cents
+              ? `$${(talent.day_rate_cents / 100).toLocaleString()}`
+              : '—'}
+          </p>
+          {talent.rate_floor_cents &&
+            talent.rate_floor_cents < (talent.day_rate_cents ?? 0) && (
+              <p
+                style={{
+                  fontSize: 9,
+                  color: 'rgba(170,189,224,0.5)',
+                  marginTop: 1,
+                }}
+              >
+                Floor $
+                {(talent.rate_floor_cents / 100).toLocaleString()}
+              </p>
+            )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: 9,
+              color: TEXT_MUTED,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: 4,
+            }}
+          >
+            Custom rate / day
+          </p>
+          <div style={{ position: 'relative' }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'rgba(170,189,224,0.6)',
+                fontSize: 13,
+                pointerEvents: 'none',
+              }}
+            >
+              $
+            </span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={100}
+              step={50}
+              value={customRate}
+              onChange={(e) => setCustomRate(e.target.value)}
+              placeholder="Optional"
+              style={{
+                width: '100%',
+                padding: '7px 8px 7px 20px',
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.08)',
+                border: `1px solid ${
+                  rateLow
+                    ? 'rgba(252,165,165,0.5)'
+                    : 'rgba(170,189,224,0.2)'
+                }`,
+                color: TEXT_PRIMARY,
+                fontSize: 14,
+                fontWeight: 500,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Silent rate-floor guard */}
+      {rateLow && (
+        <p
+          style={{
+            fontSize: 11,
+            color: '#fca5a5',
+            background: 'rgba(252,165,165,0.1)',
+            border: '1px solid rgba(252,165,165,0.25)',
+            borderRadius: 8,
+            padding: '7px 12px',
+            margin: '0 12px 6px',
+            lineHeight: 1.4,
+          }}
+        >
+          Rate is below talent rate floor
+          {talent.rate_floor_cents
+            ? ` ($${(
+                talent.rate_floor_cents / 100
+              ).toLocaleString()}/day minimum)`
+            : ''}
+          . Try a higher amount.
+        </p>
+      )}
+
+      {/* Action buttons row */}
       <div
         style={{
           display: 'flex',
@@ -1360,30 +1311,43 @@ function TalentCard({
       >
         <button
           type="button"
-          onClick={onAdd}
-          disabled={!canClickAdd || added || adding}
+          onClick={handleAdd}
+          disabled={!canClickAdd || added || adding || rateLow}
           title={
-            !canClickAdd
-              ? 'Post a job before adding talent'
-              : undefined
+            !canClickAdd ? 'Post a job before adding talent' : undefined
           }
           style={{
             flex: 1,
             padding: '10px 12px',
             borderRadius: 10,
-            background: added ? 'rgba(74,222,128,0.2)' : '#fff',
-            color: added ? '#4ade80' : BUTTON_PRIMARY,
-            border: added ? '1px solid rgba(74,222,128,0.35)' : 'none',
+            background: added
+              ? 'rgba(74,222,128,0.2)'
+              : rateLow
+              ? 'rgba(255,255,255,0.1)'
+              : '#fff',
+            color: added
+              ? '#4ade80'
+              : rateLow
+              ? TEXT_MUTED
+              : BUTTON_PRIMARY,
+            border: added
+              ? '1px solid rgba(74,222,128,0.35)'
+              : 'none',
             fontSize: 12,
             fontWeight: 700,
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            cursor: !canClickAdd || added || adding ? 'not-allowed' : 'pointer',
-            opacity: !canClickAdd ? 0.55 : 1,
+            cursor:
+              !canClickAdd || added || adding || rateLow
+                ? 'not-allowed'
+                : 'pointer',
+            opacity: !canClickAdd ? 0.55 : rateLow ? 0.45 : 1,
+            transition: 'all 120ms ease',
           }}
         >
-          {addButtonLabel}
+          {added ? '✓ Added' : adding ? 'Adding…' : 'Add to job'}
         </button>
+
         <button
           type="button"
           onClick={onToggleExpand}
