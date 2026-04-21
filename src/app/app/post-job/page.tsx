@@ -47,21 +47,17 @@ type FormState = {
 
 // Platform-wide minimum working budget per person. Kept as a single
 // constant so any future change touches one line.
-const MIN_BUDGET_DOLLARS = 300
+const MIN_BUDGET_DOLLARS = 350
 
 // Pre-computed 00:00 → 23:30 half-hour slots for both call/end selects.
-// Labels keep the 24hr value + an AM/PM suffix so the native picker still
-// scans naturally — e.g. "08:00 AM", "16:30 PM".
+// Pure 24hr labels — AM/PM was redundant on a 24hr clock and overflowed
+// the select box on mobile.
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   const opts: { value: string; label: string }[] = []
   for (let h = 0; h < 24; h++) {
     for (const m of [0, 30]) {
       const v = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-      const suffix = h < 12 ? 'AM' : 'PM'
-      opts.push({
-        value: v,
-        label: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${suffix}`,
-      })
+      opts.push({ value: v, label: v })
     }
   }
   return opts
@@ -850,9 +846,14 @@ function ShootDayFields({
   const budgetBelowMin =
     Number.isFinite(budgetNum) && budgetNum > 0 && budgetNum < MIN_BUDGET_DOLLARS
 
-  // YYYY-MM-DD for today — used as the min on the date input so the
-  // native picker can't select a day that's already gone.
-  const todayStr = new Date().toISOString().split('T')[0]
+  // YYYY-MM-DD for today in the user's LOCAL timezone — used as the min
+  // on the date input so the native picker can't select a past day.
+  // toISOString() returns UTC, which reads as yesterday in LA before 5pm,
+  // so we build the string from the local-calendar getters instead.
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${String(
+    now.getMonth() + 1
+  ).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
   // Keep end_time sensible when call_time changes. If end was blank we
   // shift to call + 8h (a reasonable default); otherwise preserve the
@@ -900,59 +901,57 @@ function ShootDayFields({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Date / call / end — date still gets a little extra room for
-          "Apr 19, 2026" but Call/End need width for "16:30 PM" at 16px. */}
+      {/* Row 1 — Date on its own row. The native iOS date chrome needs
+          a full-width field so "Apr 19, 2026" doesn't overflow into the
+          Call select. */}
+      <label
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 3,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: TEXT_MUTED,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Date *
+        </span>
+        <input
+          type="date"
+          required
+          min={todayStr}
+          value={day.date}
+          onChange={(e) => onChange({ date: e.target.value })}
+          style={{
+            // 16px keeps iOS from auto-zooming on focus.
+            fontSize: 16,
+            padding: '10px 12px',
+            background: 'rgba(255,255,255,0.92)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 8,
+            color: '#1A3C6B',
+            fontWeight: 500,
+            outline: 'none',
+            width: '100%',
+            boxSizing: 'border-box',
+          }}
+        />
+      </label>
+
+      {/* Row 2 — Call and End in a clean 1:1 grid underneath. */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns:
-            'minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)',
-          gap: 6,
+          gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)',
+          gap: 8,
         }}
       >
-        <label
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: TEXT_MUTED,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Date
-          </span>
-          <input
-            type="date"
-            required
-            min={todayStr}
-            value={day.date}
-            onChange={(e) => onChange({ date: e.target.value })}
-            style={{
-              // 16px keeps iOS from auto-zooming on focus; padding still
-              // controls the visual height of the field.
-              fontSize: 16,
-              padding: '8px 6px',
-              background: 'rgba(255,255,255,0.92)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 8,
-              color: '#1A3C6B',
-              fontWeight: 500,
-              outline: 'none',
-              minWidth: 0,
-              width: '100%',
-              boxSizing: 'border-box',
-              // NO appearance:none — let iOS render its native date chrome
-              // so the field reads as a populated date before it's tapped.
-            }}
-          />
-        </label>
         <label
           style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
         >
@@ -972,7 +971,7 @@ function ShootDayFields({
             onChange={(e) => setCallTime(e.target.value)}
             style={{
               fontSize: 16,
-              padding: '8px 4px',
+              padding: '10px 8px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: 8,
@@ -980,11 +979,8 @@ function ShootDayFields({
               fontWeight: 500,
               outline: 'none',
               cursor: 'pointer',
-              minWidth: 0,
               width: '100%',
               boxSizing: 'border-box',
-              // NO appearance:none — the native chevron + picker handle
-              // "16:30 PM" labels better than a custom styled select.
             }}
           >
             {TIME_OPTIONS.map((o) => (
@@ -994,6 +990,7 @@ function ShootDayFields({
             ))}
           </select>
         </label>
+
         <label
           style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
         >
@@ -1013,7 +1010,7 @@ function ShootDayFields({
             onChange={(e) => setEndTime(e.target.value)}
             style={{
               fontSize: 16,
-              padding: '8px 4px',
+              padding: '10px 8px',
               background: 'rgba(255,255,255,0.92)',
               border: '1px solid rgba(255,255,255,0.2)',
               borderRadius: 8,
@@ -1021,10 +1018,8 @@ function ShootDayFields({
               fontWeight: 500,
               outline: 'none',
               cursor: 'pointer',
-              minWidth: 0,
               width: '100%',
               boxSizing: 'border-box',
-              // NO appearance:none — see Call select above.
             }}
           >
             <option value="">—</option>
