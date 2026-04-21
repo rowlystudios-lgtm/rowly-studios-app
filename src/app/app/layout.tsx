@@ -23,13 +23,16 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const isAdmin = profile?.role === 'admin'
 
-  // First-login redirect: talent who haven't finished onboarding go
-  // to the wizard. A missing `onboarded` column reads as `undefined`,
-  // which deliberately doesn't trigger the redirect.
+  // First-login redirect: talent and client roles each have their own
+  // wizard. A missing `onboarded` column reads as `undefined`, which
+  // deliberately doesn't trigger the redirect.
   useEffect(() => {
     if (loading || !user || !profile) return
-    if (profile.role === 'talent' && profile.onboarded === false) {
+    if (profile.onboarded !== false) return
+    if (profile.role === 'talent') {
       router.replace('/onboarding')
+    } else if (profile.role === 'client') {
+      router.replace('/onboarding/client')
     }
   }, [loading, user, profile, router])
 
