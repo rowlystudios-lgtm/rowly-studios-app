@@ -671,6 +671,44 @@ function JobCard({
               </span>
             )}
           </p>
+          {/* Day-rate comparison — makes it obvious at a glance when the
+              client is offering below the talent's standard rate so the
+              accept/decline decision has all the context on one screen. */}
+          {variant === 'offer' &&
+            !isShortShoot &&
+            rateCents != null &&
+            talentDayRateCents != null &&
+            rateCents < talentDayRateCents && (
+              <p
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#F0A500',
+                  marginTop: 4,
+                  lineHeight: 1.4,
+                }}
+              >
+                ⚠ Below your standard rate of{' '}
+                {formatMoney(talentDayRateCents)}/day
+              </p>
+            )}
+          {variant === 'offer' &&
+            !isShortShoot &&
+            rateCents != null &&
+            talentDayRateCents != null &&
+            rateCents >= talentDayRateCents && (
+              <p
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#4ADE80',
+                  marginTop: 4,
+                  lineHeight: 1.4,
+                }}
+              >
+                ✓ At or above your standard rate
+              </p>
+            )}
           {isShortShoot && talentDayRateCents && (
             <p
               style={{
