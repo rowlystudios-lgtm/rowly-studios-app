@@ -331,6 +331,37 @@ export function ClientOverview() {
     load()
   }, [load])
 
+  // Realtime: when any of this client's bookings change (re-offer,
+  // accept, decline, client-budget edits touching linked rows), re-run
+  // load() so the expanded crew view reflects the latest state without
+  // a manual refresh. RLS on job_bookings already scopes the channel
+  // to rows this user can read.
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    const channel = supabase
+      .channel(`client-bookings:${uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_bookings',
+        },
+        () => {
+          void load()
+        }
+      )
+      .subscribe()
+    return () => {
+      try {
+        void supabase.removeChannel(channel)
+      } catch {
+        // ignore cleanup errors on unmount
+      }
+    }
+  }, [user?.id, supabase, load])
+
   async function deleteJob(job: JobRow): Promise<boolean> {
     const snapshot = jobs
     setJobs((js) => js.filter((j) => j.id !== job.id))

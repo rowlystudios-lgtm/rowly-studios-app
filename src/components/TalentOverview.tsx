@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { AddToCalendar } from '@/components/AddToCalendar'
@@ -57,64 +57,93 @@ export function TalentOverview() {
     .join(' ') || profile?.full_name || null
   const today = formatLongDate(new Date())
 
+  // Load talent's bookings + own day rate. Extracted so both the
+  // initial mount effect and the realtime-subscription effect below
+  // can re-run the same fetch when something changes server-side.
+  const load = useCallback(async () => {
+    const uid = user?.id
+    if (!uid) return
+    const rateRes = supabase
+      .from('talent_profiles')
+      .select('day_rate_cents')
+      .eq('id', uid)
+      .maybeSingle()
+    const { data, error } = await supabase
+      .from('job_bookings')
+      .select(
+        `id, status, confirmed_rate_cents, offered_rate_cents,
+         talent_reviewed_at,
+         is_short_shoot, shoot_duration_hours,
+         jobs (
+           id, title, description, location,
+           start_date, end_date, call_time,
+           day_rate_cents, client_notes,
+           shoot_days, crew_needed
+         )`
+      )
+      .eq('talent_id', uid)
+      // Talent sees actionable offers (requested) plus already-confirmed
+      // jobs. admin_approved is kept for any legacy rows — new bookings
+      // go straight to 'requested' with no admin gate.
+      .in('status', ['requested', 'admin_approved', 'confirmed'])
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('job_bookings query', error)
+      setLoading(false)
+      return
+    }
+    const rows = (data ?? []) as Parameters<typeof normalizeBooking>[0][]
+    const normalized = rows
+      .map(normalizeBooking)
+      .filter((b): b is Booking => b !== null)
+    setBookings(normalized)
+    try {
+      const { data: rateRow } = await rateRes
+      setOwnDayRateCents(rateRow?.day_rate_cents ?? null)
+    } catch {
+      // non-fatal — short-shoot cards just won't show the comparison note
+    }
+    setLoading(false)
+  }, [user?.id, supabase])
+
+  // Initial mount + whenever identity changes.
+  useEffect(() => {
+    if (!user?.id) return
+    void load()
+  }, [user?.id, load])
+
+  // Realtime: re-fetch whenever a job_bookings row for this talent
+  // changes on the server. Covers fresh offers from the roster's
+  // reofferClientBooking action, declines, confirms, and any admin
+  // edits. RLS on job_bookings restricts this channel to rows the
+  // talent can already read, so the filter is effectively scoped.
   useEffect(() => {
     const uid = user?.id
     if (!uid) return
-    let cancelled = false
-
-    async function load() {
-      // Fire both queries in parallel — the own-rate lookup is one row
-      // and doesn't depend on bookings.
-      const rateRes = supabase
-        .from('talent_profiles')
-        .select('day_rate_cents')
-        .eq('id', uid)
-        .maybeSingle()
-      const { data, error } = await supabase
-        .from('job_bookings')
-        .select(
-          `id, status, confirmed_rate_cents, offered_rate_cents,
-           talent_reviewed_at,
-           is_short_shoot, shoot_duration_hours,
-           jobs (
-             id, title, description, location,
-             start_date, end_date, call_time,
-             day_rate_cents, client_notes,
-             shoot_days, crew_needed
-           )`
-        )
-        .eq('talent_id', uid)
-        // Talent sees actionable offers (requested) plus already-confirmed
-        // jobs. admin_approved is kept for any legacy rows — new bookings
-        // go straight to 'requested' with no admin gate.
-        .in('status', ['requested', 'admin_approved', 'confirmed'])
-        .order('created_at', { ascending: false })
-
-      if (cancelled) return
-      if (error) {
-        console.error('job_bookings query', error)
-        setLoading(false)
-        return
-      }
-      const rows = (data ?? []) as Parameters<typeof normalizeBooking>[0][]
-      const normalized = rows
-        .map(normalizeBooking)
-        .filter((b): b is Booking => b !== null)
-      setBookings(normalized)
-      try {
-        const { data: rateRow } = await rateRes
-        if (!cancelled) setOwnDayRateCents(rateRow?.day_rate_cents ?? null)
-      } catch {
-        // non-fatal — short-shoot cards just won't show the comparison note
-      }
-      setLoading(false)
-    }
-
-    load()
+    const channel = supabase
+      .channel(`talent-bookings:${uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_bookings',
+          filter: `talent_id=eq.${uid}`,
+        },
+        () => {
+          void load()
+        }
+      )
+      .subscribe()
     return () => {
-      cancelled = true
+      try {
+        void supabase.removeChannel(channel)
+      } catch {
+        // ignore cleanup errors on unmount
+      }
     }
-  }, [user?.id, supabase])
+  }, [user?.id, supabase, load])
 
   const upcoming = bookings.filter((b) => b.status === 'confirmed')
   const offers = bookings.filter(

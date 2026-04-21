@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase-server'
 import { createServiceClient } from '@/lib/supabase-service'
-import { sendNotification } from '@/lib/notifications'
+import { sendNotification, notifyJobOffer } from '@/lib/notifications'
 
 // Platform-wide minimum working budget per person — must match the
 // client-facing post-job form and the admin guard.
@@ -214,9 +214,13 @@ export async function reofferClientBooking(
     .eq('talent_id', talentId)
     .maybeSingle()
 
+  let bookingId: string | null = null
+  let previousStatus: string | null = null
+  let isReoffer = false
+
   if (existing) {
     if (existing.status === 'declined') {
-      const { error: updateError } = await svc
+      const { data: updated, error: updateError } = await svc
         .from('job_bookings')
         .update({
           status: 'requested',
@@ -226,24 +230,72 @@ export async function reofferClientBooking(
           talent_reviewed_at: null,
         })
         .eq('id', existing.id)
+        .select('id')
+        .maybeSingle()
       if (updateError) return { error: updateError.message }
-      revalidatePath('/app/roster')
-      return { reoffered: true }
+      bookingId = updated?.id ?? existing.id
+      previousStatus = 'declined'
+      isReoffer = true
+    } else {
+      return {
+        error: `Talent is already on this job (${existing.status}).`,
+      }
     }
-    return {
-      error: `Talent is already on this job (${existing.status}).`,
+  } else {
+    const { data: inserted, error: insertError } = await svc
+      .from('job_bookings')
+      .insert({
+        job_id: jobId,
+        talent_id: talentId,
+        status: 'requested',
+        notes: null,
+        offered_rate_cents: rateCents,
+        confirmed_rate_cents: null,
+      })
+      .select('id')
+      .single()
+    if (insertError || !inserted) {
+      return { error: insertError?.message ?? 'insert failed' }
+    }
+    bookingId = inserted.id
+  }
+
+  // Log the event for admin timelines — same shape as accept/decline.
+  if (bookingId) {
+    try {
+      await svc.from('booking_events').insert({
+        booking_id: bookingId,
+        job_id: jobId,
+        talent_id: talentId,
+        client_id: user.id,
+        event_type: 'offer_sent',
+        old_status: previousStatus,
+        new_status: 'requested',
+        rate_cents: rateCents,
+      })
+    } catch {
+      // non-fatal — audit is advisory
     }
   }
 
-  const { error: insertError } = await svc.from('job_bookings').insert({
-    job_id: jobId,
-    talent_id: talentId,
-    status: 'requested',
-    notes: null,
-    offered_rate_cents: rateCents,
-    confirmed_rate_cents: null,
-  })
-  if (insertError) return { error: insertError.message }
+  // Fire the full notification pipeline so the talent gets the offer
+  // (in-app + email + SMS) and the admin gets a status digest. Runs on
+  // both the re-offer path and the fresh-insert path so the pathway is
+  // identical whether this is the first or fifth time talent has been
+  // offered for this job.
+  if (bookingId) {
+    try {
+      await notifyJobOffer(bookingId)
+    } catch {
+      // non-fatal — the booking itself has already landed
+    }
+  }
+
+  // Revalidate everything that might surface this booking. Client
+  // components with useEffect-driven fetches also subscribe to realtime
+  // below, so they don't rely on this alone.
+  revalidatePath('/app')
   revalidatePath('/app/roster')
-  return { added: true }
+  revalidatePath(`/admin/jobs/${jobId}`)
+  return isReoffer ? { reoffered: true } : { added: true }
 }
