@@ -5,11 +5,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
-import { CITY_OPTIONS, type Department } from '@/lib/types'
+import { CITY_OPTIONS, DEPARTMENT_LABELS, type Department } from '@/lib/types'
 import { DEPARTMENTS, deptRoles, type DepartmentKey } from '@/lib/crew-taxonomy'
-
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024 // 5MB
-const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
 
 const BG = '#1A3C6B'
 const CARD_BG = '#2E5099'
@@ -127,12 +124,14 @@ export default function EditProfilePage() {
     setAvatarError('')
     setAvatarToast('')
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      setAvatarError('Please use a JPEG, PNG or WebP photo.')
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarError('Image must be under 5MB. Try a smaller photo.')
       return
     }
-    if (file.size > MAX_AVATAR_BYTES) {
-      setAvatarError('Photo must be under 5MB.')
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      setAvatarError('Only JPG, PNG, and WebP images are supported.')
       return
     }
 
@@ -335,6 +334,7 @@ export default function EditProfilePage() {
         >
           {avatarUploading ? 'Uploading…' : 'Change photo'}
         </button>
+        <p className="text-[10px] text-white/30 mt-1">JPG, PNG or WebP · Max 5MB</p>
         {avatarToast && (
           <p className="text-[11px] mt-2" style={{ color: '#4ade80' }}>
             {avatarToast}
@@ -603,6 +603,10 @@ export default function EditProfilePage() {
           </Field>
         </Section>
 
+        <Section title="Worked with">
+          <WorkedWithEditor userId={userId} supabase={supabase} />
+        </Section>
+
         {error && (
           <p
             className="text-[12px] rounded-rs p-3"
@@ -732,5 +736,209 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
       {children}
     </label>
+  )
+}
+
+type WorkedWithTalent = {
+  id: string
+  full_name: string | null
+  avatar_url: string | null
+  talent_profiles:
+    | { department: Department | null; primary_role: string | null }
+    | { department: Department | null; primary_role: string | null }[]
+    | null
+}
+
+function WorkedWithEditor({
+  userId,
+  supabase,
+}: {
+  userId: string | null
+  supabase: ReturnType<typeof useAuth>['supabase']
+}) {
+  const [talent, setTalent] = useState<WorkedWithTalent[]>([])
+  const [connected, setConnected] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [pending, setPending] = useState<Set<string>>(new Set())
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    async function load() {
+      const [{ data: people }, { data: rows }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url, talent_profiles(department, primary_role)')
+          .eq('role', 'talent')
+          .eq('verified', true)
+          .neq('id', userId)
+          .order('full_name', { ascending: true, nullsFirst: false }),
+        supabase
+          .from('worked_with')
+          .select('other_talent_id')
+          .eq('talent_id', userId),
+      ])
+      if (cancelled) return
+      setTalent((people ?? []) as WorkedWithTalent[])
+      setConnected(
+        new Set(
+          ((rows ?? []) as { other_talent_id: string }[]).map((r) => r.other_talent_id)
+        )
+      )
+      setLoading(false)
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [userId, supabase])
+
+  async function toggle(otherId: string) {
+    if (!userId) return
+    if (pending.has(otherId)) return
+    setError('')
+    setPending((p) => new Set(p).add(otherId))
+
+    const wasConnected = connected.has(otherId)
+    // Optimistic flip
+    setConnected((prev) => {
+      const next = new Set(prev)
+      if (wasConnected) next.delete(otherId)
+      else next.add(otherId)
+      return next
+    })
+
+    const result = wasConnected
+      ? await supabase
+          .from('worked_with')
+          .delete()
+          .match({ talent_id: userId, other_talent_id: otherId })
+      : await supabase
+          .from('worked_with')
+          .insert({ talent_id: userId, other_talent_id: otherId })
+
+    if (result.error) {
+      // Revert
+      setConnected((prev) => {
+        const next = new Set(prev)
+        if (wasConnected) next.add(otherId)
+        else next.delete(otherId)
+        return next
+      })
+      setError(result.error.message)
+    }
+
+    setPending((p) => {
+      const next = new Set(p)
+      next.delete(otherId)
+      return next
+    })
+  }
+
+  const filtered = talent.filter((t) => {
+    const q = query.trim().toLowerCase()
+    if (!q) return true
+    const name = (t.full_name ?? '').toLowerCase()
+    const tp = Array.isArray(t.talent_profiles) ? t.talent_profiles[0] : t.talent_profiles
+    const dept = tp?.department ? DEPARTMENT_LABELS[tp.department].toLowerCase() : ''
+    const role = (tp?.primary_role ?? '').toLowerCase()
+    return name.includes(q) || dept.includes(q) || role.includes(q)
+  })
+
+  return (
+    <div>
+      <p className="text-[12px] leading-relaxed -mt-1 mb-3" style={{ color: TEXT_MUTED }}>
+        Check everyone you&apos;ve worked with. Changes save as you toggle.
+      </p>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search by name, role, or department…"
+        className="rs-input"
+      />
+      {error && (
+        <p className="text-[11px] mt-2" style={{ color: '#fca5a5' }}>
+          {error}
+        </p>
+      )}
+      {loading ? (
+        <p className="text-[12px] mt-3" style={{ color: TEXT_MUTED }}>
+          Loading…
+        </p>
+      ) : filtered.length === 0 ? (
+        <p className="text-[12px] mt-3" style={{ color: TEXT_MUTED }}>
+          No talent found.
+        </p>
+      ) : (
+        <div className="mt-3 max-h-72 overflow-y-auto flex flex-col gap-1.5 pr-1">
+          {filtered.map((t) => {
+            const tp = Array.isArray(t.talent_profiles)
+              ? t.talent_profiles[0]
+              : t.talent_profiles
+            const name = t.full_name || 'Unnamed'
+            const dept = tp?.department ? DEPARTMENT_LABELS[tp.department] : ''
+            const role = tp?.primary_role ?? ''
+            const meta = [role, dept].filter(Boolean).join(' · ')
+            const checked = connected.has(t.id)
+            const isPending = pending.has(t.id)
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => toggle(t.id)}
+                disabled={isPending}
+                className="flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-left"
+                style={{
+                  background: checked ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${checked ? 'rgba(255,255,255,0.25)' : 'rgba(170,189,224,0.15)'}`,
+                  opacity: isPending ? 0.6 : 1,
+                  cursor: isPending ? 'wait' : 'pointer',
+                }}
+              >
+                <Avatar url={t.avatar_url} name={name} size={32} />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-[13px] font-semibold truncate"
+                    style={{ color: TEXT_PRIMARY }}
+                  >
+                    {name}
+                  </p>
+                  {meta && (
+                    <p
+                      className="text-[11px] truncate"
+                      style={{ color: TEXT_MUTED }}
+                    >
+                      {meta}
+                    </p>
+                  )}
+                </div>
+                <span
+                  aria-hidden
+                  className="shrink-0"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 6,
+                    border: `1.5px solid ${checked ? '#4ade80' : 'rgba(170,189,224,0.4)'}`,
+                    background: checked ? '#4ade80' : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#1A3C6B',
+                    fontWeight: 700,
+                    fontSize: 13,
+                  }}
+                >
+                  {checked ? '✓' : ''}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }

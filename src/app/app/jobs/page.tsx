@@ -10,6 +10,7 @@ import {
   BookingStatusBadge,
 } from '@/components/StatusBadge'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
+import { Skeleton } from '@/components/ui/Skeleton'
 import {
   CREW_LABELS,
   summariseShootDays,
@@ -480,7 +481,13 @@ function AdminJobsInner() {
         />
       )}
 
-      {loading && <p style={{ fontSize: 13, color: TEXT_MUTED }}>Loading…</p>}
+      {loading && (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      )}
       {!loading && filtered.length === 0 && (
         <p style={{ fontSize: 13, color: TEXT_MUTED }}>No jobs in this view.</p>
       )}

@@ -5,6 +5,7 @@ import { TabBar } from '@/components/TabBar'
 import { AuthGate } from '@/components/AuthGate'
 import { Toast } from '@/components/Toast'
 import { ModeSwitcher } from '@/components/ModeSwitcher'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { useAuth } from '@/lib/auth-context'
 
 export default function AppLayout({
@@ -50,7 +51,9 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             paddingBottom: 'calc(72px + env(safe-area-inset-bottom))',
           }}
         >
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </div>
 
         <TabBar />

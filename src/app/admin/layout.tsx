@@ -1,5 +1,6 @@
 import { AdminHeader } from '@/components/AdminHeader'
 import { AdminTabBar } from '@/components/AdminTabBar'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { requireAdmin } from '@/lib/admin-auth'
 
 export default async function AdminLayout({
@@ -50,7 +51,9 @@ export default async function AdminLayout({
           paddingBottom: 'calc(88px + env(safe-area-inset-bottom))',
         }}
       >
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </main>
       <AdminTabBar />
     </div>

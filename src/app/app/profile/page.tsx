@@ -7,6 +7,7 @@ import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { ShareCodeCard } from '@/components/ShareCodeCard'
 import { TaxDocumentsSection } from '@/components/TaxDocumentsSection'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { DEPARTMENT_LABELS, type Department, type TalentProfile } from '@/lib/types'
 
 const BG = '#1A3C6B'
@@ -141,13 +142,13 @@ export default function ProfilePage() {
         {/* Department */}
         <Card>
           <FieldLabel>Department</FieldLabel>
-          <p className="text-[16px] font-semibold mt-1" style={{ color: TEXT_PRIMARY }}>
-            {talentLoading ? (
-              <Muted>Loading…</Muted>
-            ) : (
-              departmentLabel ?? <Muted>Not set</Muted>
-            )}
-          </p>
+          {talentLoading ? (
+            <Skeleton className="h-5 w-40 mt-2" />
+          ) : (
+            <p className="text-[16px] font-semibold mt-1" style={{ color: TEXT_PRIMARY }}>
+              {departmentLabel ?? <Muted>Not set</Muted>}
+            </p>
+          )}
         </Card>
 
         {/* Rates */}
@@ -155,15 +156,23 @@ export default function ProfilePage() {
           <div className="grid grid-cols-2" style={{ gap: 0 }}>
             <div className="pr-4">
               <FieldLabel>Day Rate</FieldLabel>
-              <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
-                {talentLoading ? <Muted>…</Muted> : formatMoney(talent?.day_rate_cents)}
-              </p>
+              {talentLoading ? (
+                <Skeleton className="h-6 w-24 mt-2" />
+              ) : (
+                <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
+                  {formatMoney(talent?.day_rate_cents)}
+                </p>
+              )}
             </div>
             <div className="pl-4" style={{ borderLeft: `1px solid ${CARD_BORDER}` }}>
               <FieldLabel>Rate Floor</FieldLabel>
-              <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
-                {talentLoading ? <Muted>…</Muted> : formatMoney(talent?.rate_floor_cents)}
-              </p>
+              {talentLoading ? (
+                <Skeleton className="h-6 w-24 mt-2" />
+              ) : (
+                <p className="text-[18px] font-bold mt-1" style={{ color: TEXT_PRIMARY }}>
+                  {formatMoney(talent?.rate_floor_cents)}
+                </p>
+              )}
             </div>
           </div>
         </Card>
@@ -172,9 +181,10 @@ export default function ProfilePage() {
         <Card>
           <FieldLabel>Equipment</FieldLabel>
           {talentLoading ? (
-            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
-              Loading…
-            </p>
+            <div className="mt-2 space-y-2">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-3/4" />
+            </div>
           ) : talent?.equipment ? (
             <p
               className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
@@ -189,6 +199,9 @@ export default function ProfilePage() {
           )}
         </Card>
 
+        {/* Worked with */}
+        <WorkedWithList userId={user?.id ?? null} supabase={supabase} />
+
         {/* Availability */}
         <AvailabilityCard
           userId={user?.id ?? null}
@@ -201,9 +214,11 @@ export default function ProfilePage() {
         <Card>
           <FieldLabel>About</FieldLabel>
           {talentLoading ? (
-            <p className="text-[13px] mt-1" style={{ color: TEXT_MUTED }}>
-              Loading…
-            </p>
+            <div className="mt-2 space-y-2">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
           ) : talent?.bio ? (
             <p
               className="text-[14px] mt-1 leading-relaxed whitespace-pre-wrap"
@@ -466,6 +481,108 @@ function AvailabilityCard({
         <p className="text-[11px] mt-3" style={{ color: '#fca5a5' }}>
           {errorMsg}
         </p>
+      )}
+    </Card>
+  )
+}
+
+type WorkedWithProfile = {
+  id: string
+  full_name: string | null
+  avatar_url: string | null
+  talent_profiles:
+    | { primary_role: string | null }
+    | { primary_role: string | null }[]
+    | null
+}
+
+function WorkedWithList({
+  userId,
+  supabase,
+}: {
+  userId: string | null
+  supabase: ReturnType<typeof useAuth>['supabase']
+}) {
+  const [profiles, setProfiles] = useState<WorkedWithProfile[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    async function load() {
+      const { data: rows } = await supabase
+        .from('worked_with')
+        .select('talent_id, other_talent_id')
+        .or(`talent_id.eq.${userId},other_talent_id.eq.${userId}`)
+
+      if (cancelled) return
+      const otherIds = new Set<string>()
+      for (const r of (rows ?? []) as { talent_id: string; other_talent_id: string }[]) {
+        otherIds.add(r.talent_id === userId ? r.other_talent_id : r.talent_id)
+      }
+      if (otherIds.size === 0) {
+        setProfiles([])
+        setLoading(false)
+        return
+      }
+      const { data: people } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, talent_profiles(primary_role)')
+        .in('id', Array.from(otherIds))
+      if (cancelled) return
+      setProfiles((people ?? []) as WorkedWithProfile[])
+      setLoading(false)
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [userId, supabase])
+
+  return (
+    <Card>
+      <FieldLabel>Worked with</FieldLabel>
+      {loading ? (
+        <div className="flex gap-3 mt-3 overflow-x-auto">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="w-14 h-14 rounded-full shrink-0" />
+          ))}
+        </div>
+      ) : profiles.length === 0 ? (
+        <p className="text-[12px] mt-2 leading-relaxed" style={{ color: TEXT_MUTED }}>
+          No connections yet — connections appear automatically after a confirmed job
+        </p>
+      ) : (
+        <div
+          className="flex gap-3 mt-3 overflow-x-auto pb-1"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+          {profiles.map((p) => {
+            const name = p.full_name || 'Unnamed'
+            return (
+              <div
+                key={p.id}
+                className="shrink-0 flex flex-col items-center"
+                style={{ width: 64 }}
+              >
+                <Avatar url={p.avatar_url} name={name} size={56} />
+                <p
+                  className="text-[10px] mt-1 text-center leading-tight"
+                  style={{
+                    color: TEXT_PRIMARY,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                  }}
+                >
+                  {name}
+                </p>
+              </div>
+            )
+          })}
+        </div>
       )}
     </Card>
   )
