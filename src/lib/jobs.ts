@@ -95,6 +95,7 @@ export type Booking = {
   id: string
   status: BookingStatus
   confirmed_rate_cents: number | null
+  offered_rate_cents: number | null
   job: JobRow
 }
 
@@ -102,6 +103,7 @@ type BookingRaw = {
   id: string
   status: BookingStatus
   confirmed_rate_cents: number | null
+  offered_rate_cents: number | null
   jobs: JobRow | JobRow[] | null
 }
 
@@ -113,6 +115,7 @@ export function normalizeBooking(raw: BookingRaw): Booking | null {
     id: raw.id,
     status: raw.status,
     confirmed_rate_cents: raw.confirmed_rate_cents,
+    offered_rate_cents: raw.offered_rate_cents ?? null,
     job,
   }
 }

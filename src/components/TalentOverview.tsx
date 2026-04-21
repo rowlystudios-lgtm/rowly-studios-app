@@ -406,20 +406,21 @@ function JobCard({
 }: JobCardProps) {
   const job = booking.job
   const dateStr = summariseShootDays(job)
-  // Cast once so we can read the extended columns fetched on the booking
-  // without polluting the shared Booking type.
+  // offered_rate_cents is now on the Booking type directly — no cast
+  // needed. is_short_shoot + shoot_duration_hours live on the row too
+  // but aren't in the shared Booking shape yet, so they still need a
+  // narrow cast.
   const ext = booking as unknown as {
-    offered_rate_cents: number | null
     is_short_shoot: boolean | null
     shoot_duration_hours: number | null
   }
-  const offeredCents = ext.offered_rate_cents ?? null
+  const offeredCents = booking.offered_rate_cents ?? null
   // offered_rate_cents IS the talent net — display directly, no fee
   // maths. The flow is direct client → talent: the roster enforces
   // that an offer always carries a rate, but for legacy rows where
   // offered_rate_cents might be null we fall back to the job's own
   // day_rate_cents (also talent net) so the card always surfaces a
-  // concrete number instead of a vague "to be confirmed" caption.
+  // concrete number.
   const rateCents =
     variant === 'confirmed'
       ? booking.confirmed_rate_cents ?? offeredCents ?? null
@@ -431,17 +432,7 @@ function JobCard({
     ext.shoot_duration_hours != null
       ? Number(ext.shoot_duration_hours)
       : null
-  // Talent-facing label. Short-shoot offers drop the word "Your" since
-  // "Flat fee offered" reads better than "Your flat fee offered" above a
-  // FLAT FEE pill.
-  const rateLabel = isShortShoot
-    ? variant === 'confirmed'
-      ? 'Your confirmed rate'
-      : 'Flat fee offered'
-    : variant === 'confirmed'
-    ? 'Your confirmed rate'
-    : 'Rate offered'
-  // Talent's own day rate, for the contextual "Your full day rate is $X" note.
+  // Talent's own day rate, for the contextual day-rate comparison note.
   const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
 
@@ -618,115 +609,87 @@ function JobCard({
           <p
             style={{
               fontSize: 10,
-              fontWeight: 500,
+              fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
               color: TEXT_MUTED,
+              marginBottom: 4,
             }}
           >
-            {rateLabel}
+            {variant === 'confirmed'
+              ? 'Your confirmed rate'
+              : 'Rate offered to you'}
           </p>
-          <p style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginTop: 2 }}>
-            {rateCents ? (
-              isShortShoot ? (
-                <>
-                  <span
-                    style={{
-                      color: '#F0A500',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.08em',
-                      marginRight: 4,
-                    }}
-                  >
-                    FLAT FEE
-                  </span>
-                  {formatMoney(rateCents)}
-                </>
-              ) : (
-                <>
-                  <span style={{ fontSize: 20, fontWeight: 700 }}>
-                    {formatMoney(rateCents)}
-                  </span>
-                  <span
-                    style={{
-                      color: TEXT_MUTED,
-                      fontWeight: 400,
-                      fontSize: 13,
-                    }}
-                  >
-                    {' '}
-                    /day
-                  </span>
-                </>
-              )
-            ) : null}
-          </p>
-          {/* Day-rate comparison — makes it obvious at a glance when the
-              client is offering below the talent's standard rate so the
-              accept/decline decision has all the context on one screen. */}
-          {variant === 'offer' &&
+
+          {offeredCents || (variant === 'confirmed' && rateCents) ? (
+            <p
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color: '#fff',
+                lineHeight: 1.1,
+              }}
+            >
+              {formatMoney(rateCents)}
+              {!isShortShoot && (
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 400,
+                    color: TEXT_MUTED,
+                    marginLeft: 4,
+                  }}
+                >
+                  / day
+                </span>
+              )}
+            </p>
+          ) : (
+            <p
+              style={{
+                fontSize: 14,
+                color: TEXT_MUTED,
+                fontStyle: 'italic',
+              }}
+            >
+              Rate to be confirmed
+            </p>
+          )}
+
+          {/* Short-shoot flag — complements the missing "/ day" suffix so
+              the talent knows why this is a flat fee. */}
+          {isShortShoot && rateCents && (
+            <p
+              style={{
+                fontSize: 11,
+                color: '#F0A500',
+                marginTop: 3,
+                fontWeight: 600,
+              }}
+            >
+              Flat fee · short shoot
+              {durationHrs ? ` (${durationHrs} hrs)` : ''}
+            </p>
+          )}
+
+          {/* Day-rate context — only when the offer diverges from the
+              talent's own day rate so they can weigh accept vs. decline. */}
+          {isOffer &&
             !isShortShoot &&
-            rateCents != null &&
-            talentDayRateCents != null &&
-            rateCents < talentDayRateCents && (
+            talentDayRateCents &&
+            offeredCents &&
+            offeredCents !== talentDayRateCents && (
               <p
                 style={{
                   fontSize: 11,
-                  fontWeight: 600,
-                  color: '#F0A500',
+                  color: TEXT_MUTED,
                   marginTop: 4,
                   lineHeight: 1.4,
                 }}
               >
-                ⚠ Below your standard rate of{' '}
-                {formatMoney(talentDayRateCents)}/day
+                Your day rate is {formatMoney(talentDayRateCents)}/day
               </p>
             )}
-          {variant === 'offer' &&
-            !isShortShoot &&
-            rateCents != null &&
-            talentDayRateCents != null &&
-            rateCents >= talentDayRateCents && (
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: '#4ADE80',
-                  marginTop: 4,
-                  lineHeight: 1.4,
-                }}
-              >
-                ✓ At or above your standard rate
-              </p>
-            )}
-          {isShortShoot && talentDayRateCents && (
-            <p
-              style={{
-                fontSize: 11,
-                color: TEXT_MUTED,
-                marginTop: 4,
-                lineHeight: 1.45,
-              }}
-            >
-              Your full day rate is {formatMoney(talentDayRateCents)}. Short
-              shoots are offered as a flat fee
-              {durationHrs ? ` (this one is ${durationHrs} hrs)` : ''}.
-            </p>
-          )}
-          {isShortShoot && !talentDayRateCents && (
-            <p
-              style={{
-                fontSize: 11,
-                color: TEXT_MUTED,
-                marginTop: 4,
-                lineHeight: 1.45,
-              }}
-            >
-              Short shoots are offered as a flat fee
-              {durationHrs ? ` (this one is ${durationHrs} hrs)` : ''}.
-            </p>
-          )}
         </div>
 
         {variant === 'confirmed' ? (
