@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
@@ -1203,278 +1203,106 @@ function ShootDayFields({
 /* ─────────── Custom date picker ─────────── */
 
 /**
- * Calendar-grid date picker. Renders the month the caller is looking at
- * (initialised from `value` or today) with Sun-first weekday labels, and
- * emits the selected day as a 'YYYY-MM-DD' string. Past dates are visible
- * but muted + non-clickable; today gets a ring, the selected day is
- * filled solid navy. Navigation caps at the current month going back so
- * clients can't accidentally post a shoot in the past.
+ * Pill wrapper around a hidden native <input type="date">. Tapping the
+ * pill opens the platform's date picker (via showPicker() where
+ * supported, click() as a fallback); the input itself fills the pill
+ * so every tap within the bounds registers. Display text reads as
+ * "Mon, Apr 21, 2026" when populated, "Select date" as a placeholder.
  */
 function DatePicker({
   value,
   onChange,
 }: {
-  value: string // 'YYYY-MM-DD' or ''
+  value: string
   onChange: (val: string) => void
 }) {
-  // Use midnight-today as the floor — comparing via Date objects is cleaner
-  // than juggling year/month/day integers once we get into "is this day
-  // before today?" territory.
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Parse the current value (if any) so we can highlight it in the grid
-  // and seed the initial month/year. Passing "T00:00:00" keeps us in the
-  // user's local timezone rather than UTC.
-  const selected = value ? new Date(value + 'T00:00:00') : null
+  // LOCAL date string for the `min` attr — avoids the UTC bug where
+  // toISOString() returns yesterday in US timezones before 5pm.
+  const now = new Date()
+  const todayStr = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-')
 
-  const [viewYear, setViewYear] = useState(
-    selected ? selected.getFullYear() : today.getFullYear()
-  )
-  const [viewMonth, setViewMonth] = useState(
-    selected ? selected.getMonth() : today.getMonth()
-  )
-
-  const MONTH_NAMES = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ]
-  const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
-
-  // How much leading whitespace the first row needs so the 1st of the
-  // month lines up under its correct weekday column.
-  const firstDay = new Date(viewYear, viewMonth, 1)
-  const startOffset = firstDay.getDay() // 0 = Sunday
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
-
-  // Grid cells: leading empties + each day + trailing empties to fill
-  // out the last row. Simpler than a 6×7 two-dim array and renders in a
-  // single flex-free CSS grid.
-  const cells: (number | null)[] = [
-    ...Array(startOffset).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
-  while (cells.length % 7 !== 0) cells.push(null)
-
-  function prevMonth() {
-    if (viewMonth === 0) {
-      setViewMonth(11)
-      setViewYear((y) => y - 1)
-    } else {
-      setViewMonth((m) => m - 1)
-    }
-  }
-
-  function nextMonth() {
-    if (viewMonth === 11) {
-      setViewMonth(0)
-      setViewYear((y) => y + 1)
-    } else {
-      setViewMonth((m) => m + 1)
-    }
-  }
-
-  // Only allow navigating backwards if the viewed month is still in the
-  // future relative to today.
-  const canGoPrev =
-    viewYear > today.getFullYear() ||
-    (viewYear === today.getFullYear() && viewMonth > today.getMonth())
-
-  function selectDay(day: number) {
-    const d = new Date(viewYear, viewMonth, day)
-    d.setHours(0, 0, 0, 0)
-    if (d < today) return // past days are inert
-    const yyyy = viewYear
-    const mm = String(viewMonth + 1).padStart(2, '0')
-    const dd = String(day).padStart(2, '0')
-    onChange(`${yyyy}-${mm}-${dd}`)
-  }
-
-  function isDayPast(day: number): boolean {
-    const d = new Date(viewYear, viewMonth, day)
-    d.setHours(0, 0, 0, 0)
-    return d < today
-  }
-
-  function isDayToday(day: number): boolean {
-    return (
-      viewYear === today.getFullYear() &&
-      viewMonth === today.getMonth() &&
-      day === today.getDate()
-    )
-  }
-
-  function isDaySelected(day: number): boolean {
-    if (!selected) return false
-    return (
-      viewYear === selected.getFullYear() &&
-      viewMonth === selected.getMonth() &&
-      day === selected.getDate()
-    )
+  function displayValue(): string {
+    if (!value) return 'Select date'
+    const [y, m, d] = value.split('-').map(Number)
+    const date = new Date(y, m - 1, d)
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
   }
 
   return (
+    // The pill owns the visible styling; the input layers invisibly on
+    // top so every tap lands on the native control and the rounded
+    // corners stay crisp.
     <div
+      onClick={() =>
+        inputRef.current?.showPicker?.() ?? inputRef.current?.click()
+      }
       style={{
-        background: 'rgba(255,255,255,0.95)',
-        borderRadius: 10,
+        position: 'relative',
+        borderRadius: 8,
         border: '1px solid rgba(255,255,255,0.2)',
+        background: 'rgba(255,255,255,0.92)',
+        padding: '10px 12px',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         overflow: 'hidden',
-        padding: '12px 10px 10px',
       }}
     >
-      {/* Month navigation */}
-      <div
+      <span
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 10,
-          padding: '0 2px',
+          fontSize: 16,
+          fontWeight: value ? 500 : 400,
+          color: value ? '#1A3C6B' : 'rgba(26,60,107,0.35)',
+          pointerEvents: 'none',
         }}
       >
-        <button
-          type="button"
-          onClick={prevMonth}
-          disabled={!canGoPrev}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            border: 'none',
-            background: 'transparent',
-            cursor: canGoPrev ? 'pointer' : 'default',
-            color: canGoPrev ? '#1A3C6B' : 'rgba(26,60,107,0.25)',
-            fontSize: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
-          }}
-        >
-          ‹
-        </button>
+        {displayValue()}
+      </span>
 
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: '#1A3C6B',
-          }}
-        >
-          {MONTH_NAMES[viewMonth]} {viewYear}
-        </span>
-
-        <button
-          type="button"
-          onClick={nextMonth}
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: '#1A3C6B',
-            fontSize: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
-          }}
-        >
-          ›
-        </button>
-      </div>
-
-      {/* Weekday labels */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, 1fr)',
-          marginBottom: 4,
-        }}
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#1A3C6B"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ flexShrink: 0, opacity: 0.5, pointerEvents: 'none' }}
       >
-        {DAY_LABELS.map((d) => (
-          <div
-            key={d}
-            style={{
-              textAlign: 'center',
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'rgba(26,60,107,0.4)',
-              padding: '2px 0 4px',
-            }}
-          >
-            {d}
-          </div>
-        ))}
-      </div>
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M3 10h18M8 3v4M16 3v4" />
+      </svg>
 
-      {/* Day grid */}
-      <div
+      <input
+        ref={inputRef}
+        type="date"
+        min={todayStr}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: 2,
+          position: 'absolute',
+          inset: 0,
+          opacity: 0,
+          width: '100%',
+          height: '100%',
+          cursor: 'pointer',
+          // 16px keeps iOS from auto-zooming when the hidden input focuses.
+          fontSize: 16,
         }}
-      >
-        {cells.map((day, i) => {
-          if (!day) return <div key={`e-${i}`} />
-
-          const past = isDayPast(day)
-          const isToday = isDayToday(day)
-          const isSel = isDaySelected(day)
-
-          return (
-            <button
-              key={day}
-              type="button"
-              disabled={past}
-              onClick={() => selectDay(day)}
-              style={{
-                width: '100%',
-                aspectRatio: '1',
-                borderRadius: '50%',
-                border: 'none',
-                background: isSel
-                  ? '#1A3C6B'
-                  : isToday
-                  ? 'rgba(26,60,107,0.12)'
-                  : 'transparent',
-                color: isSel
-                  ? '#ffffff'
-                  : past
-                  ? 'rgba(26,60,107,0.2)'
-                  : '#1A3C6B',
-                fontSize: 13,
-                fontWeight: isSel || isToday ? 700 : 400,
-                cursor: past ? 'default' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 0,
-                // Ring around today when it's not the currently selected day.
-                outline:
-                  isToday && !isSel ? '1.5px solid #1A3C6B' : 'none',
-                outlineOffset: -1,
-              }}
-            >
-              {day}
-            </button>
-          )
-        })}
-      </div>
+      />
     </div>
   )
 }
