@@ -26,6 +26,15 @@ const CARD_BORDER = 'rgba(170,189,224,0.15)'
 const CARD_BORDER_SOFT = 'rgba(170,189,224,0.1)'
 const TEXT_MUTED = '#AABDE0'
 
+// Rowly Studios 15% fee. offered_rate_cents / confirmed_rate_cents on a
+// booking is always the TALENT NET — i.e. what talent actually take
+// home. Client-facing amounts elsewhere in the app are marked up by
+// RS_MULTIPLIER. Constants are kept in sync with roster/page.tsx.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const RS_FEE = 0.15
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const RS_MULTIPLIER = 1.15
+
 type SheetBusy = 'confirm' | 'decline' | null
 
 export function TalentOverview() {
@@ -376,10 +385,13 @@ function JobCard({
     shoot_duration_hours: number | null
   }
   const offeredCents = ext.offered_rate_cents ?? null
+  // offered_rate_cents IS the talent net — display directly, no fee maths.
+  // Never fall through to job.day_rate_cents because that would surface
+  // an unconfirmed rate as if it were booked.
   const rateCents =
     variant === 'confirmed'
       ? booking.confirmed_rate_cents
-      : offeredCents ?? booking.confirmed_rate_cents ?? job.day_rate_cents
+      : offeredCents ?? booking.confirmed_rate_cents ?? null
   const isShortShoot =
     ext.is_short_shoot === true ||
     (ext.shoot_duration_hours != null && Number(ext.shoot_duration_hours) < 4)
@@ -387,18 +399,15 @@ function JobCard({
     ext.shoot_duration_hours != null
       ? Number(ext.shoot_duration_hours)
       : null
-  // Label varies by whether this is a flat-fee short shoot vs. a day rate.
-  // Non-short offers where no rate is on the booking yet just say "Rate"
-  // — the card still renders a calm "Rate to be confirmed" caption below.
+  // Talent-facing label — always prefixed with "Your" so it's clear
+  // whose number this is (the talent's net take).
   const rateLabel = isShortShoot
     ? variant === 'confirmed'
-      ? 'Confirmed flat fee'
-      : 'Flat fee offered'
+      ? 'Your confirmed rate'
+      : 'Flat fee (your rate)'
     : variant === 'confirmed'
-    ? 'Confirmed rate'
-    : offeredCents
-    ? 'Offered rate'
-    : 'Rate'
+    ? 'Your confirmed rate'
+    : 'Your offered rate'
   // Talent's own day rate, for the contextual "Your full day rate is $X" note.
   const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
@@ -606,7 +615,7 @@ function JobCard({
                   {formatMoney(rateCents)}
                   <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>
                     {' '}
-                    per day
+                    / day
                   </span>
                 </>
               )
@@ -622,6 +631,21 @@ function JobCard({
               </span>
             )}
           </p>
+          {/* Day-rate offers: make it explicit this is net-of-fee so talent
+              never wonder whether the 15% comes out of this figure. Short
+              shoots get their own contextual note below. */}
+          {rateCents && !isShortShoot && (
+            <p
+              style={{
+                fontSize: 10,
+                color: 'rgba(170,189,224,0.5)',
+                marginTop: 3,
+                fontWeight: 400,
+              }}
+            >
+              Your take after Rowly Studios fee
+            </p>
+          )}
           {isShortShoot && talentDayRateCents && (
             <p
               style={{

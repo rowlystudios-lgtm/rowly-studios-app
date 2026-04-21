@@ -16,6 +16,18 @@ const AVAILABLE_GREEN = '#4ade80'
 const LINK_COLOR = '#AABDE0'
 const BUTTON_PRIMARY = '#1A3C6B'
 
+// Rowly Studios take the 15% on top of the talent's net rate. Kept
+// as named constants so rate-fee math is greppable and a future change
+// is a one-line edit.
+//   client_pays = talent_net × RS_MULTIPLIER
+//   talent_net  = client_pays / RS_MULTIPLIER
+//
+// offered_rate_cents / confirmed_rate_cents always store the TALENT NET
+// amount. The client sees the marked-up value everywhere.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const RS_FEE = 0.15
+const RS_MULTIPLIER = 1.15
+
 type Side = 'production' | 'post'
 
 // Departments grouped by roster side. Everything except 'post' lives on the
@@ -844,32 +856,55 @@ function JobPickerSheet({
                 >
                   {talent.name} · {selectedJob.title}
                 </p>
-                <p
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: TEXT_PRIMARY,
-                  }}
-                >
-                  {pickerRateCents
-                    ? `$${(pickerRateCents / 100).toLocaleString()}/day`
-                    : talent.day_rate_cents
-                    ? `$${(talent.day_rate_cents / 100).toLocaleString()}/day`
-                    : 'Rate TBC'}
-                </p>
-                <p
-                  style={{
-                    fontSize: 11,
-                    color: TEXT_MUTED,
-                    marginTop: 2,
-                  }}
-                >
-                  {pickerRateCents &&
-                  talent.day_rate_cents &&
-                  pickerRateCents !== talent.day_rate_cents
-                    ? 'Custom rate offered'
-                    : 'Day rate accepted'}
-                </p>
+                {/* Resolve the effective talent-net rate from the card,
+                    then mark up to show the client exactly what they'll
+                    pay. pickerRateCents is always talent net. */}
+                {(() => {
+                  const talentNetCents =
+                    pickerRateCents ?? talent.day_rate_cents ?? null
+                  const clientPaysCents =
+                    talentNetCents != null
+                      ? Math.round(talentNetCents * RS_MULTIPLIER)
+                      : null
+                  const isCustom =
+                    pickerRateCents != null &&
+                    talent.day_rate_cents != null &&
+                    pickerRateCents !== talent.day_rate_cents
+                  return (
+                    <>
+                      <p
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          color: TEXT_PRIMARY,
+                        }}
+                      >
+                        {clientPaysCents
+                          ? `$${(
+                              clientPaysCents / 100
+                            ).toLocaleString()}/day`
+                          : 'Rate TBC'}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 11,
+                          color: TEXT_MUTED,
+                          marginTop: 2,
+                        }}
+                      >
+                        {talentNetCents != null
+                          ? isCustom
+                            ? `Custom offer · talent receives $${(
+                                talentNetCents / 100
+                              ).toLocaleString()}/day`
+                            : `Day rate · talent receives $${(
+                                talentNetCents / 100
+                              ).toLocaleString()}/day`
+                          : 'No rate on file yet'}
+                      </p>
+                    </>
+                  )
+                })()}
               </div>
               <button
                 type="button"
@@ -1080,25 +1115,31 @@ function TalentCard({
   // the client has at least one active job).
   const canClickAdd = hasJob || canPickJob
 
-  // Optional custom rate — when empty we fall back to the talent's own
-  // day rate at add-time.
+  // Optional custom rate — the client enters what THEY pay (inclusive
+  // of the 15% RS fee). We compare against a marked-up floor and
+  // convert back to talent net before sending it to the parent.
   const [customRate, setCustomRate] = useState('')
   const customRateCents = customRate
     ? Math.round(parseFloat(customRate) * 100)
     : null
-  // Silent floor guard — disables Add when a custom rate is below the
-  // talent's floor.
+  const clientFloorCents = talent.rate_floor_cents
+    ? Math.round(talent.rate_floor_cents * RS_MULTIPLIER)
+    : null
   const rateLow = Boolean(
     customRateCents &&
-      talent.rate_floor_cents &&
-      customRateCents < talent.rate_floor_cents
+      clientFloorCents &&
+      customRateCents < clientFloorCents
   )
 
   function handleAdd() {
     if (!canClickAdd || added || adding || rateLow) return
-    // Prefer the custom rate if set, else the talent's day rate.
+    // Client-entered amount → talent net (divide by 1.15). The day rate
+    // is already stored as talent net so it needs no conversion.
+    const talentNetCents = customRateCents
+      ? Math.round(customRateCents / RS_MULTIPLIER)
+      : null
     const effectiveRate =
-      customRateCents ?? talent.day_rate_cents ?? null
+      talentNetCents ?? talent.day_rate_cents ?? null
     onAdd(effectiveRate)
   }
 
@@ -1202,12 +1243,16 @@ function TalentCard({
           <p
             style={{ fontSize: 14, fontWeight: 700, color: TEXT_PRIMARY }}
           >
+            {/* Shown client-facing: talent net × RS_MULTIPLIER. */}
             {talent.day_rate_cents
-              ? `$${(talent.day_rate_cents / 100).toLocaleString()}`
+              ? `$${Math.round(
+                  (talent.day_rate_cents * RS_MULTIPLIER) / 100
+                ).toLocaleString()}`
               : '—'}
           </p>
           {talent.rate_floor_cents &&
-            talent.rate_floor_cents < (talent.day_rate_cents ?? 0) && (
+            talent.day_rate_cents &&
+            talent.rate_floor_cents < talent.day_rate_cents && (
               <p
                 style={{
                   fontSize: 9,
@@ -1215,8 +1260,12 @@ function TalentCard({
                   marginTop: 1,
                 }}
               >
-                Floor $
-                {(talent.rate_floor_cents / 100).toLocaleString()}
+                {/* Client-facing floor — the minimum they can offer. */}
+                Min offer $
+                {Math.round(
+                  (talent.rate_floor_cents * RS_MULTIPLIER) / 100
+                ).toLocaleString()}
+                /day
               </p>
             )}
         </div>
@@ -1232,7 +1281,7 @@ function TalentCard({
               marginBottom: 4,
             }}
           >
-            Custom rate / day
+            Offer (what you pay)
           </p>
           <div style={{ position: 'relative' }}>
             <span
@@ -1255,7 +1304,15 @@ function TalentCard({
               step={50}
               value={customRate}
               onChange={(e) => setCustomRate(e.target.value)}
-              placeholder="Optional"
+              // Placeholder shows the client-facing day rate so the user
+              // can gauge what a "normal" offer looks like at a glance.
+              placeholder={
+                talent.day_rate_cents
+                  ? `e.g. ${Math.round(
+                      (talent.day_rate_cents * RS_MULTIPLIER) / 100
+                    )}`
+                  : 'Optional'
+              }
               style={{
                 width: '100%',
                 padding: '7px 8px 7px 20px',
@@ -1291,11 +1348,11 @@ function TalentCard({
             lineHeight: 1.4,
           }}
         >
-          Rate is below talent rate floor
-          {talent.rate_floor_cents
-            ? ` ($${(
-                talent.rate_floor_cents / 100
-              ).toLocaleString()}/day minimum)`
+          Rate is below the minimum offer
+          {clientFloorCents
+            ? ` ($${Math.round(
+                clientFloorCents / 100
+              ).toLocaleString()}/day)`
             : ''}
           . Try a higher amount.
         </p>
