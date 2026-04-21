@@ -1133,9 +1133,14 @@ function TalentCard({
       clientFloorCents &&
       customRateCents < clientFloorCents
   )
+  // A talent without a day rate on file AND no custom rate entered
+  // can't be offered — the talent-side card would display nothing for
+  // Rate. Block the add until one is provided.
+  const rateMissing =
+    customRateCents == null && talent.day_rate_cents == null
 
   function handleAdd() {
-    if (!canClickAdd || added || adding || rateLow) return
+    if (!canClickAdd || added || adding || rateLow || rateMissing) return
     // Client-entered amount → talent net (divide by 1.15). The day rate
     // is already stored as talent net so it needs no conversion.
     const talentNetCents = customRateCents
@@ -1372,9 +1377,15 @@ function TalentCard({
         <button
           type="button"
           onClick={handleAdd}
-          disabled={!canClickAdd || added || adding || rateLow}
+          disabled={
+            !canClickAdd || added || adding || rateLow || rateMissing
+          }
           title={
-            !canClickAdd ? 'Post a job before adding talent' : undefined
+            !canClickAdd
+              ? 'Post a job before adding talent'
+              : rateMissing
+              ? 'Enter a custom rate for this talent'
+              : undefined
           }
           style={{
             flex: 1,
@@ -1382,12 +1393,12 @@ function TalentCard({
             borderRadius: 10,
             background: added
               ? 'rgba(74,222,128,0.2)'
-              : rateLow
+              : rateLow || rateMissing
               ? 'rgba(255,255,255,0.1)'
               : '#fff',
             color: added
               ? '#4ade80'
-              : rateLow
+              : rateLow || rateMissing
               ? TEXT_MUTED
               : BUTTON_PRIMARY,
             border: added
@@ -1398,14 +1409,24 @@ function TalentCard({
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             cursor:
-              !canClickAdd || added || adding || rateLow
+              !canClickAdd || added || adding || rateLow || rateMissing
                 ? 'not-allowed'
                 : 'pointer',
-            opacity: !canClickAdd ? 0.55 : rateLow ? 0.45 : 1,
+            opacity: !canClickAdd
+              ? 0.55
+              : rateLow || rateMissing
+              ? 0.45
+              : 1,
             transition: 'all 120ms ease',
           }}
         >
-          {added ? '✓ Added' : adding ? 'Adding…' : 'Add to job'}
+          {added
+            ? '✓ Added'
+            : adding
+            ? 'Adding…'
+            : rateMissing
+            ? 'Enter a rate'
+            : 'Add to job'}
         </button>
 
         <button

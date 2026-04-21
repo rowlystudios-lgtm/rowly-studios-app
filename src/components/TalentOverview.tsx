@@ -414,13 +414,16 @@ function JobCard({
     shoot_duration_hours: number | null
   }
   const offeredCents = ext.offered_rate_cents ?? null
-  // offered_rate_cents IS the talent net — display directly, no fee maths.
-  // Never fall through to job.day_rate_cents because that would surface
-  // an unconfirmed rate as if it were booked.
+  // offered_rate_cents IS the talent net — display directly, no fee
+  // maths. The flow is direct client → talent: the roster enforces
+  // that an offer always carries a rate, but for legacy rows where
+  // offered_rate_cents might be null we fall back to the job's own
+  // day_rate_cents (also talent net) so the card always surfaces a
+  // concrete number instead of a vague "to be confirmed" caption.
   const rateCents =
     variant === 'confirmed'
-      ? booking.confirmed_rate_cents
-      : offeredCents ?? booking.confirmed_rate_cents ?? null
+      ? booking.confirmed_rate_cents ?? offeredCents ?? null
+      : offeredCents ?? job.day_rate_cents ?? null
   const isShortShoot =
     ext.is_short_shoot === true ||
     (ext.shoot_duration_hours != null && Number(ext.shoot_duration_hours) < 4)
@@ -430,16 +433,14 @@ function JobCard({
       : null
   // Talent-facing label. Short-shoot offers drop the word "Your" since
   // "Flat fee offered" reads better than "Your flat fee offered" above a
-  // FLAT FEE pill. When nothing is on the booking yet we just say "Rate".
+  // FLAT FEE pill.
   const rateLabel = isShortShoot
     ? variant === 'confirmed'
       ? 'Your confirmed rate'
       : 'Flat fee offered'
     : variant === 'confirmed'
     ? 'Your confirmed rate'
-    : offeredCents
-    ? 'Rate offered'
-    : 'Rate'
+    : 'Rate offered'
   // Talent's own day rate, for the contextual "Your full day rate is $X" note.
   const talentDayRateCents = ownDayRateCents ?? null
   const isOffer = variant === 'offer'
@@ -659,17 +660,7 @@ function JobCard({
                   </span>
                 </>
               )
-            ) : (
-              <span
-                style={{
-                  color: TEXT_MUTED,
-                  fontWeight: 400,
-                  fontSize: 13,
-                }}
-              >
-                Rate to be confirmed
-              </span>
-            )}
+            ) : null}
           </p>
           {/* Day-rate comparison — makes it obvious at a glance when the
               client is offering below the talent's standard rate so the
