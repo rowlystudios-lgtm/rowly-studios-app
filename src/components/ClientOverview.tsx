@@ -644,6 +644,11 @@ function ClientJobRow({
       (b) => b.status === 'admin_approved' || b.status === 'confirmed'
     )
 
+  // At least one talent has accepted — gates the call-sheet send.
+  const hasConfirmedCrew = activeBookings.some(
+    (b) => b.status === 'confirmed'
+  )
+
   async function handleDeleteConfirmed() {
     if (deleting) return
     setDeleting(true)
@@ -833,6 +838,17 @@ function ClientJobRow({
           {/* Total budget — single source of truth, client editable. */}
           <ExpandedSection label="Total budget" divider>
             <TotalBudgetCard job={job} onRefresh={onRefresh} />
+          </ExpandedSection>
+
+          {/* Budget vs live spend across all active bookings, with an
+              inline per-booking rate editor for anything not yet
+              confirmed. */}
+          <ExpandedSection label="Budget tracker" divider>
+            <BudgetTracker
+              job={job}
+              activeBookings={activeBookings}
+              onRefresh={onRefresh}
+            />
           </ExpandedSection>
 
           <ExpandedSection label="Full address" divider>
@@ -1072,6 +1088,11 @@ function ClientJobRow({
               </div>
             )}
           </div>
+
+          {/* Call-sheet send — only shown once at least one talent has
+              confirmed. Sits below the actions row so it's the final
+              thing on the expanded card. */}
+          {hasConfirmedCrew && <CallSheetSection job={job} />}
         </div>
       )}
     </article>
@@ -1400,6 +1421,563 @@ function TotalBudgetCard({
           </div>
         </form>
       )}
+    </div>
+  )
+}
+
+/**
+ * Budget vs live crew spend. Sums offered_rate_cents (or confirmed
+ * when set) across all non-declined bookings and shows a progress
+ * bar + remaining/over tally. A per-booking rate editor sits
+ * underneath so the client can adjust in-flight offers without
+ * jumping over to the roster.
+ */
+function BudgetTracker({
+  job,
+  activeBookings,
+  onRefresh,
+}: {
+  job: JobRow
+  activeBookings: JobBooking[]
+  onRefresh: () => void | Promise<void>
+}) {
+  const budgetCents =
+    job.total_budget_cents ?? job.client_budget_cents ?? null
+  const spendCents = activeBookings.reduce((sum, b) => {
+    const rate = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
+    return sum + rate
+  }, 0)
+  const remaining =
+    budgetCents != null ? budgetCents - spendCents : null
+  const overBudget = remaining != null && remaining < 0
+
+  const progressPct =
+    budgetCents && budgetCents > 0
+      ? Math.min((spendCents / budgetCents) * 100, 100)
+      : 0
+  const progressColor = overBudget
+    ? '#ef4444'
+    : budgetCents != null && spendCents === budgetCents
+    ? '#22c55e'
+    : '#d4950a'
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div
+        style={{
+          background: 'rgba(255,255,255,0.06)',
+          border: `1px solid ${
+            overBudget
+              ? 'rgba(252,165,165,0.4)'
+              : 'rgba(170,189,224,0.15)'
+          }`,
+          borderRadius: 10,
+          padding: '12px 14px',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginBottom: 8,
+          }}
+        >
+          <div>
+            <p
+              style={{
+                fontSize: 9,
+                color: TEXT_MUTED,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                marginBottom: 2,
+              }}
+            >
+              Total budget
+            </p>
+            <p
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: TEXT_PRIMARY,
+              }}
+            >
+              {budgetCents != null
+                ? `$${(budgetCents / 100).toLocaleString()}`
+                : '—'}
+            </p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p
+              style={{
+                fontSize: 9,
+                color: TEXT_MUTED,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                marginBottom: 2,
+              }}
+            >
+              Crew spend
+            </p>
+            <p
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: TEXT_PRIMARY,
+              }}
+            >
+              ${(spendCents / 100).toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        {budgetCents != null && budgetCents > 0 && (
+          <div
+            style={{
+              height: 6,
+              background: 'rgba(170,189,224,0.15)',
+              borderRadius: 999,
+              overflow: 'hidden',
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${progressPct}%`,
+                background: progressColor,
+                borderRadius: 999,
+                transition: 'width 400ms ease',
+              }}
+            />
+          </div>
+        )}
+
+        <p
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: overBudget
+              ? '#fca5a5'
+              : remaining === 0
+              ? '#4ade80'
+              : TEXT_MUTED,
+          }}
+        >
+          {remaining === null
+            ? 'Set a budget to track spend'
+            : overBudget
+            ? `⚠ Over budget by $${(
+                Math.abs(remaining) / 100
+              ).toLocaleString()}`
+            : remaining === 0
+            ? '✓ Exactly on budget'
+            : `$${(remaining / 100).toLocaleString()} remaining`}
+        </p>
+      </div>
+
+      {activeBookings.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: TEXT_MUTED,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}
+          >
+            Crew rates
+          </p>
+          {activeBookings.map((b) => (
+            <BookingRateRow key={b.id} booking={b} onRefresh={onRefresh} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Inline rate editor for a single booking. Confirmed bookings show
+ * a "Locked" pill — their rate is fixed. Pending / admin_approved
+ * bookings have an "✎ Edit" button that swaps to an inline $/day
+ * form and writes offered_rate_cents directly.
+ */
+function BookingRateRow({
+  booking,
+  onRefresh,
+}: {
+  booking: JobBooking
+  onRefresh: () => void | Promise<void>
+}) {
+  const { supabase } = useAuth()
+  const p = unwrap(booking.profiles)
+  const tp = unwrap(p?.talent_profiles)
+  const name = fullName(p)
+  const role =
+    tp?.primary_role ??
+    (tp?.department ? DEPARTMENT_LABELS[tp.department as Department] : '')
+
+  const currentCents =
+    booking.confirmed_rate_cents ?? booking.offered_rate_cents ?? null
+
+  const [editing, setEditing] = useState(false)
+  const [dollars, setDollars] = useState(
+    currentCents ? String(Math.round(currentCents / 100)) : ''
+  )
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const isLocked = booking.status === 'confirmed'
+
+  async function saveRate(e: React.FormEvent) {
+    e.preventDefault()
+    const num = parseFloat(dollars)
+    if (!Number.isFinite(num) || num <= 0) {
+      setErr('Enter a valid amount')
+      return
+    }
+    setSaving(true)
+    setErr('')
+    const { error } = await supabase
+      .from('job_bookings')
+      .update({ offered_rate_cents: Math.round(num * 100) })
+      .eq('id', booking.id)
+    setSaving(false)
+    if (error) {
+      setErr(error.message)
+      return
+    }
+    setEditing(false)
+    await onRefresh()
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(170,189,224,0.1)',
+        borderRadius: 8,
+        padding: '8px 12px',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: TEXT_PRIMARY,
+          }}
+        >
+          {name}
+        </p>
+        {role && (
+          <p style={{ fontSize: 10, color: TEXT_MUTED }}>{role}</p>
+        )}
+      </div>
+
+      {editing ? (
+        <form
+          onSubmit={saveRate}
+          style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+        >
+          <div style={{ position: 'relative' }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: '#888',
+                fontSize: 12,
+                pointerEvents: 'none',
+              }}
+            >
+              $
+            </span>
+            <input
+              type="number"
+              autoFocus
+              min={0}
+              step={50}
+              value={dollars}
+              onChange={(e) => setDollars(e.target.value)}
+              style={{
+                width: 80,
+                padding: '5px 6px 5px 18px',
+                borderRadius: 6,
+                border: '1px solid rgba(170,189,224,0.3)',
+                background: 'rgba(255,255,255,0.1)',
+                color: TEXT_PRIMARY,
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: 10, color: TEXT_MUTED }}>/day</span>
+          <button
+            type="submit"
+            disabled={saving}
+            style={{
+              padding: '5px 10px',
+              borderRadius: 6,
+              background: '#fff',
+              color: '#1A3C6B',
+              border: 'none',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: saving ? 'wait' : 'pointer',
+            }}
+          >
+            {saving ? '…' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false)
+              setErr('')
+            }}
+            style={{
+              padding: '5px 8px',
+              borderRadius: 6,
+              background: 'transparent',
+              color: TEXT_MUTED,
+              border: '1px solid rgba(170,189,224,0.2)',
+              fontSize: 11,
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </form>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: TEXT_PRIMARY,
+            }}
+          >
+            {currentCents
+              ? `$${(currentCents / 100).toLocaleString()}/day`
+              : '—'}
+          </p>
+          {!isLocked && (
+            <button
+              type="button"
+              onClick={() => {
+                setDollars(
+                  currentCents
+                    ? String(Math.round(currentCents / 100))
+                    : ''
+                )
+                setEditing(true)
+              }}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 6,
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(170,189,224,0.2)',
+                color: TEXT_MUTED,
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              ✎ Edit
+            </button>
+          )}
+          {isLocked && (
+            <span
+              style={{
+                fontSize: 9,
+                color: 'rgba(74,222,128,0.7)',
+                background: 'rgba(74,222,128,0.1)',
+                border: '1px solid rgba(74,222,128,0.2)',
+                borderRadius: 4,
+                padding: '2px 6px',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Locked
+            </span>
+          )}
+        </div>
+      )}
+      {err && <p style={{ fontSize: 10, color: '#fca5a5' }}>{err}</p>}
+    </div>
+  )
+}
+
+/**
+ * Call-sheet send panel — posts to the send-call-sheet edge function
+ * with the caller's session JWT. Two buttons: one sends only to the
+ * client (them), the other fans out to every confirmed crew member
+ * + the client.
+ */
+function CallSheetSection({ job }: { job: JobRow }) {
+  const { supabase } = useAuth()
+  const [sending, setSending] = useState<'client' | 'crew' | 'all' | null>(
+    null
+  )
+  const [sent, setSent] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+
+  async function generateAndSend(sendTo: 'client' | 'crew' | 'all') {
+    setSending(sendTo)
+    setErr('')
+    setSent(null)
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-call-sheet`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.access_token ?? ''}`,
+          },
+          body: JSON.stringify({ jobId: job.id, sendTo }),
+        }
+      )
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string
+      }
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to send')
+      }
+      const labels: Record<'client' | 'crew' | 'all', string> = {
+        client: 'Call sheet sent to client',
+        crew: 'Call sheet sent to crew',
+        all: 'Call sheet sent to client & crew',
+      }
+      setSent(labels[sendTo])
+      setTimeout(() => setSent(null), 5000)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send call sheet')
+    } finally {
+      setSending(null)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        borderTop: '1px solid rgba(170,189,224,0.1)',
+        paddingTop: 14,
+        marginTop: 14,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: TEXT_MUTED,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        Call sheet
+      </p>
+
+      {sent && (
+        <p
+          style={{
+            fontSize: 12,
+            color: '#4ade80',
+            background: 'rgba(74,222,128,0.1)',
+            border: '1px solid rgba(74,222,128,0.25)',
+            borderRadius: 8,
+            padding: '8px 12px',
+          }}
+        >
+          ✓ {sent}
+        </p>
+      )}
+      {err && (
+        <p
+          style={{
+            fontSize: 12,
+            color: '#fca5a5',
+            background: 'rgba(252,165,165,0.1)',
+            border: '1px solid rgba(252,165,165,0.25)',
+            borderRadius: 8,
+            padding: '8px 12px',
+          }}
+        >
+          {err}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => generateAndSend('client')}
+        disabled={!!sending}
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          borderRadius: 10,
+          background: '#fff',
+          color: '#1A3C6B',
+          border: 'none',
+          fontSize: 13,
+          fontWeight: 700,
+          cursor: sending ? 'wait' : 'pointer',
+          opacity: sending ? 0.6 : 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+        }}
+      >
+        {sending === 'client' ? 'Sending…' : '📋 Send call sheet to me'}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => generateAndSend('all')}
+        disabled={!!sending}
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          borderRadius: 10,
+          background: 'rgba(255,255,255,0.08)',
+          color: TEXT_PRIMARY,
+          border: '1px solid rgba(170,189,224,0.2)',
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: sending ? 'wait' : 'pointer',
+          opacity: sending ? 0.6 : 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+        }}
+      >
+        {sending === 'all' ? 'Sending…' : '📨 Send to everyone on the job'}
+      </button>
+
+      <p
+        style={{
+          fontSize: 10,
+          color: 'rgba(170,189,224,0.5)',
+          textAlign: 'center',
+          lineHeight: 1.4,
+        }}
+      >
+        Sends job details, schedule, location and crew list
+      </p>
     </div>
   )
 }
