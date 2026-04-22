@@ -9,7 +9,7 @@ import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
 
-type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
+type Status = 'checking' | 'idle' | 'submitting' | 'error'
 type AdminStatus = 'idle' | 'submitting' | 'error'
 type Mode = 'signin' | 'signup'
 
@@ -65,17 +65,28 @@ function friendlyError(message: string): string {
 function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const pageMode = searchParams.get('mode') // 'reset' when arriving from /auth/callback
   const supabase = createClient()
   const { refresh } = useAuth()
 
   const [email, setEmail] = useState('')
-  const [resetEmail, setResetEmail] = useState('')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [flashMessage, setFlashMessage] = useState('')
-  const [showReset, setShowReset] = useState(false)
+  const [forgotMessage, setForgotMessage] = useState('')
   const [selectedRole, setSelectedRole] = useState<'talent' | 'client'>('talent')
+
+  // ─── Reset-password box (mode=reset) ──────────────────────────
+  const [resetEmail, setResetEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [retypePassword, setRetypePassword] = useState('')
+  const [showNew, setShowNew] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [resetStatus, setResetStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle')
+  const [resetError, setResetError] = useState('')
 
   const [mode, setMode] = useState<Mode>('signin')
   const [firstName, setFirstName] = useState('')
@@ -97,6 +108,13 @@ function LoginInner() {
   const adminFormRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // Skip the warm-session redirect when we're specifically here to
+    // show the reset-password box — the callback has just set a session,
+    // but the user needs to stay on /login to pick a new password.
+    if (searchParams.get('mode') === 'reset') {
+      setStatus('idle')
+      return
+    }
     async function check() {
       setStatus('checking')
       try {
@@ -137,6 +155,16 @@ function LoginInner() {
       setFlashMessage(msg)
     }
   }, [searchParams])
+
+  // When we arrive in reset mode (after /auth/callback exchanges the
+  // recovery code), pull the current user's email from the session so
+  // the reset box can pre-fill it read-only.
+  useEffect(() => {
+    if (pageMode !== 'reset') return
+    supabase.auth.getSession().then(({ data }) => {
+      setResetEmail(data.session?.user?.email ?? '')
+    })
+  }, [pageMode, supabase])
 
   function resetSignupFields() {
     setFirstName('')
@@ -495,56 +523,63 @@ function LoginInner() {
     router.refresh()
   }
 
-  async function handleAdminReset() {
-    if (!adminEmail || !EMAIL_RE.test(adminEmail)) {
-      setAdminStatus('error')
-      setAdminErrorMsg('Enter your email address above first.')
+  /**
+   * Unified forgot-password request used by both the talent/client form
+   * and the admin form. Sends a recovery link; the inline banner in the
+   * form card confirms it went out.
+   */
+  async function handleForgotPassword(emailToReset: string) {
+    setForgotMessage('')
+    setAdminResetStatus('idle')
+    const addr = (emailToReset ?? '').trim()
+    if (!addr || !EMAIL_RE.test(addr)) {
+      setForgotMessage('Enter your email address first, then tap Forgot password?.')
       return
     }
-    setAdminStatus('idle')
-    setAdminErrorMsg('')
     setAdminResetStatus('sending')
-    const { error } = await supabase.auth.resetPasswordForEmail(adminEmail, {
+    const { error } = await supabase.auth.resetPasswordForEmail(addr, {
       redirectTo: 'https://app.rowlystudios.com/auth/callback?type=recovery',
     })
     if (error) {
       setAdminResetStatus('idle')
-      setAdminStatus('error')
-      setAdminErrorMsg(error.message)
+      setForgotMessage(error.message)
       return
     }
     setAdminResetStatus('sent')
+    setForgotMessage('Reset link sent. Check your email.')
   }
 
-  async function handleReset(e: React.FormEvent) {
-    e.preventDefault()
-    if (!resetEmail) return
-    setStatus('reset-sending')
-    setErrorMsg('')
-
-    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: 'https://app.rowlystudios.com/auth/callback?type=recovery',
-    })
-
-    if (error) {
-      setStatus('error')
-      setErrorMsg(error.message)
-    } else {
-      setStatus('reset-sent')
+  /**
+   * Handler for the inline reset box (mode=reset). Updates the password,
+   * signs the user out of the recovery session, and bounces to /login
+   * with a success banner.
+   */
+  async function handlePasswordReset() {
+    setResetError('')
+    if (newPassword.length < 8) {
+      setResetError('Password must be at least 8 characters.')
+      return
     }
-  }
-
-  function openReset() {
-    setResetEmail(email)
-    setShowReset(true)
-    setErrorMsg('')
-    setStatus('idle')
-  }
-
-  function backToSignIn() {
-    setShowReset(false)
-    setErrorMsg('')
-    setStatus('idle')
+    if (newPassword !== retypePassword) {
+      setResetError('Passwords do not match.')
+      return
+    }
+    setResetStatus('loading')
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
+    if (error) {
+      setResetStatus('error')
+      setResetError(error.message)
+      return
+    }
+    await supabase.auth.signOut()
+    setResetStatus('success')
+    setTimeout(() => {
+      router.replace(
+        '/login?message=Password+updated.+Please+sign+in.'
+      )
+    }, 1000)
   }
 
   function toggleAdminForm() {
@@ -578,7 +613,7 @@ function LoginInner() {
           </span>
         </Link>
 
-        {status !== 'reset-sent' && !showReset && !showWebsiteRedirect && !showAdminForm && (
+        {pageMode !== 'reset' && !showWebsiteRedirect && !showAdminForm && (
           <div className="w-full max-w-sm">
             <p
               style={{
@@ -828,66 +863,21 @@ function LoginInner() {
                 ← Back to sign in
               </button>
             </div>
-          ) : status === 'reset-sent' ? (
-            <div className="text-center space-y-3">
-              <p className="text-sm font-semibold uppercase tracking-wide" style={{ color: '#1A3C6B' }}>
-                Reset link sent
-              </p>
-              <p className="text-[13px] leading-relaxed" style={{ color: '#2E5099' }}>
-                Check your email and follow the link. Sent to <strong>{resetEmail}</strong>.
-              </p>
-              <button
-                onClick={backToSignIn}
-                className="text-[11px] uppercase tracking-wider underline mt-4"
-                style={{ color: '#2E5099' }}
-              >
-                Back to sign in
-              </button>
-            </div>
-          ) : showReset ? (
-            <form onSubmit={handleReset} className="space-y-3">
-              <label className="block text-[11px] uppercase tracking-wider font-semibold" style={{ color: '#1A3C6B' }}>
-                Reset your password
-              </label>
-              <p className="text-[12px] leading-relaxed" style={{ color: '#2E5099' }}>
-                Enter your account email and we&apos;ll send you a link to set a new password.
-              </p>
-
-              <input
-                type="email"
-                required
-                value={resetEmail}
-                onChange={(e) => setResetEmail(e.target.value)}
-                placeholder="you@email.com"
-                className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
-                style={{ borderColor: '#AABDE0' }}
-                disabled={status === 'reset-sending'}
-                autoComplete="email"
-              />
-
-              <button
-                type="submit"
-                disabled={status === 'reset-sending' || !resetEmail}
-                className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
-                style={{ backgroundColor: '#1A3C6B' }}
-              >
-                {status === 'reset-sending' && <Spinner />}
-                {status === 'reset-sending' ? 'Sending…' : 'Send reset link'}
-              </button>
-
-              {status === 'error' && errorMsg && (
-                <p className="text-[11px] text-red-700 pt-1 leading-relaxed">{errorMsg}</p>
-              )}
-
-              <button
-                type="button"
-                onClick={backToSignIn}
-                className="block mx-auto text-[11px] uppercase tracking-wider underline pt-2"
-                style={{ color: '#2E5099' }}
-              >
-                Back to sign in
-              </button>
-            </form>
+          ) : pageMode === 'reset' ? (
+            <ResetBox
+              resetEmail={resetEmail}
+              newPassword={newPassword}
+              setNewPassword={setNewPassword}
+              retypePassword={retypePassword}
+              setRetypePassword={setRetypePassword}
+              showNew={showNew}
+              setShowNew={setShowNew}
+              showConfirm={showConfirm}
+              setShowConfirm={setShowConfirm}
+              resetStatus={resetStatus}
+              resetError={resetError}
+              handlePasswordReset={handlePasswordReset}
+            />
           ) : (
             <>
               {!showAdminForm && (<>
@@ -961,13 +951,28 @@ function LoginInner() {
                   <div className="flex justify-end">
                     <button
                       type="button"
-                      onClick={openReset}
+                      onClick={() => handleForgotPassword(email)}
+                      disabled={adminResetStatus === 'sending'}
                       className="text-[11px] underline"
                       style={{ color: '#2E5099' }}
                     >
-                      Forgot password?
+                      {adminResetStatus === 'sending'
+                        ? 'Sending…'
+                        : 'Forgot password?'}
                     </button>
                   </div>
+
+                  {forgotMessage && (
+                    <p
+                      className="text-[12px] leading-relaxed"
+                      style={{
+                        color:
+                          adminResetStatus === 'sent' ? '#16A34A' : '#8A1C1C',
+                      }}
+                    >
+                      {forgotMessage}
+                    </p>
+                  )}
 
                   <button
                     type="submit"
@@ -1225,7 +1230,7 @@ function LoginInner() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <button
                           type="button"
-                          onClick={handleAdminReset}
+                          onClick={() => handleForgotPassword(adminEmail)}
                           disabled={adminResetStatus === 'sending'}
                           style={{
                             background: 'transparent',
@@ -1242,15 +1247,18 @@ function LoginInner() {
                             : 'Forgot password?'}
                         </button>
                       </div>
-                      {adminResetStatus === 'sent' && (
+                      {forgotMessage && (
                         <p
                           style={{
                             fontSize: 12,
-                            color: '#A7E2C1',
+                            color:
+                              adminResetStatus === 'sent'
+                                ? '#A7E2C1'
+                                : '#fca5a5',
                             lineHeight: 1.4,
                           }}
                         >
-                          Reset link sent. Check your email and follow the link.
+                          {forgotMessage}
                         </p>
                       )}
                       <button
@@ -1329,5 +1337,212 @@ function LoginInner() {
         </Link>
       </main>
     </>
+  )
+}
+
+type ResetBoxProps = {
+  resetEmail: string
+  newPassword: string
+  setNewPassword: (v: string) => void
+  retypePassword: string
+  setRetypePassword: (v: string) => void
+  showNew: boolean
+  setShowNew: React.Dispatch<React.SetStateAction<boolean>>
+  showConfirm: boolean
+  setShowConfirm: React.Dispatch<React.SetStateAction<boolean>>
+  resetStatus: 'idle' | 'loading' | 'success' | 'error'
+  resetError: string
+  handlePasswordReset: () => void | Promise<void>
+}
+
+function ResetBox({
+  resetEmail,
+  newPassword,
+  setNewPassword,
+  retypePassword,
+  setRetypePassword,
+  showNew,
+  setShowNew,
+  showConfirm,
+  setShowConfirm,
+  resetStatus,
+  resetError,
+  handlePasswordReset,
+}: ResetBoxProps) {
+  if (resetStatus === 'success') {
+    return (
+      <div
+        style={{
+          background: '#F0FDF4',
+          border: '1px solid #BBF7D0',
+          borderRadius: 8,
+          padding: '14px 16px',
+          color: '#16A34A',
+          fontSize: 13,
+          textAlign: 'center',
+        }}
+      >
+        Password updated. Redirecting…
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p
+        className="text-sm font-semibold uppercase tracking-wide"
+        style={{ color: '#1A3C6B' }}
+      >
+        Reset your password
+      </p>
+      <p
+        className="text-[12px] leading-relaxed"
+        style={{ color: '#2E5099' }}
+      >
+        Enter your new password below.
+      </p>
+
+      {/* EMAIL (read-only) */}
+      <div>
+        <label
+          className="block text-[10px] uppercase tracking-wider font-semibold mb-1"
+          style={{ color: '#9CA3AF', letterSpacing: '0.12em' }}
+        >
+          Email
+        </label>
+        <input
+          type="email"
+          value={resetEmail}
+          readOnly
+          className="w-full px-3 py-3 text-[14px] rounded-[10px] border"
+          style={{
+            borderColor: '#E5E7EB',
+            background: '#F3F4F6',
+            color: '#6B7280',
+            cursor: 'default',
+          }}
+        />
+      </div>
+
+      {/* NEW PASSWORD */}
+      <div>
+        <label
+          className="block text-[10px] uppercase tracking-wider font-semibold mb-1"
+          style={{ color: '#9CA3AF', letterSpacing: '0.12em' }}
+        >
+          New password
+        </label>
+        <div style={{ position: 'relative' }}>
+          <input
+            type={showNew ? 'text' : 'password'}
+            placeholder="At least 8 characters"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoFocus
+            className="w-full rounded-[10px] border focus:outline-none"
+            style={{
+              padding: '12px 44px 12px 14px',
+              borderColor: '#D1D5DB',
+              background: '#fff',
+              color: '#1A2030',
+              fontSize: 14,
+              boxSizing: 'border-box',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setShowNew((v) => !v)}
+            aria-label={showNew ? 'Hide password' : 'Show password'}
+            style={{
+              position: 'absolute',
+              right: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#9CA3AF',
+              fontSize: 14,
+              padding: 0,
+            }}
+          >
+            {showNew ? '🙈' : '👁'}
+          </button>
+        </div>
+      </div>
+
+      {/* RETYPE PASSWORD */}
+      <div>
+        <label
+          className="block text-[10px] uppercase tracking-wider font-semibold mb-1"
+          style={{ color: '#9CA3AF', letterSpacing: '0.12em' }}
+        >
+          Retype password
+        </label>
+        <div style={{ position: 'relative' }}>
+          <input
+            type={showConfirm ? 'text' : 'password'}
+            placeholder="Confirm new password"
+            value={retypePassword}
+            onChange={(e) => setRetypePassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                handlePasswordReset()
+              }
+            }}
+            className="w-full rounded-[10px] border focus:outline-none"
+            style={{
+              padding: '12px 44px 12px 14px',
+              borderColor: '#D1D5DB',
+              background: '#fff',
+              color: '#1A2030',
+              fontSize: 14,
+              boxSizing: 'border-box',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirm((v) => !v)}
+            aria-label={showConfirm ? 'Hide password' : 'Show password'}
+            style={{
+              position: 'absolute',
+              right: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#9CA3AF',
+              fontSize: 14,
+              padding: 0,
+            }}
+          >
+            {showConfirm ? '🙈' : '👁'}
+          </button>
+        </div>
+      </div>
+
+      {resetError && (
+        <p
+          className="text-[12px] leading-relaxed"
+          style={{ color: '#8A1C1C' }}
+        >
+          {resetError}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => handlePasswordReset()}
+        disabled={
+          resetStatus === 'loading' || !newPassword || !retypePassword
+        }
+        className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50"
+        style={{ backgroundColor: '#1A3C6B', letterSpacing: '0.1em' }}
+      >
+        {resetStatus === 'loading' ? 'UPDATING…' : 'SET PASSWORD'}
+      </button>
+    </div>
   )
 }

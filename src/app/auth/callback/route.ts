@@ -3,48 +3,55 @@ import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
-  const type = searchParams.get('type')
+  const requestUrl = new URL(request.url)
+  const code = requestUrl.searchParams.get('code')
+  const type = requestUrl.searchParams.get('type')
+  const origin = requestUrl.origin
 
-  if (code) {
-    const cookieStore = cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
-          },
-          setAll(
-            cookiesToSet: {
-              name: string
-              value: string
-              options?: CookieOptions
-            }[]
-          ) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          },
-        },
-      }
+  if (!code) {
+    return NextResponse.redirect(
+      `${origin}/login?message=Reset+link+expired.+Please+try+again.`
     )
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      if (type === 'recovery') {
-        return NextResponse.redirect(`${origin}/auth/reset-password`)
-      }
-      if (type === 'invite') {
-        return NextResponse.redirect(
-          `${origin}/auth/reset-password?mode=invite`
-        )
-      }
-      return NextResponse.redirect(`${origin}/app`)
-    }
   }
-  return NextResponse.redirect(
-    `${origin}/login?message=Link+expired.+Please+request+a+new+one.`
+
+  const cookieStore = cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(
+          cookiesToSet: {
+            name: string
+            value: string
+            options?: CookieOptions
+          }[]
+        ) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options)
+          })
+        },
+      },
+    }
   )
+
+  const { error } = await supabase.auth.exchangeCodeForSession(code)
+
+  if (error) {
+    console.error('Auth callback error:', error.message)
+    return NextResponse.redirect(
+      `${origin}/login?message=Reset+link+expired.+Please+request+a+new+one.`
+    )
+  }
+
+  // Recovery = password reset; invite = new user setting first password.
+  if (type === 'recovery' || type === 'invite') {
+    return NextResponse.redirect(`${origin}/login?mode=reset`)
+  }
+
+  // Magic link or OAuth — straight to app.
+  return NextResponse.redirect(`${origin}/app`)
 }
