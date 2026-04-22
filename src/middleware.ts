@@ -11,6 +11,16 @@ import { NextResponse, type NextRequest } from 'next/server'
  * as non-admin to fail safe.
  */
 export async function middleware(request: NextRequest) {
+  // Auth route handlers (/auth/callback, /auth/signout, …) must run
+  // without middleware touching cookies or calling getUser. The callback
+  // consumes a single-use recovery/invite code via exchangeCodeForSession;
+  // if the middleware touches the session first the response cookies
+  // can race the handler's Set-Cookie headers and the user ends up on
+  // /login?message=Reset+link+expired…
+  if (request.nextUrl.pathname.startsWith('/auth/')) {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   })
