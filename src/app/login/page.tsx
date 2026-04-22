@@ -7,6 +7,7 @@ import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
+import { adminSignIn } from './actions'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'error'
 type AdminStatus = 'idle' | 'submitting' | 'error'
@@ -460,57 +461,15 @@ function LoginInner() {
     setAdminStatus('submitting')
     setAdminErrorMsg('')
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: adminEmail,
-      password: adminPassword,
-    })
+    const result = await adminSignIn(adminEmail, adminPassword)
 
-    if (authError) {
+    if (result?.error) {
       setAdminStatus('error')
-      const m = authError.message.toLowerCase()
-      if (
-        m.includes('invalid') ||
-        m.includes('credential') ||
-        m.includes('password') ||
-        m.includes('user not found') ||
-        m.includes('no user found')
-      ) {
-        setAdminErrorMsg('Incorrect email or password')
-      } else {
-        setAdminErrorMsg(friendlyError(authError.message))
-      }
-      return
+      setAdminErrorMsg(result.error)
     }
-
-    // Best-effort role guard: if we can confirm the account is not
-    // admin, bail out cleanly. If this query fails or times out we
-    // do NOT block the redirect — the server-side middleware is the
-    // authoritative gate for /admin and will reject non-admins there.
-    try {
-      const userId = authData.user?.id
-      if (userId) {
-        const { data: profileRow } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', userId)
-          .maybeSingle()
-        if (profileRow && profileRow.role !== 'admin') {
-          await supabase.auth.signOut()
-          setAdminStatus('error')
-          setAdminErrorMsg("This account doesn't have admin access.")
-          return
-        }
-      }
-    } catch (err) {
-      console.warn('[admin-login] role check failed, letting middleware gate /admin:', err)
-    }
-
-    // Hard navigation — guarantees the auth cookie just written by
-    // signInWithPassword is included in the /admin request. router.push
-    // can race with cookie propagation and leave middleware seeing a
-    // null user, which sends the visitor back to /login.
-    setAdminPassword('')
-    window.location.assign('/admin')
+    // If no error, the server action called redirect('/admin') — Next
+    // returns a 303 with Set-Cookie for the session, and the browser
+    // follows it. No client-side navigation needed.
   }
 
   /**
