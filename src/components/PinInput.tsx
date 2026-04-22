@@ -95,9 +95,26 @@ export function PinInput({
     if (e.key === 'ArrowLeft' && index > 0) {
       refs.current[index - 1]?.focus()
       e.preventDefault()
+      return
     }
     if (e.key === 'ArrowRight' && index < LENGTH - 1) {
       refs.current[index + 1]?.focus()
+      e.preventDefault()
+      return
+    }
+    // Digit: write manually and advance focus. preventDefault so onChange
+    // doesn't double-fire or get blocked by maxLength when the box is
+    // already filled and the user is retyping.
+    if (/^\d$/.test(e.key)) {
+      e.preventDefault()
+      writeAt(index, e.key)
+      if (index < LENGTH - 1) refs.current[index + 1]?.focus()
+      return
+    }
+    // Block any other single-character key (letters, symbols) so non-digits
+    // can never land in the field. Keep modifier combos (e.g. Cmd+V paste)
+    // working.
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
     }
   }
@@ -144,12 +161,14 @@ export function PinInput({
           }}
           type="text"
           inputMode="numeric"
+          pattern="[0-9]*"
           autoComplete="one-time-code"
           maxLength={1}
           value={d}
           onChange={(e) => handleChange(i, e.target.value)}
           onKeyDown={(e) => handleKeyDown(i, e)}
           onPaste={(e) => handlePaste(i, e)}
+          onClick={(e) => (e.target as HTMLInputElement).focus()}
           onFocus={(e) => {
             ;(e.currentTarget as HTMLInputElement).select()
             ;(e.currentTarget as HTMLInputElement).style.borderColor = '#1A3C6B'

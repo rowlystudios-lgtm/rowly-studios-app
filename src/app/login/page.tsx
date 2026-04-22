@@ -525,13 +525,14 @@ function LoginInner() {
   }
 
   async function verifyPin(fullPin: string) {
-    if (fullPin.length !== PIN_LENGTH) return
+    const trimmedPin = (fullPin ?? '').trim()
+    if (trimmedPin.length !== PIN_LENGTH) return
     if (pinStatus === 'submitting') return
 
     setPinStatus('submitting')
     setPinErrorMsg('')
 
-    const { data: valid, error } = await supabase.rpc('verify_admin_pin', { pin: fullPin })
+    const { data: valid, error } = await supabase.rpc('verify_admin_pin', { pin: trimmedPin })
 
     if (error) {
       setPinStatus('error')
@@ -631,8 +632,7 @@ function LoginInner() {
         setAdminStatus('idle')
         setAdminErrorMsg('')
       } else {
-        // Opening — pre-fill a default admin email if none has been entered yet.
-        setAdminEmail((cur) => cur || 'rowlystudios@gmail.com')
+        // Opening — focus the (blank) email input. No pre-fill.
         setTimeout(() => {
           adminFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
           adminEmailRef.current?.focus()
