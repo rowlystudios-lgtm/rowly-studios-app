@@ -1,219 +1,322 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
-import { RSLogo } from '@/components/RSLogo'
-import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
 
-type Status = 'idle' | 'submitting' | 'error' | 'success'
-
-const MIN_LENGTH = 8
-
-function isStrongEnough(pw: string): boolean {
-  if (pw.length < MIN_LENGTH) return false
-  const hasLetter = /[a-zA-Z]/.test(pw)
-  const hasNumber = /\d/.test(pw)
-  return hasLetter && hasNumber
-}
-
 export default function ResetPasswordPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="min-h-[100dvh] flex items-center justify-center rs-bg-fusion">
-          <RSLogo size={48} />
-        </main>
-      }
-    >
-      <ResetPasswordInner />
-    </Suspense>
-  )
-}
-
-function ResetPasswordInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const mode = searchParams.get('mode')
   const supabase = createClient()
-
-  const invited = searchParams.get('invited') === 'true'
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [status, setStatus] = useState<Status>('idle')
+  const [showPass, setShowPass] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [status, setStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle')
   const [errorMsg, setErrorMsg] = useState('')
-  const [sessionChecked, setSessionChecked] = useState(false)
-  const [hasSession, setHasSession] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
 
-  // The auth/callback route exchanged the recovery/invite code for a
-  // session before landing here. If no session exists, the link was
-  // stale or exchanged already — send the user back to /login.
   useEffect(() => {
-    let cancelled = false
-    async function check() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (cancelled) return
-      setHasSession(!!session)
-      setSessionChecked(true)
-    }
-    check()
-    return () => {
-      cancelled = true
+    // Handle hash-based tokens (implicit flow). Supabase puts access_token
+    // in the URL hash on some flows; getSession() picks that up.
+    const hash = typeof window !== 'undefined' ? window.location.hash : ''
+    if (hash && hash.includes('access_token')) {
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) setSessionReady(true)
+        else
+          setErrorMsg(
+            'Link expired or already used. Please request a new one.'
+          )
+      })
+    } else {
+      // Code flow — session was set by the /auth/callback route already.
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) setSessionReady(true)
+        else
+          setErrorMsg(
+            'Link expired or already used. Please request a new one.'
+          )
+      })
     }
   }, [supabase])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit() {
     setErrorMsg('')
-
-    if (!isStrongEnough(password)) {
-      setStatus('error')
-      setErrorMsg(
-        'Use at least 8 characters with a mix of letters and numbers.'
-      )
+    if (password.length < 8) {
+      setErrorMsg('Password must be at least 8 characters.')
       return
     }
     if (password !== confirm) {
-      setStatus('error')
       setErrorMsg('Passwords do not match.')
       return
     }
 
-    setStatus('submitting')
-    const { error: updateErr } = await supabase.auth.updateUser({
-      password,
-    })
+    setStatus('loading')
 
-    if (updateErr) {
+    const { error } = await supabase.auth.updateUser({ password })
+
+    if (error) {
       setStatus('error')
-      setErrorMsg(updateErr.message)
+      setErrorMsg(error.message)
       return
     }
 
-    // Route based on role. If the session evaporated between submit and
-    // role lookup, fall back to /app — middleware will gate accordingly.
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    setStatus('success')
 
-    let target = '/app'
-    if (user) {
+    // Redirect based on role.
+    setTimeout(async () => {
       const { data: profile } = await supabase
         .from('profiles')
         .select('role')
-        .eq('id', user.id)
-        .maybeSingle()
-      if (profile?.role === 'admin') target = '/admin'
-    }
-    setStatus('success')
-    router.push(target)
-    router.refresh()
+        .single()
+
+      if (profile?.role === 'admin') router.push('/admin')
+      else router.push('/app')
+    }, 1500)
   }
 
-  const title = invited
-    ? 'Welcome — set your password'
-    : 'Set your password'
+  const isInvite = mode === 'invite'
 
   return (
-    <main className="min-h-[100dvh] flex flex-col items-center px-6 py-12 rs-bg-fusion">
-      <Link href="/" className="flex flex-col items-center gap-4 mb-8">
-        <RSLogo size={64} />
-        <span className="text-xs tracking-[2px] text-rs-cream uppercase font-semibold">
-          Rowly Studios
-        </span>
-      </Link>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #1E3A6B 0%, #0F1B2E 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'Montserrat, sans-serif',
+        padding: '24px',
+      }}
+    >
+      {/* Logo */}
+      <div
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          border: '2px solid rgba(255,255,255,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 12,
+          color: '#fff',
+          fontSize: 18,
+          fontWeight: 700,
+          letterSpacing: 1,
+        }}
+      >
+        RS
+      </div>
+      <p
+        style={{
+          color: 'rgba(255,255,255,0.7)',
+          fontSize: 11,
+          letterSpacing: '0.2em',
+          marginBottom: 32,
+        }}
+      >
+        ROWLY STUDIOS
+      </p>
 
-      <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
-        <h1
-          className="text-[20px] font-bold"
-          style={{ color: '#1A3C6B', lineHeight: 1.2, marginBottom: 6 }}
+      {/* Card */}
+      <div
+        style={{
+          background: '#FAF8F4',
+          borderRadius: 16,
+          padding: '36px 32px',
+          width: '100%',
+          maxWidth: 420,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.3)',
+        }}
+      >
+        <h2
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            color: '#0F1B2E',
+            marginBottom: 6,
+            textAlign: 'center',
+          }}
         >
-          {title}
-        </h1>
+          {isInvite ? 'Welcome — set your password' : 'Set a new password'}
+        </h2>
         <p
-          className="text-[13px] leading-relaxed"
-          style={{ color: '#2E5099', marginBottom: 18 }}
+          style={{
+            fontSize: 13,
+            color: '#6B7280',
+            textAlign: 'center',
+            marginBottom: 28,
+          }}
         >
-          Choose a strong password for your account.
+          {isInvite
+            ? 'Create a password to access your Rowly Studios account.'
+            : 'Choose a strong password for your account.'}
         </p>
 
-        {!sessionChecked ? (
+        {!sessionReady && !errorMsg && (
+          <p style={{ textAlign: 'center', color: '#6B7280', fontSize: 14 }}>
+            Verifying link…
+          </p>
+        )}
+
+        {errorMsg && (
           <div
-            style={{ textAlign: 'center', padding: '16px 0', color: '#2E5099' }}
+            style={{
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+              borderRadius: 8,
+              padding: '12px 16px',
+              color: '#DC2626',
+              fontSize: 13,
+              marginBottom: 16,
+              textAlign: 'center',
+            }}
           >
-            <span className="text-[13px]">Loading…</span>
+            {errorMsg}
           </div>
-        ) : !hasSession ? (
-          <div className="space-y-3">
-            <p className="text-[13px] leading-relaxed" style={{ color: '#8A1C1C' }}>
-              Your reset link has expired or was already used. Request a new
-              one from the sign-in page.
-            </p>
-            <Link
-              href="/login"
-              className="block w-full text-center rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white"
-              style={{ backgroundColor: '#1A3C6B' }}
-            >
-              Back to sign in
-            </Link>
+        )}
+
+        {status === 'success' && (
+          <div
+            style={{
+              background: '#F0FDF4',
+              border: '1px solid #BBF7D0',
+              borderRadius: 8,
+              padding: '12px 16px',
+              color: '#16A34A',
+              fontSize: 13,
+              textAlign: 'center',
+            }}
+          >
+            Password updated. Redirecting you now…
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <PasswordInput
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="New password"
-              disabled={status === 'submitting'}
-              autoComplete="new-password"
-            />
-            <PasswordInput
-              required
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Confirm new password"
-              disabled={status === 'submitting'}
-              autoComplete="new-password"
-            />
+        )}
+
+        {sessionReady && status !== 'success' && (
+          <>
+            {/* Password */}
+            <div style={{ position: 'relative', marginBottom: 12 }}>
+              <input
+                type={showPass ? 'text' : 'password'}
+                placeholder="New password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '12px 44px 12px 14px',
+                  borderRadius: 8,
+                  border: '1.5px solid #D1D5DB',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  background: '#fff',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass((v) => !v)}
+                aria-label={showPass ? 'Hide password' : 'Show password'}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9CA3AF',
+                  padding: 0,
+                  fontSize: 16,
+                }}
+              >
+                {showPass ? '🙈' : '👁'}
+              </button>
+            </div>
+
+            {/* Confirm */}
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                type={showConfirm ? 'text' : 'password'}
+                placeholder="Confirm password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                style={{
+                  width: '100%',
+                  padding: '12px 44px 12px 14px',
+                  borderRadius: 8,
+                  border: '1.5px solid #D1D5DB',
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  background: '#fff',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm((v) => !v)}
+                aria-label={
+                  showConfirm ? 'Hide password' : 'Show password'
+                }
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9CA3AF',
+                  padding: 0,
+                  fontSize: 16,
+                }}
+              >
+                {showConfirm ? '🙈' : '👁'}
+              </button>
+            </div>
+
             <p
-              className="text-[11px]"
-              style={{ color: '#2E5099', opacity: 0.75, lineHeight: 1.5 }}
+              style={{
+                fontSize: 11,
+                color: '#9CA3AF',
+                marginBottom: 20,
+                paddingLeft: 2,
+              }}
             >
-              At least 8 characters with a mix of letters and numbers.
+              At least 8 characters
             </p>
 
             <button
-              type="submit"
-              disabled={
-                status === 'submitting' || !password || !confirm
-              }
-              className="w-full rounded-[10px] py-3 text-[12px] uppercase tracking-wider font-semibold text-white disabled:opacity-50"
-              style={{ backgroundColor: '#1A3C6B' }}
+              onClick={handleSubmit}
+              disabled={status === 'loading' || !password || !confirm}
+              style={{
+                width: '100%',
+                padding: '13px',
+                background:
+                  status === 'loading' ? '#9CA3AF' : '#1E3A6B',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                cursor: status === 'loading' ? 'wait' : 'pointer',
+                fontFamily: 'inherit',
+              }}
             >
-              {status === 'submitting' ? 'Saving…' : 'Set password'}
+              {status === 'loading' ? 'UPDATING…' : 'SET PASSWORD'}
             </button>
-
-            {status === 'error' && errorMsg && (
-              <p
-                className="text-[12px] leading-relaxed pt-1"
-                style={{ color: '#8A1C1C' }}
-              >
-                {errorMsg}
-              </p>
-            )}
-          </form>
+          </>
         )}
       </div>
-
-      <Link
-        href="/login"
-        className="text-[11px] uppercase tracking-wider text-rs-cream/60 mt-8"
-      >
-        ← Back to sign in
-      </Link>
-    </main>
+    </div>
   )
 }

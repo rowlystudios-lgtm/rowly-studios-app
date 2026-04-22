@@ -500,7 +500,7 @@ function LoginInner() {
     setAdminErrorMsg('')
     setAdminResetStatus('sending')
     const { error } = await supabase.auth.resetPasswordForEmail(adminEmail, {
-      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+      redirectTo: 'https://app.rowlystudios.com/auth/callback?type=recovery',
     })
     if (error) {
       setAdminResetStatus('idle')
@@ -518,7 +518,7 @@ function LoginInner() {
     setErrorMsg('')
 
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+      redirectTo: 'https://app.rowlystudios.com/auth/callback?type=recovery',
     })
 
     if (error) {
