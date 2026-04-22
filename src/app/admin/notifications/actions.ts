@@ -75,3 +75,30 @@ export async function deleteNotification(formData: FormData) {
   await supabase.from('notifications').delete().eq('id', id)
   revalidatePath('/admin/notifications')
 }
+
+/**
+ * Admin marks a clearable notification as handled. Sets cleared_at + cleared_by.
+ * Removes it from the to-do queue (it stays visible in the activity log).
+ */
+export async function clearNotification(formData: FormData) {
+  const { supabase, user } = await requireAdmin()
+  const id = ((formData.get('id') as string) ?? '').trim()
+  if (!id) return
+  await supabase
+    .from('notifications')
+    .update({ cleared_at: new Date().toISOString(), cleared_by: user.id })
+    .eq('id', id)
+    .is('cleared_at', null)
+  revalidatePath('/admin/notifications')
+}
+
+/** Clear every clearable notification in one shot. */
+export async function clearAllNotifications() {
+  const { supabase, user } = await requireAdmin()
+  await supabase
+    .from('notifications')
+    .update({ cleared_at: new Date().toISOString(), cleared_by: user.id })
+    .eq('clearable', true)
+    .is('cleared_at', null)
+  revalidatePath('/admin/notifications')
+}

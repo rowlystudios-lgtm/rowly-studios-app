@@ -35,8 +35,39 @@ export async function updateJobStatus(formData: FormData) {
   if (next === 'wrapped') patch.wrapped_at = nowIso
 
   await supabase.from('jobs').update(patch).eq('id', jobId)
+
+  // v1.2: wrap-to-client trigger. Fire once the row is updated so we
+  // don't email the client on an intermediate state change. Errors are
+  // swallowed — the status change itself is the primary operation.
+  if (next === 'wrapped') {
+    try {
+      await dispatchJobWrappedToClient(jobId)
+    } catch {
+      // non-fatal
+    }
+  }
+
   revalidatePath(`/admin/jobs/${jobId}`)
   revalidatePath('/admin/jobs')
+}
+
+/**
+ * Post to the internal /api/notifications dispatcher so the wrap email
+ * pipeline lives in one place. Falls back to a best-effort direct Drive
+ * insert path if the fetch fails for any reason.
+ */
+async function dispatchJobWrappedToClient(jobId: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const secret = process.env.CRON_SECRET
+  if (!baseUrl || !secret) return
+  await fetch(`${baseUrl}/api/notifications`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-cron-secret': secret,
+    },
+    body: JSON.stringify({ action: 'job-wrapped-to-client', jobId }),
+  })
 }
 
 /**

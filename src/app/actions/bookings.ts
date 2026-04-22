@@ -448,6 +448,35 @@ async function blockCalendarAndResolveConflicts(args: {
     await svc.from('notifications').insert(clientRows)
   }
 
+  // v1.2: fire per-client booking-conflict emails via the internal
+  // notifications dispatcher. Best-effort — the in-app insert above is
+  // the authoritative record; email is a courtesy layer.
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const cronSecret = process.env.CRON_SECRET
+  if (baseUrl && cronSecret) {
+    for (const [clientId, jobs] of clientJobs) {
+      for (const j of jobs) {
+        try {
+          await fetch(`${baseUrl}/api/notifications`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cron-secret': cronSecret,
+            },
+            body: JSON.stringify({
+              action: 'booking-conflict',
+              releasedJobId: j.jobId,
+              affectedClientId: clientId,
+              talentName,
+            }),
+          })
+        } catch {
+          // non-fatal
+        }
+      }
+    }
+  }
+
   // 7. Notify all admins so ops can re-crew the released jobs.
   const { data: admins } = await svc
     .from('profiles')
