@@ -795,8 +795,9 @@ function ActiveCard({
   onWrap: () => void | Promise<void>
 }) {
   const [wrapping, setWrapping] = useState(false)
+  const countable = bookings.filter((b) => b.status !== 'unavailable')
   const allConfirmed =
-    bookings.length > 0 && bookings.every((b) => b.status === 'confirmed')
+    countable.length > 0 && countable.every((b) => b.status === 'confirmed')
 
   async function doWrap() {
     if (wrapping) return

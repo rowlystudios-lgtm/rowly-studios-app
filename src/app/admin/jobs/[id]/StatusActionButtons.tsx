@@ -47,7 +47,16 @@ export function StatusActionButtons({ jobId, currentStatus }: Props) {
   if (actions.length === 0) return null
 
   return (
-    <div className="flex flex-wrap gap-2 mt-4">
+    <div
+      className="flex gap-2 mt-3 -mx-5 px-5"
+      style={{
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
+      }}
+    >
+      <style>{`div::-webkit-scrollbar { display: none; }`}</style>
       {actions.map((a) => (
         <StatusButton key={a.next} jobId={jobId} action={a} />
       ))}
@@ -60,7 +69,7 @@ function StatusButton({ jobId, action }: { jobId: string; action: Action }) {
   const [busy, setBusy] = useState(false)
 
   const base =
-    'rounded-lg transition-colors text-[12px] font-semibold tracking-wider uppercase whitespace-nowrap'
+    'rounded-full transition-colors text-[12px] font-semibold tracking-wider uppercase whitespace-nowrap'
   const padding = { padding: '8px 12px', letterSpacing: '0.04em' } as const
 
   let style: React.CSSProperties = {

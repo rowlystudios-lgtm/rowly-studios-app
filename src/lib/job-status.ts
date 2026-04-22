@@ -12,6 +12,7 @@ export type BookingStatus =
   | 'confirmed'
   | 'declined'
   | 'cancelled'
+  | 'unavailable'
 
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   draft: 'Draft',
@@ -30,12 +31,20 @@ export const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   confirmed: 'Confirmed',
   declined: 'Declined',
   cancelled: 'Cancelled',
+  unavailable: 'Unavailable — booked elsewhere',
 }
 
 type Swatch = { bg: string; color: string; border?: string }
 
 function swatch(
-  kind: 'submitted' | 'review' | 'awaiting' | 'confirmed' | 'wrapped' | 'cancelled'
+  kind:
+    | 'submitted'
+    | 'review'
+    | 'awaiting'
+    | 'confirmed'
+    | 'wrapped'
+    | 'cancelled'
+    | 'unavailable'
 ): Swatch {
   switch (kind) {
     case 'submitted':
@@ -74,6 +83,12 @@ function swatch(
         color: '#f87171',
         border: 'rgba(239,68,68,0.3)',
       }
+    case 'unavailable':
+      return {
+        bg: 'rgba(120,130,140,0.18)',
+        color: '#9AA3AE',
+        border: 'rgba(120,130,140,0.3)',
+      }
   }
 }
 
@@ -106,5 +121,7 @@ export function bookingStatusSwatch(status: BookingStatus): Swatch {
       return swatch('cancelled')
     case 'cancelled':
       return swatch('wrapped')
+    case 'unavailable':
+      return swatch('unavailable')
   }
 }

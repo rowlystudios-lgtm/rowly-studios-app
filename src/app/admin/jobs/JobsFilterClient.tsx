@@ -3,30 +3,29 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const FILTERS = [
+export type JobFilterKey = 'all' | 'active' | 'action' | 'wrapped'
+
+const FILTERS: { key: JobFilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'upcoming', label: 'Upcoming' },
-  { key: 'crewing', label: 'Crewing' },
-  { key: 'submitted', label: 'Submitted' },
-  { key: 'confirmed', label: 'Confirmed' },
+  { key: 'active', label: 'Active' },
+  { key: 'action', label: 'Action needed' },
   { key: 'wrapped', label: 'Wrapped' },
-  { key: 'cancelled', label: 'Cancelled' },
 ]
 
-export function JobsFilterClient({ current }: { current: string }) {
+export function JobsFilterClient({
+  current,
+  actionCount,
+}: {
+  current: JobFilterKey
+  actionCount: number
+}) {
   const pathname = usePathname()
   return (
     <div
-      className="flex gap-1"
-      style={{
-        overflowX: 'auto',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
-      }}
+      className="inline-flex rounded-full bg-[#0F1B2E] border border-white/5 p-1"
+      style={{ width: '100%', maxWidth: 520 }}
+      role="tablist"
     >
-      <style>{`
-        div::-webkit-scrollbar { display: none; }
-      `}</style>
       {FILTERS.map((f) => {
         const active = current === f.key
         const href = f.key === 'all' ? pathname : `${pathname}?status=${f.key}`
@@ -34,21 +33,54 @@ export function JobsFilterClient({ current }: { current: string }) {
           <Link
             key={f.key}
             href={href}
+            role="tab"
+            aria-selected={active}
             className={
               active
-                ? 'text-white border-b-2 border-[#F0A500]'
-                : 'text-[#7A90AA] border-b-2 border-transparent hover:text-white/80'
+                ? 'text-white bg-[#1E3A6B]'
+                : 'text-[#7A90AA] hover:text-white/80'
             }
             style={{
-              padding: '8px 12px',
-              fontSize: 13,
+              flex: 1,
+              textAlign: 'center',
+              padding: '10px 12px',
+              fontSize: 12,
               fontWeight: 600,
               letterSpacing: '0.02em',
               whiteSpace: 'nowrap',
               textDecoration: 'none',
+              borderRadius: 999,
+              transition: 'background-color 0.15s, color 0.15s',
+              minHeight: 40,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
             }}
           >
-            {f.label}
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {f.label}
+            </span>
+            {f.key === 'action' && actionCount > 0 && (
+              <span
+                className="inline-flex items-center justify-center rounded-full bg-amber-500/30 text-amber-200"
+                style={{
+                  minWidth: 20,
+                  height: 18,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: '0 6px',
+                }}
+              >
+                {actionCount}
+              </span>
+            )}
           </Link>
         )
       })}

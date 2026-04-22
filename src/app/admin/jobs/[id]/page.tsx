@@ -281,8 +281,13 @@ export default async function AdminJobDetailPage({
           </div>
           <StatusBadge status={job.status} />
         </div>
+
+        {!isTerminal && (
+          <StatusActionButtons jobId={job.id} currentStatus={job.status} />
+        )}
+
         <p
-          className="mt-1"
+          className="mt-3"
           style={{ fontSize: 14, color: '#AABDE0' }}
         >
           {clientName}
@@ -314,10 +319,6 @@ export default async function AdminJobDetailPage({
             />
           )}
         </div>
-
-        {!isTerminal && (
-          <StatusActionButtons jobId={job.id} currentStatus={job.status} />
-        )}
       </section>
 
       {/* ─── Job budget (inline admin edit) ─── */}
@@ -477,7 +478,22 @@ export default async function AdminJobDetailPage({
                       className="flex flex-col items-end gap-1"
                       style={{ flexShrink: 0 }}
                     >
-                      <StatusBadge status={b.status} size="sm" />
+                      {b.status === 'unavailable' ? (
+                        <span
+                          className="rounded-full bg-gray-800/60 text-gray-400"
+                          style={{
+                            padding: '3px 10px',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: '0.04em',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Unavailable — booked elsewhere
+                        </span>
+                      ) : (
+                        <StatusBadge status={b.status} size="sm" />
+                      )}
                       {b.auto_accepted && (
                         <span
                           className="rounded-full"
