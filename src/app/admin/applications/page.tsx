@@ -15,7 +15,7 @@ export default async function AdminApplicationsPage() {
   const { data: rows, error } = await supabase
     .from('talent_applications')
     .select(
-      'id, email, first_name, last_name, phone, type, status, department, primary_role, instagram, website, company_name, industry, message, admin_notes, created_at, reviewed_at, reviewed_by'
+      'id, email, first_name, last_name, phone, type, status, department, primary_role, instagram, website, company_name, industry, message, admin_notes, created_at, reviewed_at, reviewed_by, previously_deleted, previous_deletion_reason, previous_deletion_date'
     )
     .order('created_at', { ascending: false })
 

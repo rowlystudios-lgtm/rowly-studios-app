@@ -27,6 +27,7 @@ export type Profile = {
   pin_verified_at: string | null
   share_code: string | null
   onboarded: boolean | null
+  account_status: 'active' | 'paused' | 'deleted' | null
   created_at: string
   updated_at: string
 }

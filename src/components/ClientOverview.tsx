@@ -12,6 +12,7 @@ import {
 } from '@/lib/jobs'
 import type { JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { ClientRestrictedBanner } from '@/components/AccountManagement'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -292,10 +293,42 @@ export function ClientOverview() {
   const [error, setError] = useState('')
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
   const [completedOpen, setCompletedOpen] = useState(false)
+  const [restriction, setRestriction] = useState<{
+    restricted: boolean
+    reason: string | null
+    restrictedAt: string | null
+  }>({ restricted: false, reason: null, restrictedAt: null })
 
   const load = useCallback(async () => {
     const uid = user?.id
     if (!uid) return
+
+    // Client restriction status lives on client_profiles; fetch in parallel
+    // with the jobs query so the banner renders on the first paint.
+    void supabase
+      .from('client_profiles')
+      .select('account_restricted, restriction_reason, restricted_at')
+      .eq('id', uid)
+      .maybeSingle()
+      .then(({ data }) => {
+        const row = data as
+          | {
+              account_restricted: boolean | null
+              restriction_reason: string | null
+              restricted_at: string | null
+            }
+          | null
+        if (row?.account_restricted) {
+          setRestriction({
+            restricted: true,
+            reason: row.restriction_reason,
+            restrictedAt: row.restricted_at,
+          })
+        } else {
+          setRestriction({ restricted: false, reason: null, restrictedAt: null })
+        }
+      })
+
     const { data, error } = await supabase
       .from('jobs')
       .select(
@@ -440,6 +473,13 @@ export function ClientOverview() {
     <>
       <style>{`@keyframes rs-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
 
+      {restriction.restricted && (
+        <ClientRestrictedBanner
+          reason={restriction.reason}
+          restrictedAt={restriction.restrictedAt}
+        />
+      )}
+
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 2 }}>My Jobs</h1>
       <p
         style={{
@@ -469,23 +509,44 @@ export function ClientOverview() {
           }}
         >
           <p style={{ fontSize: 14, marginBottom: 12 }}>No jobs posted yet.</p>
-          <Link
-            href="/app/post-job"
-            style={{
-              display: 'inline-block',
-              padding: '10px 16px',
-              borderRadius: 10,
-              background: '#fff',
-              color: '#1A3C6B',
-              fontSize: 12,
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              textDecoration: 'none',
-            }}
-          >
-            Post your first job →
-          </Link>
+          {restriction.restricted ? (
+            <span
+              aria-disabled
+              title="Account restricted — settle outstanding invoices to re-enable"
+              style={{
+                display: 'inline-block',
+                padding: '10px 16px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.25)',
+                color: 'rgba(255,255,255,0.55)',
+                fontSize: 12,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                cursor: 'not-allowed',
+              }}
+            >
+              Post your first job →
+            </span>
+          ) : (
+            <Link
+              href="/app/post-job"
+              style={{
+                display: 'inline-block',
+                padding: '10px 16px',
+                borderRadius: 10,
+                background: '#fff',
+                color: '#1A3C6B',
+                fontSize: 12,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                textDecoration: 'none',
+              }}
+            >
+              Post your first job →
+            </Link>
+          )}
         </div>
       )}
 

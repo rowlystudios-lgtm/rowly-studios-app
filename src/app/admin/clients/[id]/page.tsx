@@ -3,6 +3,7 @@ import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ClientAdminControls } from './ClientAdminControls'
 import { AdminDocumentsPanel } from '@/components/admin/AdminDocumentsPanel'
+import { AccountManagementSection } from '@/components/AccountManagement'
 
 export const dynamic = 'force-dynamic'
 
@@ -679,6 +680,16 @@ export default async function AdminClientDetailPage({
           adminNotes={cp?.admin_notes ?? null}
         />
       </section>
+
+      <AccountManagementSection
+        accountId={profile.id}
+        accountType="client"
+        status={
+          (profile.account_status as 'active' | 'paused' | 'deleted' | null) ??
+          'active'
+        }
+        displayName={displayName}
+      />
 
       <div className="mt-6 text-center">
         <Link

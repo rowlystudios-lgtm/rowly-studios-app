@@ -26,6 +26,9 @@ export type Application = {
   created_at: string
   reviewed_at: string | null
   reviewed_by: string | null
+  previously_deleted?: boolean | null
+  previous_deletion_reason?: string | null
+  previous_deletion_date?: string | null
 }
 
 type Props = {
@@ -112,14 +115,45 @@ export function ApplicationCard({ app, reviewerName }: Props) {
   const fullName =
     [app.first_name, app.last_name].filter(Boolean).join(' ') || app.email
 
+  const priorDate = app.previous_deletion_date
+    ? new Date(app.previous_deletion_date).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : null
+
   return (
+    <div style={{ marginBottom: 14 }}>
+      {app.previously_deleted && (
+        <div
+          role="alert"
+          style={{
+            background: 'rgba(240,165,0,0.12)',
+            border: '1px solid rgba(240,165,0,0.4)',
+            borderRadius: 10,
+            padding: '10px 14px',
+            marginBottom: 8,
+            color: '#F0A500',
+            fontSize: 12.5,
+            fontWeight: 600,
+            lineHeight: 1.45,
+          }}
+        >
+          ⚠️ Previously deleted account
+          {priorDate ? ` — ${priorDate}` : ''}
+          {app.previous_deletion_reason
+            ? ` — Reason: ${app.previous_deletion_reason}`
+            : ''}
+        </div>
+      )}
+
     <article
       style={{
         background: isActioned ? '#0F1B2E' : '#132542',
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 12,
         padding: isActioned ? 14 : 18,
-        marginBottom: 14,
         color: '#E8EEF7',
         opacity: isActioned ? 0.65 : 1,
         transition: 'opacity .2s',
@@ -397,6 +431,7 @@ export function ApplicationCard({ app, reviewerName }: Props) {
         </div>
       )}
     </article>
+    </div>
   )
 }
 

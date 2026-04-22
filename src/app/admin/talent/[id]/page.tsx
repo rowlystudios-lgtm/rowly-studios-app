@@ -6,6 +6,7 @@ import { PaymentForm, type UnpaidBooking } from './PaymentForm'
 import { W9Form, Toggle1099SentButton } from './TaxControls'
 import { AutoAcceptToggle } from './AutoAcceptToggle'
 import { AdminDocumentsPanel } from '@/components/admin/AdminDocumentsPanel'
+import { AccountManagementSection } from '@/components/AccountManagement'
 
 export const dynamic = 'force-dynamic'
 
@@ -1234,6 +1235,21 @@ export default async function AdminTalentDetailPage({
         </p>
         <AdminDocumentsPanel ownerId={profile.id} role="talent" />
       </section>
+
+      <AccountManagementSection
+        accountId={profile.id}
+        accountType="talent"
+        status={
+          (profile.account_status as 'active' | 'paused' | 'deleted' | null) ??
+          'active'
+        }
+        displayName={
+          [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
+          profile.full_name ||
+          profile.email ||
+          'this account'
+        }
+      />
 
       <div className="mt-6 text-center">
         <Link
