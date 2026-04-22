@@ -6,17 +6,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
-import { PinInput } from '@/components/PinInput'
 import { createClient } from '@/lib/supabase-browser'
 import { useAuth } from '@/lib/auth-context'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'reset-sending' | 'reset-sent' | 'error'
-type AdminStep = 'password' | 'pin'
 type AdminStatus = 'idle' | 'submitting' | 'error'
 type Mode = 'signin' | 'signup'
 
-const PIN_LENGTH = 6
-const MAX_PIN_ATTEMPTS = 3
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default function LoginPage() {
@@ -88,16 +84,10 @@ function LoginInner() {
   const [showWebsiteRedirect, setShowWebsiteRedirect] = useState(false)
 
   const [showAdminForm, setShowAdminForm] = useState(false)
-  const [adminStep, setAdminStep] = useState<AdminStep>('password')
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
   const [adminStatus, setAdminStatus] = useState<AdminStatus>('idle')
   const [adminErrorMsg, setAdminErrorMsg] = useState('')
-
-  const [pin, setPin] = useState('')
-  const [pinAttempts, setPinAttempts] = useState(0)
-  const [pinStatus, setPinStatus] = useState<AdminStatus>('idle')
-  const [pinErrorMsg, setPinErrorMsg] = useState('')
 
   const adminEmailRef = useRef<HTMLInputElement>(null)
   const adminFormRef = useRef<HTMLDivElement>(null)
@@ -106,40 +96,12 @@ function LoginInner() {
     async function check() {
       setStatus('checking')
       try {
-        const wantsAdminPin =
-          searchParams.get('admin') === '1' && searchParams.get('reason') === 'pin'
-
         const { data: { user } } = await supabase.auth.getUser()
 
         if (!user) {
           if (searchParams.get('admin') === '1') {
             setShowAdminForm(true)
           }
-          return
-        }
-
-        if (wantsAdminPin) {
-          const { data: profileRow } = await supabase
-            .from('profiles')
-            .select('role, email')
-            .eq('id', user.id)
-            .maybeSingle()
-
-          if (profileRow?.role === 'admin') {
-            setAdminEmail(profileRow.email ?? user.email ?? '')
-            setShowAdminForm(true)
-            setAdminStep('pin')
-            setPin('')
-            setPinAttempts(0)
-            setPinStatus('idle')
-            setPinErrorMsg('')
-            setAdminStatus('idle')
-            setAdminErrorMsg('')
-            return
-          }
-
-          // Session exists but this isn't an admin account — sign out and show login
-          await supabase.auth.signOut()
           return
         }
 
@@ -514,77 +476,15 @@ function LoginInner() {
       return
     }
 
+    // Password verified + role=admin confirmed → redirect to /admin.
+    // refresh() rehydrates AuthContext; router.refresh() invalidates
+    // server-component caches so the admin shell sees the new session.
     setAdminStatus('idle')
     setAdminErrorMsg('')
     setAdminPassword('')
-    setPin('')
-    setPinAttempts(0)
-    setPinErrorMsg('')
-    setPinStatus('idle')
-    setAdminStep('pin')
-  }
-
-  async function verifyPin(fullPin: string) {
-    const trimmedPin = (fullPin ?? '').trim()
-    if (trimmedPin.length !== PIN_LENGTH) return
-    if (pinStatus === 'submitting') return
-
-    setPinStatus('submitting')
-    setPinErrorMsg('')
-
-    const { data: valid, error } = await supabase.rpc('verify_admin_pin', { pin: trimmedPin })
-
-    if (error) {
-      setPinStatus('error')
-      setPinErrorMsg(error.message)
-      return
-    }
-
-    if (valid === true) {
-      setPinStatus('idle')
-      // Re-fetch the profile so pin_verified_at is fresh in AuthContext
-      // before any guard checks. Admins land in /admin; all other roles
-      // that happen to have a PIN land in /app.
-      await refresh()
-      router.push('/admin')
-      return
-    }
-
-    const attempts = pinAttempts + 1
-    setPinAttempts(attempts)
-    setPin('')
-
-    if (attempts >= MAX_PIN_ATTEMPTS) {
-      await supabase.auth.signOut()
-      setAdminStep('password')
-      setAdminEmail('')
-      setAdminPassword('')
-      setAdminStatus('error')
-      setAdminErrorMsg('Too many failed attempts. Please sign in again.')
-      setPinStatus('idle')
-      setPinErrorMsg('')
-      setPinAttempts(0)
-      return
-    }
-
-    setPinStatus('error')
-    setPinErrorMsg(
-      `Incorrect PIN. Try again. (${MAX_PIN_ATTEMPTS - attempts} attempt${
-        MAX_PIN_ATTEMPTS - attempts === 1 ? '' : 's'
-      } left)`
-    )
-  }
-
-  async function handlePinBack() {
-    await supabase.auth.signOut()
-    setAdminStep('password')
-    setAdminPassword('')
-    setPin('')
-    setPinAttempts(0)
-    setPinStatus('idle')
-    setPinErrorMsg('')
-    setAdminStatus('idle')
-    setAdminErrorMsg('')
+    await refresh()
+    router.push('/admin')
+    router.refresh()
   }
 
   async function handleReset(e: React.FormEvent) {
@@ -622,13 +522,8 @@ function LoginInner() {
     setShowAdminForm((prev) => {
       const next = !prev
       if (!next) {
-        // Collapsing — reset the admin flow entirely.
-        setAdminStep('password')
+        // Collapsing — reset the admin form.
         setAdminPassword('')
-        setPin('')
-        setPinAttempts(0)
-        setPinStatus('idle')
-        setPinErrorMsg('')
         setAdminStatus('idle')
         setAdminErrorMsg('')
       } else {
@@ -1243,11 +1138,10 @@ function LoginInner() {
                     transition: 'all 160ms ease',
                   }}
                 >
-                  {adminStep === 'password' ? (
-                    <form
-                      onSubmit={handleAdminPasswordStep}
-                      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
-                    >
+                  <form
+                    onSubmit={handleAdminPasswordStep}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+                  >
                       <p
                         style={{
                           fontSize: 11,
@@ -1342,113 +1236,6 @@ function LoginInner() {
                         ← Back to sign in
                       </button>
                     </form>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      {searchParams.get('reason') === 'pin' && (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: '#AABDE0',
-                            background: 'rgba(170,189,224,0.1)',
-                            border: '1px solid rgba(170,189,224,0.2)',
-                            borderRadius: 10,
-                            padding: '10px 12px',
-                            textAlign: 'center',
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          Your admin session requires PIN verification to continue.
-                        </p>
-                      )}
-
-                      <div style={{ textAlign: 'center' }}>
-                        <p
-                          style={{
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: '#fff',
-                            marginBottom: 4,
-                          }}
-                        >
-                          Admin PIN
-                        </p>
-                        <p style={{ fontSize: 12, color: '#AABDE0' }}>
-                          Enter your 6-digit access code
-                        </p>
-                      </div>
-
-                      <PinInput
-                        value={pin}
-                        onChange={setPin}
-                        onComplete={verifyPin}
-                        disabled={pinStatus === 'submitting'}
-                        variant="dark"
-                        autoFocus
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() => verifyPin(pin)}
-                        disabled={pinStatus === 'submitting' || pin.length !== PIN_LENGTH}
-                        style={{
-                          width: '100%',
-                          padding: '12px 0',
-                          borderRadius: 10,
-                          background: '#fff',
-                          color: '#1A3C6B',
-                          border: 'none',
-                          fontSize: 12,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 8,
-                          opacity:
-                            pinStatus === 'submitting' || pin.length !== PIN_LENGTH
-                              ? 0.55
-                              : 1,
-                          cursor: pinStatus === 'submitting' ? 'wait' : 'pointer',
-                        }}
-                      >
-                        {pinStatus === 'submitting' && <Spinner color="#1A3C6B" />}
-                        {pinStatus === 'submitting' ? 'Verifying…' : 'Verify'}
-                      </button>
-
-                      {pinStatus === 'error' && pinErrorMsg && (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: '#fca5a5',
-                            lineHeight: 1.4,
-                            textAlign: 'center',
-                          }}
-                        >
-                          {pinErrorMsg}
-                        </p>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={handlePinBack}
-                        disabled={pinStatus === 'submitting'}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#AABDE0',
-                          fontSize: 11,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                          cursor: 'pointer',
-                          textDecoration: 'underline',
-                          alignSelf: 'center',
-                        }}
-                      >
-                        ← Back
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
             </>
