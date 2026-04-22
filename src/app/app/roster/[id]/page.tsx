@@ -62,12 +62,13 @@ function getVimeoId(url: string): string | null {
 export default function RosterDetailPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
-  const { supabase } = useAuth()
+  const { supabase, user } = useAuth()
   const id = params?.id
 
   const [row, setRow] = useState<Row | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [restricted, setRestricted] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -97,6 +98,25 @@ export default function RosterDetailPage() {
       cancelled = true
     }
   }, [id, supabase])
+
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    let cancelled = false
+    supabase
+      .from('client_profiles')
+      .select('account_restricted')
+      .eq('id', uid)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        const row = data as { account_restricted: boolean | null } | null
+        setRestricted(Boolean(row?.account_restricted))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, supabase])
 
   if (loading) {
     return (
@@ -245,21 +265,29 @@ export default function RosterDetailPage() {
 
       <button
         type="button"
-        onClick={() => router.push(`/app/post-job?talent=${row.id}`)}
+        onClick={() =>
+          restricted ? null : router.push(`/app/post-job?talent=${row.id}`)
+        }
+        disabled={restricted}
+        title={
+          restricted
+            ? 'Account restricted — settle outstanding invoices to re-enable'
+            : undefined
+        }
         style={{
           width: '100%',
           marginTop: 16,
           padding: '14px 0',
           borderRadius: 12,
-          background: '#fff',
-          color: '#1A3C6B',
+          background: restricted ? 'rgba(255,255,255,0.25)' : '#fff',
+          color: restricted ? 'rgba(255,255,255,0.55)' : '#1A3C6B',
           border: 'none',
           fontSize: 13,
           fontWeight: 600,
-          cursor: 'pointer',
+          cursor: restricted ? 'not-allowed' : 'pointer',
         }}
       >
-        Request for a job →
+        {restricted ? 'Request disabled — account restricted' : 'Request for a job →'}
       </button>
     </PageShell>
   )

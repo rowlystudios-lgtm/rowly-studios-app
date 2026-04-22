@@ -39,11 +39,16 @@ export async function pauseAccount(args: {
 }): Promise<Result> {
   const ctx = await requireAdminContext()
   if ('error' in ctx) return { error: ctx.error }
-  const { svc } = ctx
+  const { svc, actorId } = ctx
 
   const { error } = await svc
     .from('profiles')
-    .update({ account_status: 'paused' })
+    .update({
+      account_status: 'paused',
+      paused_at: new Date().toISOString(),
+      paused_by: actorId,
+      paused_reason: args.reason?.trim() || null,
+    })
     .eq('id', args.accountId)
   if (error) return { error: error.message }
 
@@ -81,7 +86,12 @@ export async function resumeAccount(args: {
 
   const { error } = await svc
     .from('profiles')
-    .update({ account_status: 'active' })
+    .update({
+      account_status: 'active',
+      paused_at: null,
+      paused_by: null,
+      paused_reason: null,
+    })
     .eq('id', args.accountId)
   if (error) return { error: error.message }
 

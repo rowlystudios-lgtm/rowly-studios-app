@@ -51,6 +51,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             profile?.full_name ||
             null
           }
+          reason={profile?.paused_reason ?? null}
         />
       ) : (
         <div

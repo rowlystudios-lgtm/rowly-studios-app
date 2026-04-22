@@ -28,6 +28,9 @@ export type Profile = {
   share_code: string | null
   onboarded: boolean | null
   account_status: 'active' | 'paused' | 'deleted' | null
+  paused_at: string | null
+  paused_by: string | null
+  paused_reason: string | null
   created_at: string
   updated_at: string
 }

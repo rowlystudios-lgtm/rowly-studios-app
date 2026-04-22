@@ -13,6 +13,7 @@ import {
   LINK_COLOR,
   BUTTON_PRIMARY,
 } from '@/components/PageShell'
+import { ClientRestrictedBanner } from '@/components/AccountManagement'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -173,6 +174,42 @@ function PostJobInner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [restriction, setRestriction] = useState<{
+    checked: boolean
+    restricted: boolean
+    reason: string | null
+    restrictedAt: string | null
+  }>({ checked: false, restricted: false, reason: null, restrictedAt: null })
+
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    let cancelled = false
+    supabase
+      .from('client_profiles')
+      .select('account_restricted, restriction_reason, restricted_at')
+      .eq('id', uid)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        const row = data as
+          | {
+              account_restricted: boolean | null
+              restriction_reason: string | null
+              restricted_at: string | null
+            }
+          | null
+        setRestriction({
+          checked: true,
+          restricted: Boolean(row?.account_restricted),
+          reason: row?.restriction_reason ?? null,
+          restrictedAt: row?.restricted_at ?? null,
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, supabase])
 
   useEffect(() => {
     const talentId = params.get('talent')
@@ -432,6 +469,35 @@ function PostJobInner() {
       const c = budgetCents(d)
       return Boolean(d.date) && c != null && c >= MIN_BUDGET_DOLLARS * 100
     })
+
+  if (restriction.checked && restriction.restricted) {
+    return (
+      <Shell>
+        <Link
+          href="/app"
+          style={{
+            fontSize: 11,
+            color: TEXT_MUTED,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            fontWeight: 600,
+          }}
+        >
+          ← Back
+        </Link>
+        <div style={{ marginTop: 20 }}>
+          <ClientRestrictedBanner
+            reason={restriction.reason}
+            restrictedAt={restriction.restrictedAt}
+          />
+        </div>
+        <p style={{ fontSize: 13, color: TEXT_MUTED, marginTop: 12 }}>
+          New job requests are disabled until your outstanding invoices are
+          settled.
+        </p>
+      </Shell>
+    )
+  }
 
   return (
     <Shell>

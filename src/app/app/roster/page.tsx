@@ -191,6 +191,26 @@ function RosterInner() {
   // Rate chosen on the talent card before the job picker opens. Null
   // means "no custom rate" — fall back to the talent's day_rate_cents.
   const [pickerRateCents, setPickerRateCents] = useState<number | null>(null)
+  const [restricted, setRestricted] = useState(false)
+
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    let cancelled = false
+    supabase
+      .from('client_profiles')
+      .select('account_restricted')
+      .eq('id', uid)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        const row = data as { account_restricted: boolean | null } | null
+        setRestricted(Boolean(row?.account_restricted))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, supabase])
 
   // Reset department when side changes and current dept isn't on the new side.
   useEffect(() => {
@@ -629,6 +649,7 @@ function RosterInner() {
           talent={pickerTalent}
           jobs={pickableJobs}
           busy={pickerBusy}
+          restricted={restricted}
           pickerRateCents={pickerRateCents}
           onConfirm={onPickerConfirm}
           onClose={() => {
@@ -656,6 +677,7 @@ function JobPickerSheet({
   talent,
   jobs,
   busy,
+  restricted,
   pickerRateCents,
   onConfirm,
   onClose,
@@ -663,6 +685,7 @@ function JobPickerSheet({
   talent: Talent
   jobs: ClientJob[]
   busy: boolean
+  restricted: boolean
   /** Rate set on the talent card before the sheet opened. */
   pickerRateCents: number | null
   onConfirm: (jobId: string, rateCents: number | null) => void
@@ -739,25 +762,47 @@ function JobPickerSheet({
           {!selectedJob && (
             <>
               {jobs.length === 0 ? (
-                <Link
-                  href="/app/post-job"
-                  onClick={onClose}
-                  style={{
-                    display: 'inline-block',
-                    marginTop: 16,
-                    padding: '12px 18px',
-                    borderRadius: 10,
-                    background: '#fff',
-                    color: BUTTON_PRIMARY,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    textDecoration: 'none',
-                  }}
-                >
-                  Post a job →
-                </Link>
+                restricted ? (
+                  <span
+                    aria-disabled
+                    title="Account restricted — settle outstanding invoices to re-enable"
+                    style={{
+                      display: 'inline-block',
+                      marginTop: 16,
+                      padding: '12px 18px',
+                      borderRadius: 10,
+                      background: 'rgba(255,255,255,0.2)',
+                      color: 'rgba(255,255,255,0.55)',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      cursor: 'not-allowed',
+                    }}
+                  >
+                    Post a job — restricted
+                  </span>
+                ) : (
+                  <Link
+                    href="/app/post-job"
+                    onClick={onClose}
+                    style={{
+                      display: 'inline-block',
+                      marginTop: 16,
+                      padding: '12px 18px',
+                      borderRadius: 10,
+                      background: '#fff',
+                      color: BUTTON_PRIMARY,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Post a job →
+                  </Link>
+                )
               ) : (
                 <div
                   style={{
