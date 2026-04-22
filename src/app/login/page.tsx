@@ -7,7 +7,6 @@ import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
-import { useAuth } from '@/lib/auth-context'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'error'
 type AdminStatus = 'idle' | 'submitting' | 'error'
@@ -67,7 +66,6 @@ function LoginInner() {
   const searchParams = useSearchParams()
   const pageMode = searchParams.get('mode') // 'reset' when arriving from /auth/callback
   const supabase = createClient()
-  const { refresh } = useAuth()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -484,43 +482,35 @@ function LoginInner() {
       return
     }
 
-    const userId = authData.user?.id
-    if (!userId) {
-      await supabase.auth.signOut()
-      setAdminStatus('error')
-      setAdminErrorMsg('Could not verify the account. Please try again.')
-      return
+    // Best-effort role guard: if we can confirm the account is not
+    // admin, bail out cleanly. If this query fails or times out we
+    // do NOT block the redirect — the server-side middleware is the
+    // authoritative gate for /admin and will reject non-admins there.
+    try {
+      const userId = authData.user?.id
+      if (userId) {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .maybeSingle()
+        if (profileRow && profileRow.role !== 'admin') {
+          await supabase.auth.signOut()
+          setAdminStatus('error')
+          setAdminErrorMsg("This account doesn't have admin access.")
+          return
+        }
+      }
+    } catch (err) {
+      console.warn('[admin-login] role check failed, letting middleware gate /admin:', err)
     }
 
-    const { data: profileRow, error: profileError } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .maybeSingle()
-
-    if (profileError || !profileRow) {
-      await supabase.auth.signOut()
-      setAdminStatus('error')
-      setAdminErrorMsg(profileError?.message ?? 'Could not read your profile.')
-      return
-    }
-
-    if (profileRow.role !== 'admin') {
-      await supabase.auth.signOut()
-      setAdminStatus('error')
-      setAdminErrorMsg("This account doesn't have admin access.")
-      return
-    }
-
-    // Password verified + role=admin confirmed → redirect to /admin.
-    // refresh() rehydrates AuthContext; router.refresh() invalidates
-    // server-component caches so the admin shell sees the new session.
-    setAdminStatus('idle')
-    setAdminErrorMsg('')
+    // Hard navigation — guarantees the auth cookie just written by
+    // signInWithPassword is included in the /admin request. router.push
+    // can race with cookie propagation and leave middleware seeing a
+    // null user, which sends the visitor back to /login.
     setAdminPassword('')
-    await refresh()
-    router.push('/admin')
-    router.refresh()
+    window.location.assign('/admin')
   }
 
   /**
