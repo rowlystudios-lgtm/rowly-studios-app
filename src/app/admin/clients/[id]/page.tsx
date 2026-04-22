@@ -53,6 +53,7 @@ type Profile = {
   full_name: string | null
   verified: boolean
   verified_at: string | null
+  account_status: 'active' | 'paused' | 'deleted' | null
   created_at: string | null
 }
 

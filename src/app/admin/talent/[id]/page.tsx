@@ -85,6 +85,7 @@ type Profile = {
   city: string | null
   verified: boolean
   verified_at: string | null
+  account_status: 'active' | 'paused' | 'deleted' | null
   created_at: string | null
 }
 

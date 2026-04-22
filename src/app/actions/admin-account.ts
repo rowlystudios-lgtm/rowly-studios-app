@@ -164,8 +164,6 @@ export async function deleteAccount(args: {
   //    ban_duration as a Postgres interval string.
   try {
     await svc.auth.admin.updateUserById(args.accountId, {
-      // @ts-expect-error — ban_duration is valid on the REST API but not
-      // yet in the typed UserAttributes shape.
       ban_duration: '87600h',
     })
   } catch {
