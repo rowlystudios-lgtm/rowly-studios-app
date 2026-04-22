@@ -518,3 +518,370 @@ export async function removeLineItem(formData: FormData) {
   await recalcTotal(supabase, invoiceId)
   revalidatePath(`/admin/finance/${invoiceId}`)
 }
+
+/* ─────────── v1.2: Generate draft invoice from wrapped job ─────────── */
+
+function addDaysIso(iso: string, n: number): string {
+  const parts = iso.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return iso
+  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Create a draft invoice from a wrapped job. Pulls confirmed bookings as
+ * line items, sets invoice_period_start = job.end_date + 1 day, and
+ * due_date = end_date + 31 days. Idempotent: if a non-void invoice
+ * already exists for this job we return it instead of creating a dupe.
+ */
+export async function generateDraftInvoiceFromJob(formData: FormData) {
+  const { supabase, user } = await requireAdmin()
+  const jobId = ((formData.get('jobId') as string) ?? '').trim()
+  if (!jobId) return
+
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('id, title, status, client_id, start_date, end_date, shoot_days')
+    .eq('id', jobId)
+    .maybeSingle()
+  if (!job || !job.client_id) return
+
+  // Idempotency: reuse any existing non-void invoice for this job.
+  const { data: existing } = await supabase
+    .from('invoices')
+    .select('id')
+    .eq('job_id', jobId)
+    .neq('status', 'void')
+    .limit(1)
+    .maybeSingle()
+  if (existing) {
+    revalidatePath('/admin/finance')
+    redirect(`/admin/finance/${existing.id}`)
+  }
+
+  // Shoot-day count for rate math: prefer shoot_days[] length, fall
+  // back to start..end range, fall back to 1.
+  let shootDays = 1
+  if (Array.isArray(job.shoot_days) && job.shoot_days.length > 0) {
+    shootDays = job.shoot_days.length
+  } else if (job.start_date && job.end_date) {
+    const start = new Date(job.start_date)
+    const end = new Date(job.end_date)
+    const diff = Math.round(
+      (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+    )
+    shootDays = Math.max(1, diff + 1)
+  }
+
+  // Pull confirmed bookings as line items.
+  const { data: bookings } = await supabase
+    .from('job_bookings')
+    .select(
+      `id, talent_id, confirmed_rate_cents, offered_rate_cents, status,
+       profiles!job_bookings_talent_id_fkey (first_name, last_name, full_name,
+         talent_profiles (primary_role))`
+    )
+    .eq('job_id', jobId)
+    .in('status', ['confirmed', 'completed'])
+
+  type BRow = {
+    id: string
+    talent_id: string
+    confirmed_rate_cents: number | null
+    offered_rate_cents: number | null
+    profiles:
+      | {
+          first_name: string | null
+          last_name: string | null
+          full_name: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }
+      | {
+          first_name: string | null
+          last_name: string | null
+          full_name: string | null
+          talent_profiles:
+            | { primary_role: string | null }
+            | { primary_role: string | null }[]
+            | null
+        }[]
+      | null
+  }
+  const rows = (bookings ?? []) as unknown as BRow[]
+  const lineItems = rows.map((b) => {
+    const p = Array.isArray(b.profiles) ? b.profiles[0] ?? null : b.profiles
+    const tp = p
+      ? Array.isArray(p.talent_profiles)
+        ? p.talent_profiles[0] ?? null
+        : p.talent_profiles
+      : null
+    const name =
+      [p?.first_name, p?.last_name].filter(Boolean).join(' ') ||
+      p?.full_name ||
+      'Talent'
+    const role = tp?.primary_role ?? null
+    const unit = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
+    return {
+      description: role ? `${name} — ${role} (${shootDays} day${shootDays === 1 ? '' : 's'})` : name,
+      quantity: shootDays,
+      unit_price_cents: unit,
+      total_cents: unit * shootDays,
+      booking_id: b.id,
+      talent_id: b.talent_id,
+    }
+  })
+
+  const subtotal = lineItems.reduce((s, li) => s + li.total_cents, 0)
+  const taxCents = 0
+  const total = subtotal + taxCents
+  const rsFeePercent = 15
+  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
+  const clientTotalCents = total + rsFeeCents
+  const invoiceNumber = await nextInvoiceNumber(supabase)
+
+  const periodStart = job.end_date ? addDaysIso(job.end_date, 1) : todayIsoLA()
+  const dueDate = job.end_date
+    ? addDaysIso(job.end_date, 31)
+    : addDaysIso(todayIsoLA(), 30)
+
+  const { data: inv, error } = await supabase
+    .from('invoices')
+    .insert({
+      job_id: jobId,
+      client_id: job.client_id,
+      invoice_number: invoiceNumber,
+      status: 'draft',
+      total_cents: total,
+      tax_cents: taxCents,
+      rs_fee_percent: rsFeePercent,
+      rs_fee_cents: rsFeeCents,
+      client_total_cents: clientTotalCents,
+      invoice_verified: false,
+      invoice_period_start: periodStart,
+      due_date: dueDate,
+      late_fee_rate: 0,
+      late_fee_cents: 0,
+      notes: job.title ? `Invoice for ${job.title}.` : null,
+      created_by: user.id,
+    })
+    .select('id')
+    .single()
+  if (error || !inv) return
+
+  if (lineItems.length > 0) {
+    await supabase.from('invoice_line_items').insert(
+      lineItems.map((li) => ({
+        invoice_id: inv.id,
+        description: li.description,
+        quantity: li.quantity,
+        unit_price_cents: li.unit_price_cents,
+        total_cents: li.total_cents,
+        booking_id: li.booking_id,
+        talent_id: li.talent_id,
+      }))
+    )
+  }
+
+  revalidatePath('/admin/finance')
+  redirect(`/admin/finance/${inv.id}`)
+}
+
+/**
+ * v1.2 one-shot send: generate PDF, upload to Drive, email client with
+ * PDF attached, flip status → 'sent'. Replaces the old verify-then-
+ * Gmail flow. Requires invoice_verified=true for safety.
+ */
+export async function sendInvoice(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const invoiceId = ((formData.get('invoiceId') as string) ?? '').trim()
+  if (!invoiceId) return { error: 'Missing invoice id' }
+
+  const { data: invoice } = await supabase
+    .from('invoices')
+    .select(
+      `id, invoice_number, client_id, job_id, status, total_cents, tax_cents,
+       rs_fee_cents, rs_fee_percent, client_total_cents, due_date,
+       invoice_period_start, notes, created_at, invoice_verified`
+    )
+    .eq('id', invoiceId)
+    .maybeSingle()
+  if (!invoice) return { error: 'Invoice not found' }
+  if (invoice.status !== 'draft' && invoice.status !== 'overdue') {
+    return { error: `Invoice already ${invoice.status}` }
+  }
+  if (!invoice.invoice_verified) {
+    return { error: 'Verify the invoice before sending.' }
+  }
+
+  const svc = createServiceClient()
+  const [{ data: lineItems }, { data: clientProfile }, { data: job }] =
+    await Promise.all([
+      svc
+        .from('invoice_line_items')
+        .select('description, quantity, unit_price_cents, total_cents')
+        .eq('invoice_id', invoiceId)
+        .order('created_at', { ascending: true }),
+      svc
+        .from('profiles')
+        .select(
+          `id, full_name, email,
+           client_profiles (company_name, billing_email)`
+        )
+        .eq('id', invoice.client_id)
+        .maybeSingle(),
+      invoice.job_id
+        ? svc
+            .from('jobs')
+            .select('title, start_date, end_date')
+            .eq('id', invoice.job_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ])
+
+  type CP = { company_name: string | null; billing_email: string | null } | null
+  const rawCp = (clientProfile as unknown as { client_profiles?: CP | CP[] } | null)
+    ?.client_profiles
+  const cp: CP = Array.isArray(rawCp) ? (rawCp[0] ?? null) : (rawCp ?? null)
+  const recipientEmail =
+    cp?.billing_email ||
+    (clientProfile as unknown as { email?: string } | null)?.email ||
+    null
+  if (!recipientEmail) {
+    return { error: 'No billing email on file for this client.' }
+  }
+
+  const { generateInvoiceHTML, generateInvoicePDF } = await import(
+    '@/lib/invoice-pdf'
+  )
+  const html = generateInvoiceHTML(
+    {
+      invoice_number: invoice.invoice_number,
+      created_at: invoice.created_at,
+      due_date: invoice.due_date,
+      total_cents: invoice.total_cents,
+      tax_cents: invoice.tax_cents,
+      rs_fee_cents: invoice.rs_fee_cents,
+      rs_fee_percent: invoice.rs_fee_percent,
+      client_total_cents: invoice.client_total_cents,
+      notes: invoice.notes,
+    },
+    (lineItems ?? []) as Array<{
+      description: string | null
+      quantity: number | null
+      unit_price_cents: number | null
+      total_cents: number | null
+    }>,
+    {
+      company_name: cp?.company_name ?? null,
+      billing_email: cp?.billing_email ?? null,
+      full_name:
+        (clientProfile as unknown as { full_name?: string | null } | null)
+          ?.full_name ?? null,
+      email:
+        (clientProfile as unknown as { email?: string | null } | null)?.email ??
+        null,
+    },
+    job ?? null
+  )
+
+  const pdf = await generateInvoicePDF(html)
+
+  // Drive upload — best effort.
+  let driveUrl: string | null = null
+  if (pdf) {
+    try {
+      const { data: folderSetting } = await svc
+        .from('admin_settings')
+        .select('value')
+        .eq('key', 'drive_invoices_2026_id')
+        .maybeSingle()
+      if (folderSetting?.value) {
+        const safeName = (cp?.company_name ?? (clientProfile as unknown as { full_name?: string } | null)?.full_name ?? 'client')
+          .replace(/[^\w\d]+/g, '_')
+          .slice(0, 40)
+        const fileName = `${invoice.invoice_number ?? invoiceId}_${safeName}.pdf`
+        const { uploadToDrive } = await import('@/lib/google')
+        const result = await uploadToDrive({
+          fileName,
+          mimeType: 'application/pdf',
+          content: pdf,
+          folderId: folderSetting.value,
+        })
+        if (result) {
+          driveUrl = result.url
+          await svc
+            .from('invoices')
+            .update({
+              drive_file_id: result.id,
+              drive_file_url: result.url,
+            })
+            .eq('id', invoiceId)
+        }
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
+  // Email via Resend with PDF attachment.
+  const { sendTransactionalEmail } = await import('@/lib/email')
+  const clientName =
+    cp?.company_name ||
+    (clientProfile as unknown as { full_name?: string | null } | null)
+      ?.full_name ||
+    'there'
+  const dueLong = invoice.due_date
+    ? new Date(invoice.due_date).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : 'on receipt'
+  const jobTitle = (job as { title?: string } | null)?.title ?? 'your recent shoot'
+  const totalFmt = invoice.client_total_cents
+    ? `$${(invoice.client_total_cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+    : ''
+  const bodyHtml = `
+    <p>Hi ${clientName},</p>
+    <p>Your invoice for <strong>${jobTitle}</strong> is attached${totalFmt ? ` (total ${totalFmt})` : ''}.</p>
+    <p><strong>Payment is due by ${dueLong}.</strong> Late payment fees apply as set out in the Rowly Studios Client Platform Agreement.</p>
+    ${driveUrl ? `<p>A copy is also available at <a href="${driveUrl}">${driveUrl}</a>.</p>` : ''}
+    <p>Thank you,<br/>Rowly Studios</p>
+  `
+  const mailResult = await sendTransactionalEmail({
+    to: recipientEmail,
+    subject: `Invoice ${invoice.invoice_number ?? ''} — Rowly Studios`.trim(),
+    html: bodyHtml,
+    attachments:
+      pdf
+        ? [
+            {
+              filename: `${invoice.invoice_number ?? 'invoice'}.pdf`,
+              content: Buffer.from(pdf).toString('base64'),
+              contentType: 'application/pdf',
+            },
+          ]
+        : undefined,
+  })
+  if (mailResult.error && mailResult.error !== 'not_configured') {
+    return { error: `Email failed: ${mailResult.error}` }
+  }
+
+  // Flip status + sent_at + gmail_message_id (reused for resend message id).
+  await svc
+    .from('invoices')
+    .update({
+      status: 'sent',
+      sent_at: new Date().toISOString(),
+      resend_message_id: mailResult.id ?? null,
+    })
+    .eq('id', invoiceId)
+
+  revalidatePath('/admin/finance')
+  revalidatePath(`/admin/finance/${invoiceId}`)
+  return { ok: true, emailSent: !mailResult.error, driveUrl }
+}

@@ -7,11 +7,20 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY)
 }
 
+type EmailAttachment = {
+  filename: string
+  /** Base64-encoded content (no data: prefix). */
+  content: string
+  /** Defaults to 'application/octet-stream' if omitted. */
+  contentType?: string
+}
+
 type SendEmail = {
   to: string
   subject: string
   html: string
   replyTo?: string
+  attachments?: EmailAttachment[]
 }
 
 // Default to Resend's on-domain sender so emails ship immediately on any
@@ -26,6 +35,7 @@ export async function sendTransactionalEmail({
   subject,
   html,
   replyTo,
+  attachments,
 }: SendEmail): Promise<{ id?: string; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
@@ -46,6 +56,11 @@ export async function sendTransactionalEmail({
         subject,
         html,
         reply_to: replyTo,
+        attachments: attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          content_type: a.contentType ?? 'application/octet-stream',
+        })),
       }),
     })
     const data = (await res.json().catch(() => ({}))) as {

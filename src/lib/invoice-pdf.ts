@@ -98,7 +98,8 @@ export function generateInvoiceHTML(
     )
     .join('')
 
-  const dueDate = invoice.due_date ? longDate(invoice.due_date) : 'Net 14 days'
+  const dueDate = invoice.due_date ? longDate(invoice.due_date) : 'On receipt'
+  const dueDateForFooter = invoice.due_date ? longDate(invoice.due_date) : null
   const issued = invoice.created_at ? longDate(invoice.created_at) : ''
   const clientName = client.company_name ?? client.full_name ?? 'Client'
   const clientEmail = client.billing_email ?? client.email ?? ''
@@ -202,7 +203,12 @@ export function generateInvoiceHTML(
 
   <div class="footer">
     <p>Amount due includes a ${rsFeePercent}% Rowly Studios production fee.</p>
-    <p style="margin-top:6px">Payment terms: Net 14 days. Please reference ${escapeHtml(
+    <p style="margin-top:6px">${
+      dueDateForFooter
+        ? `Payment is due by ${dueDateForFooter}.`
+        : 'Payment is due on receipt.'
+    } Late payment fees apply as set out in the Rowly Studios Client Platform Agreement.</p>
+    <p style="margin-top:6px">Please reference ${escapeHtml(
       invoice.invoice_number ?? 'this invoice'
     )} with payment.</p>
     <p style="margin-top:6px">Rowly Studios · rowlystudios@gmail.com · Los Angeles, CA</p>
