@@ -73,6 +73,7 @@ function LoginInner() {
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  const [flashMessage, setFlashMessage] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [selectedRole, setSelectedRole] = useState<'talent' | 'client'>('talent')
 
@@ -130,6 +131,10 @@ function LoginInner() {
     if (err === 'auth_failed') {
       setErrorMsg('That sign-in link was invalid or expired. Please sign in again.')
       setStatus('error')
+    }
+    const msg = searchParams.get('message')
+    if (msg) {
+      setFlashMessage(msg)
     }
   }, [searchParams])
 
@@ -744,6 +749,24 @@ function LoginInner() {
         )}
 
         <div className="w-full max-w-sm rs-surface rounded-rs-lg p-6">
+          {flashMessage && (
+            <div
+              role="status"
+              style={{
+                background: '#F0FDF4',
+                border: '1px solid #BBF7D0',
+                borderRadius: 8,
+                padding: '10px 14px',
+                color: '#16A34A',
+                fontSize: 13,
+                textAlign: 'center',
+                marginBottom: 14,
+                lineHeight: 1.45,
+              }}
+            >
+              {flashMessage}
+            </div>
+          )}
           {showWebsiteRedirect ? (
             <div style={{ textAlign: 'center', padding: '32px 0' }}>
               <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
@@ -808,10 +831,10 @@ function LoginInner() {
           ) : status === 'reset-sent' ? (
             <div className="text-center space-y-3">
               <p className="text-sm font-semibold uppercase tracking-wide" style={{ color: '#1A3C6B' }}>
-                Check your email
+                Reset link sent
               </p>
               <p className="text-[13px] leading-relaxed" style={{ color: '#2E5099' }}>
-                We&apos;ve sent a reset link to <strong>{resetEmail}</strong>.
+                Check your email and follow the link. Sent to <strong>{resetEmail}</strong>.
               </p>
               <button
                 onClick={backToSignIn}
@@ -1227,7 +1250,7 @@ function LoginInner() {
                             lineHeight: 1.4,
                           }}
                         >
-                          Reset link sent to your email.
+                          Reset link sent. Check your email and follow the link.
                         </p>
                       )}
                       <button

@@ -24,16 +24,14 @@ export async function GET(request: NextRequest) {
               options?: CookieOptions
             }[]
           ) {
-            cookiesToSet.forEach(({ name, value, options }) => {
+            cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
-            })
+            )
           },
         },
       }
     )
-
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-
     if (!error) {
       if (type === 'recovery') {
         return NextResponse.redirect(`${origin}/auth/reset-password`)
@@ -46,14 +44,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${origin}/app`)
     }
   }
-
-  // Also handle hash-based tokens (implicit flow fallback).
-  // The reset-password page reads the hash fragment client-side.
-  if (type === 'recovery') {
-    return NextResponse.redirect(`${origin}/auth/reset-password`)
-  }
-
   return NextResponse.redirect(
-    `${origin}/login?error=Link+expired+or+invalid.+Please+try+again.`
+    `${origin}/login?message=Link+expired.+Please+request+a+new+one.`
   )
 }
