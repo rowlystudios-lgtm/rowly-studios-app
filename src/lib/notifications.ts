@@ -197,10 +197,7 @@ function defaultEmailHtml(
 
 /* ─────────── Higher-level event helpers ─────────── */
 
-function fmtUsd(cents: number | null | undefined): string {
-  if (cents == null) return 'TBD'
-  return `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-}
+import { fmtUsd, clientRateCents } from '@/lib/rates'
 
 function fmtDateShort(iso: string | null): string {
   if (!iso) return 'TBD'
@@ -255,10 +252,22 @@ type BookingContext = {
 /**
  * Shape the rate label consistently across all emails. Short shoots bill
  * as a flat fee, so don't suffix "/day".
+ *
+ * STRICT RATE RULE: cents stored on bookings is the talent net.
+ *   forTalent=true  → display the talent net (their take-home).
+ *   forTalent=false → display the client-facing rate (talentNet ÷ 0.85).
+ * Defaults to false because most surfaces (client emails, admin digests
+ * paired with explicit dual labels) expect client-facing.
  */
-function rateLabel(cents: number | null | undefined, isShort: boolean): string {
+function rateLabel(
+  cents: number | null | undefined,
+  isShort: boolean,
+  forTalent = false
+): string {
   if (!cents && cents !== 0) return 'Rate TBD'
-  return isShort ? `Flat fee: ${fmtUsd(cents)}` : `${fmtUsd(cents)}/day`
+  const display = forTalent ? cents : clientRateCents(cents)
+  const usd = fmtUsd(display)
+  return isShort ? `Flat fee: ${usd}` : `${usd}/day`
 }
 
 function durationLabel(ctx: BookingContext): string {
@@ -398,9 +407,15 @@ async function notifyAdminStatus(
       .eq('role', 'admin')
 
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const offered = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
+    // Admin digests show BOTH talent net and client-facing rate so ops
+    // can see margins at a glance.
+    const dualLabel = (cents: number | null | undefined) =>
+      cents == null
+        ? 'Pending'
+        : `Talent: ${fmtUsd(cents)}/day · Client: ${fmtUsd(clientRateCents(cents))}/day`
+    const offered = dualLabel(ctx.offeredRateCents)
     const confirmed = ctx.confirmedRateCents
-      ? rateLabel(ctx.confirmedRateCents, ctx.isShortShoot)
+      ? dualLabel(ctx.confirmedRateCents)
       : 'Pending'
     const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
     const html = EmailTemplates.adminStatus({
@@ -449,21 +464,23 @@ export async function notifyJobOffer(bookingId: string) {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
+    // Talent sees their net rate; client sees the +15% client-facing rate.
+    const talentRate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot, true)
+    const clientRate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
 
     // Email 1: talent
     const talentHtml = EmailTemplates.jobOffer({
       jobTitle: ctx.jobTitle,
       dateLabel,
       location: ctx.jobLocation ?? '',
-      rateLabel: rate,
+      rateLabel: talentRate,
       actionUrl: `${APP_URL}/app`,
     })
     await sendNotification({
       userId: ctx.talentUserId,
       type: 'job_offer',
       title: `New job offer: ${ctx.jobTitle}`,
-      body: `You have been offered ${ctx.jobTitle} on ${dateLabel} at ${rate}. Tap to respond.`,
+      body: `You have been offered ${ctx.jobTitle} on ${dateLabel} at ${talentRate}. Tap to respond.`,
       actionUrl: '/app',
       bookingId,
       jobId: ctx.jobId,
@@ -482,7 +499,7 @@ export async function notifyJobOffer(bookingId: string) {
         talentName: ctx.talentName,
         jobTitle: ctx.jobTitle,
         dateLabel,
-        rateLabel: rate,
+        rateLabel: clientRate,
         actionUrl: `${APP_URL}/app`,
       })
       await sendNotification({
@@ -512,14 +529,16 @@ export async function notifyConfirmation(bookingId: string) {
     if (!ctx) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
     const confirmed = ctx.confirmedRateCents ?? ctx.offeredRateCents
-    const rate = rateLabel(confirmed, ctx.isShortShoot)
+    // Talent gets their net; client sees the +15% client-facing rate.
+    const talentRate = rateLabel(confirmed, ctx.isShortShoot, true)
+    const clientRate = rateLabel(confirmed, ctx.isShortShoot)
 
     // Email 1: talent
     if (ctx.talentUserId) {
       const talentHtml = EmailTemplates.talentConfirmation({
         jobTitle: ctx.jobTitle,
         dateLabel,
-        rateLabel: rate,
+        rateLabel: talentRate,
         location: ctx.jobLocation,
         callTime: ctx.jobCallTime,
         actionUrl: `${APP_URL}/app`,
@@ -528,7 +547,7 @@ export async function notifyConfirmation(bookingId: string) {
         userId: ctx.talentUserId,
         type: 'booking_confirmed',
         title: `Confirmed: ${ctx.jobTitle} — ${dateLabel}`,
-        body: `You're confirmed for ${ctx.jobTitle} on ${dateLabel} at ${rate}.`,
+        body: `You're confirmed for ${ctx.jobTitle} on ${dateLabel} at ${talentRate}.`,
         actionUrl: '/app',
         bookingId,
         jobId: ctx.jobId,
@@ -543,14 +562,14 @@ export async function notifyConfirmation(bookingId: string) {
         talentName: ctx.talentName,
         jobTitle: ctx.jobTitle,
         dateLabel,
-        rateLabel: rate,
+        rateLabel: clientRate,
         actionUrl: `${APP_URL}/app`,
       })
       await sendNotification({
         userId: ctx.clientUserId,
         type: 'booking_confirmed',
         title: `${ctx.talentName} is confirmed for ${ctx.jobTitle}`,
-        body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${dateLabel} at ${rate}.`,
+        body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${dateLabel} at ${clientRate}.`,
         actionUrl: '/app',
         bookingId,
         jobId: ctx.jobId,
@@ -632,7 +651,8 @@ export async function notifyNudge(bookingId: string) {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
     const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
-    const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
+    // Nudge goes to the talent — show their net rate.
+    const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot, true)
     const html = EmailTemplates.nudge({
       jobTitle: ctx.jobTitle,
       rateLabel: rate,
@@ -662,9 +682,10 @@ export async function notifyCounterOffer(bookingId: string, notes: string | null
     const ctx = await loadBookingContext(bookingId)
     if (!ctx) return
     const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
-    // Pull counter amount out of the notes string when possible.
+    // Counter-offer goes to admins — show both talent net (the stored
+    // offered_rate_cents) and what the client would have been billed.
     const counterLabel = ctx.offeredRateCents
-      ? `${rateLabel(ctx.offeredRateCents, ctx.isShortShoot)} (was offered)`
+      ? `Talent: ${fmtUsd(ctx.offeredRateCents)}/day · Client: ${fmtUsd(clientRateCents(ctx.offeredRateCents))}/day (was offered)`
       : 'see notes'
     const html = EmailTemplates.counterOffer({
       talentName: ctx.talentName,
@@ -739,27 +760,40 @@ export async function notifyFullyCrewed(jobId: string) {
       profiles: TalentJoin | TalentJoin[] | null
     }
     const confirmedRows = (confirmed ?? []) as ConfirmedRow[]
-    const talentList = confirmedRows
-      .map((b) => {
-        const p = Array.isArray(b.profiles) ? b.profiles[0] ?? null : b.profiles
-        if (!p) return null
-        const tp = p.talent_profiles
-          ? Array.isArray(p.talent_profiles)
-            ? p.talent_profiles[0] ?? null
-            : p.talent_profiles
-          : null
-        const name =
-          [p.first_name, p.last_name].filter(Boolean).join(' ') ||
-          p.full_name ||
-          'Talent'
-        const rate = rateLabel(
-          b.confirmed_rate_cents,
-          b.is_short_shoot === true
-        )
-        const role = tp?.primary_role ? ` — ${tp.primary_role}` : ''
-        return `${name}${role} — ${rate}`
-      })
-      .filter((x): x is string => Boolean(x))
+    const buildList = (forAdmin: boolean) =>
+      confirmedRows
+        .map((b) => {
+          const p = Array.isArray(b.profiles)
+            ? b.profiles[0] ?? null
+            : b.profiles
+          if (!p) return null
+          const tp = p.talent_profiles
+            ? Array.isArray(p.talent_profiles)
+              ? p.talent_profiles[0] ?? null
+              : p.talent_profiles
+            : null
+          const name =
+            [p.first_name, p.last_name].filter(Boolean).join(' ') ||
+            p.full_name ||
+            'Talent'
+          const role = tp?.primary_role ? ` — ${tp.primary_role}` : ''
+          if (forAdmin && b.confirmed_rate_cents != null) {
+            // Admin sees both rates so they can eyeball margin.
+            const isShort = b.is_short_shoot === true
+            const suffix = isShort ? '' : '/day'
+            const dual = `Talent: ${fmtUsd(b.confirmed_rate_cents)}${suffix} · Client: ${fmtUsd(clientRateCents(b.confirmed_rate_cents))}${suffix}`
+            return `${name}${role} — ${dual}`
+          }
+          // Client list: client-facing rate only (default forTalent=false).
+          const rate = rateLabel(
+            b.confirmed_rate_cents,
+            b.is_short_shoot === true
+          )
+          return `${name}${role} — ${rate}`
+        })
+        .filter((x): x is string => Boolean(x))
+    const talentList = buildList(false)
+    const adminTalentList = buildList(true)
 
     const jobRow = job as {
       id: string
@@ -802,7 +836,7 @@ export async function notifyFullyCrewed(jobId: string) {
     const adminHtml = EmailTemplates.fullyCrewed({
       jobTitle: jobRow.title,
       dateLabel: `${dateLabel} · ${jobRow.job_code ?? ''}`.trim(),
-      talentList,
+      talentList: adminTalentList,
       actionUrl: adminActionUrl,
     })
     const adminSubject = `✓ Fully crewed: ${jobRow.job_code ?? jobRow.title}`

@@ -26,14 +26,10 @@ const CARD_BORDER = 'rgba(170,189,224,0.15)'
 const CARD_BORDER_SOFT = 'rgba(170,189,224,0.1)'
 const TEXT_MUTED = '#AABDE0'
 
-// Rowly Studios 15% fee. offered_rate_cents / confirmed_rate_cents on a
-// booking is always the TALENT NET — i.e. what talent actually take
-// home. Client-facing amounts elsewhere in the app are marked up by
-// RS_MULTIPLIER. Constants are kept in sync with roster/page.tsx.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const RS_FEE = 0.15
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const RS_MULTIPLIER = 1.15
+// offered_rate_cents / confirmed_rate_cents on a booking is always the
+// TALENT NET — what talent actually take home. This component is
+// talent-facing only, so day_rate_cents is rendered as-is. For any
+// client-facing surface use clientRateCents() from @/lib/rates.
 
 type SheetBusy = 'confirm' | 'decline' | null
 

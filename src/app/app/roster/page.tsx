@@ -26,17 +26,21 @@ const BUTTON_PRIMARY = '#1A3C6B'
 // on DB rows are ALWAYS talent-net. Every client-facing surface marks them up
 // via toClientRate(), and every client-entered amount goes through
 // toTalentNet() before it hits the database.
-const RS_FEE = 0.15
-const RS_MULTIPLIER = 1 + RS_FEE // 1.15
+// Canonical rate math lives in @/lib/rates. The strict rule is
+// client_pays = talent_net / TALENT_SHARE (0.85), which makes the RS
+// fee exactly 15% of the client-paying rate. The earlier multiplier
+// model (talent_net × 1.15) gave only ~13% of client rate and is
+// retired.
+import { clientRateCents, TALENT_SHARE } from '@/lib/rates'
 
 /** Talent-net cents → what the client pays (display). */
 function toClientRate(talentNetCents: number): number {
-  return Math.round(talentNetCents * RS_MULTIPLIER)
+  return clientRateCents(talentNetCents)
 }
 
 /** Client-pays cents → talent-net cents (storage). */
 function toTalentNet(clientPaysCents: number): number {
-  return Math.round(clientPaysCents / RS_MULTIPLIER)
+  return Math.round(clientPaysCents * TALENT_SHARE)
 }
 
 type Side = 'production' | 'post'
@@ -1304,7 +1308,7 @@ function TalentCard({
           <p
             style={{ fontSize: 14, fontWeight: 700, color: TEXT_PRIMARY }}
           >
-            {/* Client-facing: talent net × RS_MULTIPLIER. */}
+            {/* Client-facing: talent net ÷ TALENT_SHARE (i.e. + 15% fee). */}
             {talent.day_rate_cents != null
               ? `$${(
                   toClientRate(talent.day_rate_cents) / 100

@@ -512,14 +512,24 @@ export default async function AdminJobDetailPage({
                         </span>
                       )}
                       {b.confirmed_rate_cents != null && (
-                        <span style={{ fontSize: 12, color: '#4ADE80', fontWeight: 600 }}>
-                          Confirmed: {centsToUsd(b.confirmed_rate_cents)}/day
-                        </span>
+                        <div className="flex flex-col items-end" style={{ gap: 2 }}>
+                          <span style={{ fontSize: 12, color: '#4ADE80', fontWeight: 600 }}>
+                            ✓ Talent: {centsToUsd(b.confirmed_rate_cents)}/day
+                          </span>
+                          <span style={{ fontSize: 11, color: '#AABDE0' }}>
+                            Client: {centsToUsd(Math.round(b.confirmed_rate_cents / 0.85))}/day
+                          </span>
+                        </div>
                       )}
                       {b.confirmed_rate_cents == null && b.offered_rate_cents != null && (
-                        <span style={{ fontSize: 12, color: '#AABDE0' }}>
-                          Offered: {centsToUsd(b.offered_rate_cents)}/day
-                        </span>
+                        <div className="flex flex-col items-end" style={{ gap: 2 }}>
+                          <span style={{ fontSize: 12, color: '#AABDE0' }}>
+                            Offered: {centsToUsd(b.offered_rate_cents)}/day
+                          </span>
+                          <span style={{ fontSize: 11, color: '#7A90AA' }}>
+                            Client: {centsToUsd(Math.round(b.offered_rate_cents / 0.85))}/day
+                          </span>
+                        </div>
                       )}
                       {b.paid && (
                         <span

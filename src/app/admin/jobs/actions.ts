@@ -422,7 +422,11 @@ export async function generateInvoice(formData: FormData) {
     const role = tp?.primary_role ?? null
     const startLabel = job.start_date ?? ''
     const desc = [name, role].filter(Boolean).join(' — ') + (startLabel ? ` (${startLabel})` : '')
-    const unit = b.confirmed_rate_cents ?? 0
+    // Invoice line items ALWAYS use the client-facing rate (talent net ÷ 0.85).
+    // The talent_net stored on the booking is take-home; the client owes
+    // the grossed-up figure that includes the RS platform fee.
+    const talentNet = b.confirmed_rate_cents ?? 0
+    const unit = Math.round(talentNet / 0.85)
     rows.push({
       invoice_id: inv.id,
       booking_id: b.id,

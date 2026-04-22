@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { clientRateCents } from '@/lib/rates'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -180,14 +181,19 @@ export default function RosterDetailPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
           <div style={{ paddingRight: 12 }}>
             <FieldLabel>Day rate</FieldLabel>
+            {/* Client-facing surface — gross up the talent net to what the client pays. */}
             <p style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-              {formatMoney(tp?.day_rate_cents)}
+              {tp?.day_rate_cents != null
+                ? formatMoney(clientRateCents(tp.day_rate_cents))
+                : formatMoney(null)}
             </p>
           </div>
           <div style={{ paddingLeft: 12, borderLeft: `1px solid ${CARD_BORDER}` }}>
             <FieldLabel>Rate floor</FieldLabel>
             <p style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-              {formatMoney(tp?.rate_floor_cents)}
+              {tp?.rate_floor_cents != null
+                ? formatMoney(clientRateCents(tp.rate_floor_cents))
+                : formatMoney(null)}
             </p>
           </div>
         </div>
