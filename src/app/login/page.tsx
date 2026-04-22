@@ -88,6 +88,9 @@ function LoginInner() {
   const [adminPassword, setAdminPassword] = useState('')
   const [adminStatus, setAdminStatus] = useState<AdminStatus>('idle')
   const [adminErrorMsg, setAdminErrorMsg] = useState('')
+  const [adminResetStatus, setAdminResetStatus] = useState<
+    'idle' | 'sending' | 'sent'
+  >('idle')
 
   const adminEmailRef = useRef<HTMLInputElement>(null)
   const adminFormRef = useRef<HTMLDivElement>(null)
@@ -487,6 +490,27 @@ function LoginInner() {
     router.refresh()
   }
 
+  async function handleAdminReset() {
+    if (!adminEmail || !EMAIL_RE.test(adminEmail)) {
+      setAdminStatus('error')
+      setAdminErrorMsg('Enter your email address above first.')
+      return
+    }
+    setAdminStatus('idle')
+    setAdminErrorMsg('')
+    setAdminResetStatus('sending')
+    const { error } = await supabase.auth.resetPasswordForEmail(adminEmail, {
+      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+    })
+    if (error) {
+      setAdminResetStatus('idle')
+      setAdminStatus('error')
+      setAdminErrorMsg(error.message)
+      return
+    }
+    setAdminResetStatus('sent')
+  }
+
   async function handleReset(e: React.FormEvent) {
     e.preventDefault()
     if (!resetEmail) return
@@ -494,7 +518,7 @@ function LoginInner() {
     setErrorMsg('')
 
     const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: window.location.origin + '/reset-password',
+      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
     })
 
     if (error) {
@@ -526,6 +550,7 @@ function LoginInner() {
         setAdminPassword('')
         setAdminStatus('idle')
         setAdminErrorMsg('')
+        setAdminResetStatus('idle')
       } else {
         // Opening — focus the (blank) email input. No pre-fill.
         setTimeout(() => {
@@ -1174,6 +1199,37 @@ function LoginInner() {
                         disabled={adminStatus === 'submitting'}
                         autoComplete="current-password"
                       />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={handleAdminReset}
+                          disabled={adminResetStatus === 'sending'}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#AABDE0',
+                            fontSize: 11,
+                            textDecoration: 'underline',
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          {adminResetStatus === 'sending'
+                            ? 'Sending…'
+                            : 'Forgot password?'}
+                        </button>
+                      </div>
+                      {adminResetStatus === 'sent' && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: '#A7E2C1',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Reset link sent to your email.
+                        </p>
+                      )}
                       <button
                         type="submit"
                         disabled={
