@@ -11,3 +11,6 @@ build/
 .idea/
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Local-only one-off scripts (do not commit)
+gen-admin-link.mjs
