@@ -1,9 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
-import { StatusBadge } from '@/components/StatusBadge'
 import { DashboardRefreshButton } from '@/components/DashboardRefreshButton'
-import { OffersInFlight, type OfferInFlight } from './OffersInFlight'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +16,6 @@ function laToday(): string {
   }).format(new Date())
 }
 
-/** Hour 0–23 in LA time. */
 function laHour(): number {
   const s = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',
@@ -45,37 +42,74 @@ function laLongDate(): string {
   }).format(new Date())
 }
 
-function daysOut(base: string, n: number): string {
-  // base is YYYY-MM-DD; compute base+n days in ISO.
-  const parts = base.split('-').map(Number)
-  const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]))
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
-}
-
 function dateDayMonth(iso: string | null): { day: string; month: string } {
   if (!iso) return { day: '—', month: '' }
   const parts = iso.split('-').map(Number)
   if (parts.length !== 3 || parts.some(Number.isNaN)) return { day: '—', month: '' }
   const d = new Date(parts[0], parts[1] - 1, parts[2])
   const day = String(d.getDate())
-  const month = d
-    .toLocaleString('en-US', { month: 'short' })
-    .toUpperCase()
+  const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase()
   return { day, month }
 }
 
-function shortDate(iso: string | null): string {
+function relativeTime(iso: string | null): string {
   if (!iso) return ''
-  const parts = iso.split('-').map(Number)
-  if (parts.length !== 3 || parts.some(Number.isNaN)) return ''
-  const d = new Date(parts[0], parts[1] - 1, parts[2])
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000))
+  if (diffSec < 60) return 'just now'
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  return `${diffDay}d ago`
 }
 
 function unwrap<T>(v: T | T[] | null | undefined): T | null {
   if (v == null) return null
-  return Array.isArray(v) ? v[0] ?? null : v
+  return Array.isArray(v) ? (v[0] ?? null) : v
+}
+
+type ClientJoin = {
+  full_name: string | null
+  client_profiles:
+    | { company_name: string | null }
+    | { company_name: string | null }[]
+    | null
+}
+
+type UpcomingRow = {
+  id: string
+  title: string
+  status: string
+  start_date: string | null
+  num_talent: number | null
+  profiles: ClientJoin | ClientJoin[] | null
+}
+
+type NotificationRow = {
+  id: string
+  type: string
+  title: string
+  body: string | null
+  action_url: string | null
+  link: string | null
+  created_at: string
+  priority: string
+  user_id: string
+}
+
+type InvoiceRow = {
+  job_id: string | null
+  status: string
+}
+
+function clientDisplay(p: ClientJoin | ClientJoin[] | null): string {
+  const row = unwrap(p)
+  if (!row) return 'Unknown client'
+  const cp = unwrap(row.client_profiles)
+  return cp?.company_name || row.full_name || 'Unknown client'
 }
 
 export default async function AdminDashboardPage() {
@@ -84,306 +118,151 @@ export default async function AdminDashboardPage() {
     profile.first_name ?? profile.full_name?.split(' ')[0] ?? 'there'
 
   const today = laToday()
-  const thirtyOut = daysOut(today, 30)
+  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
 
-  // ─── Query 1: counts + sums, run as parallel head-only selects ───
+  // ─── Parallel queries ───
   const [
-    verifiedTalentRes,
-    verifiedClientsRes,
-    pendingAppsRes,
-    pendingClientsRes,
+    // Stat summary (4 chips, non-tappable)
     activeJobsRes,
     outstandingInvoicesRes,
-    invoiceTotalsRes,
+    verifiedTalentRes,
+    pendingAppsRes,
+    // Action chip counts (only shown when > 0)
+    offersAwaitingRes,
+    readyToInvoiceRes,
+    overdueInvoicesRes,
+    // Next 5 upcoming jobs
     upcomingRes,
-    recentRes,
-    todaysBookingsRes,
-    offersInFlightRes,
+    // Activity feed — last 15 notifications from past 48hrs
+    notificationsRes,
   ] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'talent')
-      .eq('verified', true),
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'client')
-      .eq('verified', true),
-    supabase
-      .from('talent_applications')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending'),
-    supabase
-      .from('profiles')
-      .select('id', { count: 'exact', head: true })
-      .eq('role', 'client')
-      .eq('verified', false),
     supabase
       .from('jobs')
       .select('id', { count: 'exact', head: true })
       .in('status', ['crewing', 'submitted']),
     supabase
       .from('invoices')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ['sent', 'overdue']),
-    supabase
-      .from('invoices')
       .select('status, total_cents')
       .in('status', ['sent', 'overdue']),
-    // Query 2 — upcoming jobs, next 30 days
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'talent')
+      .eq('verified', true),
+    supabase
+      .from('talent_applications')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending'),
+    supabase
+      .from('job_bookings')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['requested', 'negotiating']),
+    supabase
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'draft'),
+    supabase
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'overdue'),
     supabase
       .from('jobs')
       .select(
-        `id, title, status, start_date, end_date, location, call_time,
-         day_rate_cents, num_talent, address_city, address_state,
+        `id, title, status, start_date, num_talent,
          profiles!jobs_client_id_fkey (full_name,
            client_profiles (company_name))`
       )
       .gte('start_date', today)
-      .lte('start_date', thirtyOut)
       .neq('status', 'cancelled')
       .order('start_date', { ascending: true })
-      .limit(10),
-    // Query 3 — recent activity (by updated_at desc)
-    supabase
-      .from('jobs')
-      .select(
-        `id, title, status, start_date, updated_at,
-         profiles!jobs_client_id_fkey (full_name,
-           client_profiles (company_name))`
-      )
-      .order('updated_at', { ascending: false })
       .limit(5),
-    // Query 4 — today's bookings (j.start_date = today)
     supabase
-      .from('job_bookings')
-      .select(
-        `id, status, confirmed_rate_cents,
-         jobs!inner (id, title, call_time, location, start_date),
-         profiles!job_bookings_talent_id_fkey (id, full_name, first_name,
-           last_name, avatar_url)`
-      )
-      .filter('jobs.start_date', 'eq', today)
-      .neq('status', 'declined')
-      .neq('status', 'cancelled'),
-    // Query 5 — offers in flight (requested / negotiating on active jobs).
-    supabase
-      .from('job_bookings')
-      .select(
-        `id, status, offered_rate_cents, talent_reviewed_at,
-         response_deadline_at, nudge_count, auto_accepted,
-         jobs!inner (id, title, job_code, status, start_date, location, num_talent,
-           profiles!jobs_client_id_fkey (full_name,
-             client_profiles (company_name))),
-         profiles!job_bookings_talent_id_fkey (id, full_name, avatar_url,
-           talent_profiles (primary_role))`
-      )
-      .in('status', ['requested', 'negotiating'])
-      .order('created_at', { ascending: true }),
+      .from('notifications')
+      .select('id, type, title, body, action_url, link, created_at, priority, user_id')
+      .gte('created_at', fortyEightHoursAgo)
+      .is('cleared_at', null)
+      .order('created_at', { ascending: false })
+      .limit(15),
   ])
 
-  const verifiedTalent = verifiedTalentRes.count ?? 0
-  const verifiedClients = verifiedClientsRes.count ?? 0
-  const pendingApps = pendingAppsRes.count ?? 0
-  const pendingClients = pendingClientsRes.count ?? 0
   const activeJobs = activeJobsRes.count ?? 0
-  const outstandingInvoices = outstandingInvoicesRes.count ?? 0
-  const overdueCents = (invoiceTotalsRes.data ?? [])
-    .filter((r) => r.status === 'overdue')
-    .reduce((s, r) => s + (r.total_cents ?? 0), 0)
-  const sentCents = (invoiceTotalsRes.data ?? [])
-    .filter((r) => r.status === 'sent')
-    .reduce((s, r) => s + (r.total_cents ?? 0), 0)
-  const totalApprovals = pendingApps + pendingClients
+  const outstandingCents = (outstandingInvoicesRes.data ?? []).reduce(
+    (s, r) => s + (r.total_cents ?? 0),
+    0
+  )
+  const verifiedTalent = verifiedTalentRes.count ?? 0
+  const pendingApps = pendingAppsRes.count ?? 0
+  const offersAwaiting = offersAwaitingRes.count ?? 0
+  const readyToInvoice = readyToInvoiceRes.count ?? 0
+  const overdueInvoices = overdueInvoicesRes.count ?? 0
 
-  type ClientJoin = {
-    full_name: string | null
-    client_profiles:
-      | { company_name: string | null }
-      | { company_name: string | null }[]
-      | null
-  }
-
-  type UpcomingRow = {
-    id: string
-    title: string
-    status: string
-    start_date: string | null
-    end_date: string | null
-    location: string | null
-    call_time: string | null
-    day_rate_cents: number | null
-    num_talent: number | null
-    address_city: string | null
-    address_state: string | null
-    profiles: ClientJoin | ClientJoin[] | null
-  }
   const upcoming = (upcomingRes.data ?? []) as unknown as UpcomingRow[]
+  const notifications = (notificationsRes.data ?? []) as NotificationRow[]
 
-  type RecentRow = {
-    id: string
-    title: string
-    status: string
-    start_date: string | null
-    updated_at: string | null
-    profiles: ClientJoin | ClientJoin[] | null
-  }
-  const recent = (recentRes.data ?? []) as unknown as RecentRow[]
+  // ─── Booking + invoice status per upcoming job ───
+  const upcomingIds = upcoming.map((j) => j.id)
+  const [bookingsPerJobRes, invoicesPerJobRes] = await Promise.all([
+    upcomingIds.length
+      ? supabase
+          .from('job_bookings')
+          .select('job_id, status')
+          .in('job_id', upcomingIds)
+      : Promise.resolve({ data: [] as { job_id: string; status: string }[] }),
+    upcomingIds.length
+      ? supabase
+          .from('invoices')
+          .select('job_id, status')
+          .in('job_id', upcomingIds)
+      : Promise.resolve({ data: [] as InvoiceRow[] }),
+  ])
 
-  type TodayRow = {
-    id: string
-    status: string
-    confirmed_rate_cents: number | null
-    jobs:
-      | {
-          id: string
-          title: string
-          call_time: string | null
-          location: string | null
-          start_date: string | null
-        }
-      | {
-          id: string
-          title: string
-          call_time: string | null
-          location: string | null
-          start_date: string | null
-        }[]
-      | null
-    profiles:
-      | {
-          id: string
-          full_name: string | null
-          first_name: string | null
-          last_name: string | null
-          avatar_url: string | null
-        }
-      | {
-          id: string
-          full_name: string | null
-          first_name: string | null
-          last_name: string | null
-          avatar_url: string | null
-        }[]
-      | null
-  }
-  const todayBookings = (todaysBookingsRes.data ?? []) as unknown as TodayRow[]
-  // Sort by call_time ascending (null call_time goes last).
-  todayBookings.sort((a, b) => {
-    const ja = unwrap(a.jobs)
-    const jb = unwrap(b.jobs)
-    const ca = ja?.call_time ?? '99:99'
-    const cb = jb?.call_time ?? '99:99'
-    return ca.localeCompare(cb)
-  })
-
-  function clientDisplay(p: ClientJoin | ClientJoin[] | null): string {
-    const row = unwrap(p)
-    if (!row) return 'Unknown client'
-    const cp = unwrap(row.client_profiles)
-    return cp?.company_name || row.full_name || 'Unknown client'
+  const confirmedByJob = new Map<string, number>()
+  for (const b of bookingsPerJobRes.data ?? []) {
+    if (b.status === 'confirmed' || b.status === 'completed') {
+      confirmedByJob.set(b.job_id, (confirmedByJob.get(b.job_id) ?? 0) + 1)
+    }
   }
 
-  function talentDisplay(p: TodayRow['profiles']): string {
-    const row = unwrap(p)
-    if (!row) return 'Talent'
-    return (
-      [row.first_name, row.last_name].filter(Boolean).join(' ') ||
-      row.full_name ||
-      'Talent'
-    )
+  // Invoice state per job: 'paid' wins over 'sent'/'overdue' wins over 'draft' wins over none.
+  const invoiceStateByJob = new Map<string, 'paid' | 'invoiced' | 'none'>()
+  for (const inv of invoicesPerJobRes.data ?? []) {
+    if (!inv.job_id) continue
+    const cur = invoiceStateByJob.get(inv.job_id)
+    if (inv.status === 'paid') {
+      invoiceStateByJob.set(inv.job_id, 'paid')
+    } else if (inv.status === 'sent' || inv.status === 'overdue') {
+      if (cur !== 'paid') invoiceStateByJob.set(inv.job_id, 'invoiced')
+    } else if (inv.status === 'draft') {
+      if (!cur) invoiceStateByJob.set(inv.job_id, 'invoiced')
+    }
   }
 
-  function initials(name: string): string {
-    const parts = name.trim().split(/\s+/).slice(0, 2)
-    return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
-  }
-
-  // ─── Offers in flight ───
-  type OfferRaw = {
-    id: string
-    status: string
-    offered_rate_cents: number | null
-    talent_reviewed_at: string | null
-    response_deadline_at: string | null
-    nudge_count: number | null
-    auto_accepted: boolean | null
-    jobs:
-      | {
-          id: string
-          title: string
-          job_code: string | null
-          status: string
-          start_date: string | null
-          location: string | null
-          num_talent: number | null
-          profiles: ClientJoin | ClientJoin[] | null
-        }
-      | {
-          id: string
-          title: string
-          job_code: string | null
-          status: string
-          start_date: string | null
-          location: string | null
-          num_talent: number | null
-          profiles: ClientJoin | ClientJoin[] | null
-        }[]
-      | null
-    profiles:
-      | {
-          id: string
-          full_name: string | null
-          avatar_url: string | null
-          talent_profiles:
-            | { primary_role: string | null }
-            | { primary_role: string | null }[]
-            | null
-        }
-      | {
-          id: string
-          full_name: string | null
-          avatar_url: string | null
-          talent_profiles:
-            | { primary_role: string | null }
-            | { primary_role: string | null }[]
-            | null
-        }[]
-      | null
-  }
-  const rawOffers = (offersInFlightRes.data ?? []) as unknown as OfferRaw[]
-  const offers: OfferInFlight[] = []
-  for (const r of rawOffers) {
-    const job = unwrap(r.jobs)
-    if (!job) continue
-    // Spec excludes wrapped/cancelled jobs (the !inner already filters most
-    // of these, but double-check in case a job just flipped).
-    if (job.status === 'cancelled' || job.status === 'wrapped') continue
-    const talent = unwrap(r.profiles)
-    const tp = talent ? unwrap(talent.talent_profiles) : null
-    offers.push({
-      bookingId: r.id,
-      bookingStatus: (r.status === 'negotiating'
-        ? 'negotiating'
-        : 'requested') as 'requested' | 'negotiating',
-      offeredRateCents: r.offered_rate_cents,
-      talentReviewedAt: r.talent_reviewed_at,
-      responseDeadlineAt: r.response_deadline_at,
-      nudgeCount: r.nudge_count,
-      autoAccepted: Boolean(r.auto_accepted),
-      jobId: job.id,
-      jobTitle: job.title,
-      jobCode: job.job_code,
-      jobStart: job.start_date,
-      jobLocation: job.location,
-      talentId: talent?.id ?? '',
-      talentName: talent?.full_name ?? 'Talent',
-      talentRole: tp?.primary_role ?? null,
-      talentAvatar: talent?.avatar_url ?? null,
-      clientName: clientDisplay(job.profiles),
+  // ─── Action chips — only rendered when count > 0 ───
+  const actionChips: { label: string; count: number; href: string }[] = []
+  if (pendingApps > 0)
+    actionChips.push({
+      label: 'Pending applications',
+      count: pendingApps,
+      href: '/admin/applications',
     })
-  }
+  if (offersAwaiting > 0)
+    actionChips.push({
+      label: 'Offers awaiting response',
+      count: offersAwaiting,
+      href: '/admin/jobs',
+    })
+  if (readyToInvoice > 0)
+    actionChips.push({
+      label: 'Ready to invoice',
+      count: readyToInvoice,
+      href: '/admin/finance',
+    })
+  if (overdueInvoices > 0)
+    actionChips.push({
+      label: 'Overdue invoices',
+      count: overdueInvoices,
+      href: '/admin/finance',
+    })
 
   return (
     <div className="px-5 pt-5 pb-6 mx-auto" style={{ maxWidth: 720 }}>
@@ -400,101 +279,216 @@ export default async function AdminDashboardPage() {
         <DashboardRefreshButton />
       </div>
 
-      {/* Alert banner */}
-      {totalApprovals > 0 && (
-        <Link
-          href={pendingApps > 0 ? '/admin/talent' : '/admin/clients'}
-          className="mt-4 flex items-center justify-between rounded-xl px-4 py-3 bg-amber-500/15 border border-amber-500/30 text-amber-300"
-          style={{ textDecoration: 'none' }}
+      {/* Today's Actions Strip — horizontal scroll of amber chips */}
+      {actionChips.length > 0 && (
+        <div
+          className="mt-5 -mx-5 px-5"
+          style={{
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+          }}
         >
-          <span className="flex items-center gap-2 text-[13px] font-semibold">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            {totalApprovals} account{totalApprovals === 1 ? '' : 's'} waiting for approval
-          </span>
-          <span className="text-[13px] font-semibold">Review →</span>
-        </Link>
+          <div className="flex gap-2" style={{ width: 'max-content' }}>
+            {actionChips.map((c) => (
+              <Link
+                key={c.label}
+                href={c.href}
+                className="inline-flex items-center gap-2 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 transition-colors"
+                style={{
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  minHeight: 44,
+                }}
+              >
+                <span
+                  className="inline-flex items-center justify-center rounded-full bg-amber-500/30"
+                  style={{
+                    minWidth: 22,
+                    height: 22,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: '0 6px',
+                  }}
+                >
+                  {c.count}
+                </span>
+                <span>{c.label}</span>
+                <span aria-hidden style={{ fontSize: 14, marginLeft: 2 }}>
+                  →
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
-      {/* Stat cards 2×2 */}
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <StatCard
-          href="/admin/jobs"
-          label="Active jobs"
-          value={activeJobs}
-          sub="crewing or submitted"
-        />
-        <StatCard
-          href="/admin/jobs"
-          label="Upcoming"
-          value={upcoming.length}
-          sub="next 30 days"
-        />
-        <StatCard
-          href="/admin/finance"
-          label="Invoices due"
-          value={outstandingInvoices}
-          sub={centsToUsd(sentCents + overdueCents)}
-        />
-        <StatCard
-          href="/admin/talent"
-          label="Talent"
-          value={verifiedTalent}
-          sub={`${verifiedClients} client${verifiedClients === 1 ? '' : 's'}`}
-        />
-      </div>
-
-      {/* Quick action */}
-      <Link
-        href="/admin/jobs/new"
-        className="mt-4 flex items-center justify-center rounded-xl bg-[#1E3A6B] hover:bg-[#253D8A] text-white transition-colors"
-        style={{
-          padding: '14px 16px',
-          fontSize: 15,
-          fontWeight: 500,
-          textDecoration: 'none',
-          letterSpacing: '0.02em',
-        }}
-      >
-        + New job
-      </Link>
-
-      {/* Offers in flight */}
-      <OffersInFlight offers={offers} />
-
-      {/* Upcoming shoots */}
+      {/* Activity Feed — last 15 notifications from past 48hrs */}
       <section className="mt-6">
-        <SectionHeading title="Upcoming shoots" href="/admin/jobs" />
+        <h2
+          className="text-white"
+          style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }}
+        >
+          Activity
+        </h2>
+        {notifications.length === 0 ? (
+          <div
+            className="rounded-xl bg-[#1A2E4A] border border-white/5"
+            style={{ padding: '18px 16px' }}
+          >
+            <p className="text-center" style={{ fontSize: 13, color: '#7A90AA' }}>
+              No activity in the last 48 hours
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl bg-[#1A2E4A] border border-white/5 overflow-hidden">
+            {notifications.map((n, i) => {
+              const href = n.action_url || n.link || '#'
+              const icon = notificationIcon(n.type)
+              const dotColor = priorityColor(n.priority)
+              return (
+                <Link
+                  key={n.id}
+                  href={href}
+                  className="flex items-center gap-3 hover:bg-white/5 transition-colors"
+                  style={{
+                    padding: '12px 14px',
+                    textDecoration: 'none',
+                    color: '#fff',
+                    borderTop: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-center rounded-full relative"
+                    style={{
+                      width: 32,
+                      height: 32,
+                      background: '#253D5E',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }} aria-hidden>
+                      {icon}
+                    </span>
+                    {n.priority === 'high' || n.priority === 'urgent' ? (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          top: -1,
+                          right: -1,
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: dotColor,
+                          border: '1.5px solid #1A2E4A',
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p
+                      className="text-white"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        lineHeight: 1.35,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {n.title}
+                    </p>
+                    {n.body && (
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: '#AABDE0',
+                          marginTop: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {n.body}
+                      </p>
+                    )}
+                  </div>
+                  <div
+                    className="flex items-center gap-2"
+                    style={{ flexShrink: 0 }}
+                  >
+                    <span style={{ fontSize: 11, color: '#7A90AA' }}>
+                      {relativeTime(n.created_at)}
+                    </span>
+                    <span aria-hidden style={{ color: '#7A90AA', fontSize: 14 }}>
+                      →
+                    </span>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Next 5 Upcoming Jobs — condensed cards with two stacked chips */}
+      <section className="mt-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-white" style={{ fontSize: 16, fontWeight: 600 }}>
+            Next 5 upcoming
+          </h2>
+          <Link
+            href="/admin/jobs"
+            className="text-amber-400 hover:text-amber-300"
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textDecoration: 'none',
+            }}
+          >
+            See all →
+          </Link>
+        </div>
         {upcoming.length === 0 ? (
           <div
             className="mt-3 rounded-xl bg-[#1A2E4A] border border-white/5"
             style={{ padding: '22px 20px' }}
           >
             <p className="text-center" style={{ fontSize: 13, color: '#7A90AA' }}>
-              No shoots in the next 30 days
+              No upcoming jobs
             </p>
           </div>
         ) : (
           <div className="mt-3 flex flex-col gap-2.5">
-            {upcoming.slice(0, 5).map((j) => {
+            {upcoming.map((j) => {
               const dm = dateDayMonth(j.start_date)
-              const loc =
-                [j.address_city, j.address_state].filter(Boolean).join(', ') ||
-                j.location ||
-                ''
+              const confirmed = confirmedByJob.get(j.id) ?? 0
+              const needed = j.num_talent ?? 1
+              const invState = invoiceStateByJob.get(j.id) ?? 'none'
+              const invoiceLabel =
+                invState === 'paid'
+                  ? 'Paid'
+                  : invState === 'invoiced'
+                    ? 'Invoiced'
+                    : 'Not invoiced'
+              const invoiceChipStyle =
+                invState === 'paid'
+                  ? 'bg-green-900/40 text-green-300'
+                  : invState === 'invoiced'
+                    ? 'bg-blue-900/40 text-blue-300'
+                    : 'bg-gray-800/60 text-gray-400'
+              const bookingChipStyle =
+                confirmed >= needed
+                  ? 'bg-green-900/40 text-green-300'
+                  : confirmed > 0
+                    ? 'bg-amber-900/40 text-amber-300'
+                    : 'bg-gray-800/60 text-gray-400'
               return (
                 <Link
                   key={j.id}
@@ -555,259 +549,77 @@ export default async function AdminDashboardPage() {
                       >
                         {clientDisplay(j.profiles)}
                       </p>
-                      {loc && (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: '#7A90AA',
-                            marginTop: 2,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {loc}
-                        </p>
-                      )}
-                      {j.call_time && (
-                        <p style={{ fontSize: 12, color: '#7A90AA', marginTop: 2 }}>
-                          Call: {j.call_time.slice(0, 5)}
-                        </p>
-                      )}
                     </div>
 
                     <div
-                      className="flex flex-col items-end gap-2"
+                      className="flex flex-col items-end gap-1.5"
                       style={{ flexShrink: 0 }}
                     >
-                      <StatusBadge status={j.status} size="sm" />
-                      {j.day_rate_cents != null && (
-                        <span
-                          className="text-white"
-                          style={{ fontSize: 13, fontWeight: 600 }}
-                        >
-                          {centsToUsd(j.day_rate_cents)}/day
-                        </span>
-                      )}
+                      <span
+                        className={bookingChipStyle}
+                        style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {confirmed}/{needed} confirmed
+                      </span>
+                      <span
+                        className={invoiceChipStyle}
+                        style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {invoiceLabel}
+                      </span>
                     </div>
                   </div>
                 </Link>
               )
             })}
-            {upcoming.length > 5 && (
-              <Link
-                href="/admin/jobs"
-                className="text-center text-amber-400 hover:text-amber-300"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  padding: '6px 0',
-                  textDecoration: 'none',
-                }}
-              >
-                View all {upcoming.length} →
-              </Link>
-            )}
           </div>
         )}
       </section>
 
-      {/* Today's shoots */}
-      {todayBookings.length > 0 && (
-        <section className="mt-6">
-          <h2
-            className="text-white"
-            style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }}
-          >
-            Today
-          </h2>
-          <div className="flex flex-col gap-2.5">
-            {todayBookings.map((b) => {
-              const job = unwrap(b.jobs)
-              const talent = unwrap(b.profiles)
-              const name = talentDisplay(b.profiles)
-              return (
-                <Link
-                  key={b.id}
-                  href={job ? `/admin/jobs/${job.id}` : '/admin/jobs'}
-                  className="block rounded-xl bg-green-900/20 border border-green-500/20 hover:border-green-500/40 transition-colors"
-                  style={{ padding: 14, textDecoration: 'none' }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="flex items-center justify-center rounded-full overflow-hidden"
-                      style={{
-                        width: 40,
-                        height: 40,
-                        background: '#1E3A6B',
-                        color: '#fff',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {talent?.avatar_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={talent.avatar_url}
-                          alt=""
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        initials(name)
-                      )}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p
-                        className="text-white"
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 500,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {name}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: 13,
-                          color: '#AABDE0',
-                          marginTop: 1,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {job?.title ?? 'Untitled job'}
-                      </p>
-                      {job?.location && (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: '#7A90AA',
-                            marginTop: 1,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {job.location}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5" style={{ flexShrink: 0 }}>
-                      {job?.call_time && (
-                        <span
-                          className="text-white"
-                          style={{ fontSize: 13, fontWeight: 700 }}
-                        >
-                          {job.call_time.slice(0, 5)}
-                        </span>
-                      )}
-                      <StatusBadge status={b.status} size="sm" />
-                    </div>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Recent activity */}
+      {/* Stat Summary Row — 4 non-tappable chips in 2x2 grid */}
       <section className="mt-6">
-        <h2
-          className="text-white"
-          style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}
-        >
-          Recent
-        </h2>
-        {recent.length === 0 ? (
-          <p style={{ fontSize: 13, color: '#7A90AA', fontStyle: 'italic' }}>
-            No recent activity
-          </p>
-        ) : (
-          <div>
-            {recent.map((j) => (
-              <Link
-                key={j.id}
-                href={`/admin/jobs/${j.id}`}
-                className="flex items-center gap-3 border-b border-white/5"
-                style={{
-                  padding: '12px 0',
-                  textDecoration: 'none',
-                  color: '#fff',
-                }}
-              >
-                <StatusBadge status={j.status} size="sm" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p
-                    className="text-white"
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {j.title}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: '#7A90AA',
-                      marginTop: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {clientDisplay(j.profiles)}
-                  </p>
-                </div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: '#7A90AA',
-                    flexShrink: 0,
-                  }}
-                >
-                  {shortDate(j.updated_at ?? j.start_date ?? null)}
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
+        <div className="admin-grid grid grid-cols-2 gap-3">
+          <SummaryChip label="Active jobs" value={activeJobs} />
+          <SummaryChip label="Outstanding" value={centsToUsd(outstandingCents)} />
+          <SummaryChip label="Talent" value={verifiedTalent} />
+          <SummaryChip label="Pending apps" value={pendingApps} />
+        </div>
       </section>
     </div>
   )
 }
 
-function StatCard({
-  href,
+function SummaryChip({
   label,
   value,
-  sub,
 }: {
-  href: string
   label: string
   value: number | string
-  sub: string
 }) {
   return (
-    <Link
-      href={href}
-      className="block rounded-xl bg-[#1A2E4A] border border-white/5 hover:border-white/10 transition-colors relative"
-      style={{ padding: 16, textDecoration: 'none' }}
+    <div
+      className="rounded-xl bg-[#1A2E4A] border border-white/5"
+      style={{ padding: 14 }}
     >
       <p
         className="text-white"
-        style={{ fontSize: 32, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}
+        style={{ fontSize: 22, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}
       >
         {value}
       </p>
@@ -823,47 +635,22 @@ function StatCard({
       >
         {label}
       </p>
-      <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 4 }}>{sub}</p>
-      <span
-        aria-hidden
-        style={{
-          position: 'absolute',
-          right: 12,
-          bottom: 12,
-          color: '#7A90AA',
-          fontSize: 14,
-          lineHeight: 1,
-        }}
-      >
-        →
-      </span>
-    </Link>
+    </div>
   )
 }
 
-function SectionHeading({ title, href }: { title: string; href?: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <h2
-        className="text-white"
-        style={{ fontSize: 16, fontWeight: 600 }}
-      >
-        {title}
-      </h2>
-      {href && (
-        <Link
-          href={href}
-          className="text-amber-400 hover:text-amber-300"
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: '0.04em',
-            textDecoration: 'none',
-          }}
-        >
-          See all →
-        </Link>
-      )}
-    </div>
-  )
+function notificationIcon(type: string): string {
+  const t = type.toLowerCase()
+  if (t.includes('invoice') || t.includes('payment') || t.includes('paid')) return '$'
+  if (t.includes('booking') || t.includes('offer')) return '●'
+  if (t.includes('application') || t.includes('signup')) return '+'
+  if (t.includes('job') || t.includes('wrap') || t.includes('call_sheet')) return '▸'
+  if (t.includes('restricted') || t.includes('alert') || t.includes('warning')) return '!'
+  return '•'
+}
+
+function priorityColor(priority: string): string {
+  if (priority === 'urgent') return '#EF4444'
+  if (priority === 'high') return '#F59E0B'
+  return '#7A90AA'
 }
