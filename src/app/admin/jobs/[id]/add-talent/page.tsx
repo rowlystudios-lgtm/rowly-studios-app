@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import { addTalentToJob } from '../../actions'
 
@@ -49,15 +49,54 @@ function clientRate(talentNetCents: number | null | undefined): string {
   return `$${(Math.round(talentNetCents * 1.15) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
+/** Client-safe job-date expansion (mirrors buildJobDates in admin actions). */
+function buildJobDatesClient(
+  startDate: string | null,
+  endDate: string | null,
+  shootDays: unknown
+): string[] {
+  if (Array.isArray(shootDays) && shootDays.length > 0) {
+    return (shootDays as Array<{ date?: string }>)
+      .map((d) => d.date ?? '')
+      .filter(Boolean)
+  }
+  if (!startDate) return []
+  const dates: string[] = []
+  const start = new Date(startDate + 'T12:00:00')
+  const end = endDate ? new Date(endDate + 'T12:00:00') : start
+  const cur = new Date(start)
+  while (cur <= end) {
+    const y = cur.getFullYear()
+    const m = String(cur.getMonth() + 1).padStart(2, '0')
+    const d = String(cur.getDate()).padStart(2, '0')
+    dates.push(`${y}-${m}-${d}`)
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+
 export default function AddTalentPage() {
+  return (
+    <Suspense fallback={null}>
+      <AddTalentPageInner />
+    </Suspense>
+  )
+}
+
+function AddTalentPageInner() {
   const params = useParams<{ id: string }>()
   const jobId = params?.id ?? ''
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const errorType = searchParams.get('error')
+  const blockedDates = searchParams.get('blocked')
 
   const [jobTitle, setJobTitle] = useState<string | null>(null)
   const [jobRateCents, setJobRateCents] = useState<number | null>(null)
   const [jobBudgetCents, setJobBudgetCents] = useState<number | null>(null)
   const [jobDurationHours, setJobDurationHours] = useState<number | null>(null)
+  const [jobDates, setJobDates] = useState<string[]>([])
+  const [unavailableIds, setUnavailableIds] = useState<Set<string>>(new Set())
   const isShortShoot = jobDurationHours != null && jobDurationHours < 4
   const hasNoRate = jobRateCents == null && jobBudgetCents == null
   const [talent, setTalent] = useState<TalentRow[]>([])
@@ -77,7 +116,7 @@ export default function AddTalentPage() {
         supabase
           .from('jobs')
           .select(
-            'title, day_rate_cents, client_budget_cents, shoot_duration_hours'
+            'title, day_rate_cents, client_budget_cents, shoot_duration_hours, start_date, end_date, shoot_days'
           )
           .eq('id', jobId)
           .maybeSingle(),
@@ -113,6 +152,30 @@ export default function AddTalentPage() {
             .filter((id): id is string => id !== null)
         )
       )
+
+      // Compute job dates + load every talent's unavailability for those dates.
+      const dates = buildJobDatesClient(
+        jobRes.data?.start_date ?? null,
+        jobRes.data?.end_date ?? null,
+        jobRes.data?.shoot_days
+      )
+      setJobDates(dates)
+      if (dates.length > 0) {
+        const { data: unavailData } = await supabase
+          .from('talent_unavailability')
+          .select('talent_id, date')
+          .in('date', dates)
+        if (!cancelled) {
+          setUnavailableIds(
+            new Set(
+              (unavailData ?? []).map(
+                (r: { talent_id: string }) => r.talent_id
+              )
+            )
+          )
+        }
+      }
+
       setLoading(false)
     }
     load()
@@ -195,6 +258,42 @@ export default function AddTalentPage() {
       >
         ← Back to job
       </Link>
+      {errorType === 'unavailable' && (
+        <div
+          style={{
+            background: 'rgba(248,113,113,0.12)',
+            border: '1px solid rgba(248,113,113,0.35)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            marginTop: 12,
+            marginBottom: 4,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: '#F87171',
+              marginBottom: 4,
+            }}
+          >
+            ⚠️ Talent is unavailable on these dates
+          </p>
+          <p style={{ fontSize: 12, color: '#F87171' }}>
+            {blockedDates ?? 'One or more job dates are blocked'}
+          </p>
+          <p
+            style={{
+              fontSize: 11,
+              color: 'rgba(248,113,113,0.7)',
+              marginTop: 4,
+            }}
+          >
+            The talent has marked these dates as unavailable. Choose a different
+            talent or ask the talent to update their availability first.
+          </p>
+        </div>
+      )}
       <h1
         className="text-white"
         style={{ fontSize: 18, fontWeight: 600, marginTop: 8 }}
@@ -327,6 +426,7 @@ export default function AddTalentPage() {
                 busy={busy}
                 jobBudgetCents={jobBudgetCents}
                 isShortShoot={isShortShoot}
+                isUnavailable={unavailableIds.has(t.id)}
                 draft={draft}
                 setDraft={(v) => setDraftFor(t.id, v)}
                 onAdd={() => handleAdd(t)}
@@ -354,6 +454,7 @@ function TalentCard({
   busy,
   jobBudgetCents,
   isShortShoot,
+  isUnavailable,
   draft,
   setDraft,
   onAdd,
@@ -365,6 +466,7 @@ function TalentCard({
   busy: boolean
   jobBudgetCents: number | null
   isShortShoot: boolean
+  isUnavailable: boolean
   draft: string
   setDraft: (v: string) => void
   onAdd: () => void
@@ -402,7 +504,8 @@ function TalentCard({
     (dayRate == null || draftCents >= dayRate) &&
     !isShortShoot
 
-  const canAdd = !busy && !already && draftCents != null && !belowFloor
+  const canAdd =
+    !busy && !already && !isUnavailable && draftCents != null && !belowFloor
 
   // Set the input to a specific dollar value — used by the quick-choice buttons.
   function pick(cents: number | null) {
@@ -415,11 +518,32 @@ function TalentCard({
       className="rounded-xl"
       style={{
         background: '#1A2E4A',
-        border: '1px solid rgba(255,255,255,0.05)',
+        border: isUnavailable
+          ? '1px solid rgba(240,165,0,0.4)'
+          : '1px solid rgba(255,255,255,0.05)',
         padding: 14,
-        opacity: already ? 0.55 : 1,
+        opacity: already || isUnavailable ? 0.6 : 1,
       }}
     >
+      {isUnavailable && (
+        <div
+          style={{
+            display: 'inline-block',
+            background: 'rgba(240,165,0,0.18)',
+            color: '#F0A500',
+            border: '1px solid rgba(240,165,0,0.4)',
+            borderRadius: 999,
+            padding: '3px 10px',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            marginBottom: 10,
+          }}
+        >
+          ⚠️ Unavailable on shoot dates
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <div
           style={{
@@ -684,7 +808,11 @@ function TalentCard({
                 color: canAdd ? '#0F1B2E' : '#7A90AA',
               }}
             >
-              {busy ? 'Adding…' : 'Add to job'}
+              {busy
+                ? 'Adding…'
+                : isUnavailable
+                  ? 'Unavailable'
+                  : 'Add to job'}
             </button>
           </div>
 

@@ -448,6 +448,33 @@ export async function generateInvoice(formData: FormData) {
 }
 
 /**
+ * Expand a job's date footprint to a flat YYYY-MM-DD list. Prefers
+ * jobs.shoot_days[] when present, otherwise expands the start→end range.
+ */
+function buildJobDates(
+  startDate: string | null,
+  endDate: string | null,
+  shootDays: Array<{ date: string }> | null | undefined
+): string[] {
+  if (Array.isArray(shootDays) && shootDays.length > 0) {
+    return shootDays.map((d) => d.date).filter(Boolean)
+  }
+  if (!startDate) return []
+  const dates: string[] = []
+  const start = new Date(startDate + 'T12:00:00')
+  const end = endDate ? new Date(endDate + 'T12:00:00') : start
+  const cur = new Date(start)
+  while (cur <= end) {
+    const y = cur.getFullYear()
+    const m = String(cur.getMonth() + 1).padStart(2, '0')
+    const d = String(cur.getDate()).padStart(2, '0')
+    dates.push(`${y}-${m}-${d}`)
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+
+/**
  * Insert a new booking for this job with status='requested'. If the talent's
  * profile has a day rate, copy it into confirmed_rate_cents so the admin
  * sees a proposed rate immediately (it only becomes the "final" rate on confirm).
@@ -484,11 +511,35 @@ export async function addTalentToJob(formData: FormData) {
     supabase
       .from('jobs')
       .select(
-        'client_id, day_rate_cents, client_budget_cents, num_talent, crewed_at, shoot_duration_hours'
+        'client_id, day_rate_cents, client_budget_cents, num_talent, crewed_at, shoot_duration_hours, start_date, end_date, shoot_days'
       )
       .eq('id', jobId)
       .maybeSingle(),
   ])
+
+  // ─── Availability check ───────────────────────────────────────────────
+  // Block booking talent on days they have marked unavailable.
+  const jobDates = buildJobDates(
+    job?.start_date ?? null,
+    job?.end_date ?? null,
+    job?.shoot_days as Array<{ date: string }> | null | undefined
+  )
+
+  if (jobDates.length > 0) {
+    const { data: blockedDates } = await supabase
+      .from('talent_unavailability')
+      .select('date')
+      .eq('talent_id', talentId)
+      .in('date', jobDates)
+
+    if (blockedDates && blockedDates.length > 0) {
+      const dateList = blockedDates.map((r) => r.date).join(', ')
+      redirect(
+        `/admin/jobs/${jobId}/add-talent?error=unavailable&blocked=${encodeURIComponent(dateList)}`
+      )
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────
 
   let offeredCents: number | null = null
   if (offeredRaw) {

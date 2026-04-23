@@ -53,7 +53,11 @@ function isSameDay(a: Date, b: Date): boolean {
   )
 }
 
-type JobDateRow = { start_date: string | null; end_date: string | null }
+type JobDateRow = {
+  start_date: string | null
+  end_date: string | null
+  shoot_days: Array<{ date: string }> | null
+}
 type BookingRow = {
   status: 'requested' | 'confirmed' | 'declined'
   jobs: JobDateRow | JobDateRow[] | null
@@ -111,12 +115,12 @@ export default function CalendarPage() {
           .lte('date', toStr),
         supabase
           .from('job_bookings')
-          .select('status, jobs(start_date, end_date)')
+          .select('status, jobs(start_date, end_date, shoot_days)')
           .eq('talent_id', userId)
           .eq('status', 'confirmed'),
         supabase
           .from('job_bookings')
-          .select('status, jobs(start_date, end_date)')
+          .select('status, jobs(start_date, end_date, shoot_days)')
           .eq('talent_id', userId)
           .eq('status', 'requested'),
       ])
@@ -133,15 +137,32 @@ export default function CalendarPage() {
       const expand = (rows: BookingRow[] | null, state: 'requested' | 'booked') => {
         for (const row of rows ?? []) {
           const job = unwrapJob(row.jobs)
-          if (!job?.start_date) continue
-          const start = parseLocalDate(job.start_date)
-          const end = job.end_date ? parseLocalDate(job.end_date) : start
-          if (!start || !end) continue
-          for (let d = start; d <= end; d = addDays(d, 1)) {
-            // Booked overrides requested, requested overrides unavailable
-            const current = map[ymd(d)]
+          if (!job) continue
+
+          let datesToMark: Date[] = []
+
+          // Use explicit shoot_days if available
+          if (Array.isArray(job.shoot_days) && job.shoot_days.length > 0) {
+            datesToMark = job.shoot_days
+              .map((d) => parseLocalDate(d.date))
+              .filter((d): d is Date => d !== null)
+          } else if (job.start_date) {
+            // Fall back to start→end range expansion
+            const start = parseLocalDate(job.start_date)
+            const end = job.end_date ? parseLocalDate(job.end_date) : start
+            if (start && end) {
+              for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+                datesToMark.push(new Date(d))
+              }
+            }
+          }
+
+          for (const d of datesToMark) {
+            const key = ymd(d)
+            const current = map[key]
+            // Booked overrides requested, requested overrides unavailable.
             if (state === 'booked' || !current || current === 'unavailable') {
-              map[ymd(d)] = state
+              map[key] = state
             }
           }
         }
@@ -290,8 +311,8 @@ export default function CalendarPage() {
 
             const title = systemLocked
               ? state === 'booked'
-                ? 'Confirmed job on this date'
-                : 'Job request pending — confirm or decline in Overview'
+                ? 'Confirmed booking — this date is locked'
+                : 'Pending job offer — accept or decline this offer first'
               : state === 'unavailable'
               ? 'Marked unavailable — tap to clear'
               : 'Tap to mark unavailable'
@@ -373,6 +394,19 @@ export default function CalendarPage() {
           <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.5 }}>
             Tap any available day to mark unavailable. Tap again to clear.
           </p>
+          {Object.values(statuses).includes('booked') && (
+            <p
+              style={{
+                fontSize: 11,
+                color: TEXT_MUTED,
+                lineHeight: 1.5,
+                marginTop: 8,
+              }}
+            >
+              🔒 Green days are confirmed bookings and cannot be changed.
+              Contact hello@rowlystudios.com if there&apos;s an issue.
+            </p>
+          )}
         </div>
       </div>
     </main>

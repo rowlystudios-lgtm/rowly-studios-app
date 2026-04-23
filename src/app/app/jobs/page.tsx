@@ -1267,6 +1267,7 @@ function AssignTalentSheet({
   const [loading, setLoading] = useState(true)
   const [assigning, setAssigning] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [unavailableIds, setUnavailableIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -1287,6 +1288,37 @@ function AssignTalentSheet({
         return
       }
       setTalent((data ?? []) as AssignableTalent[])
+
+      // Pre-compute who's unavailable on this job's dates so the row UI
+      // can dim/disable matching talent before the user clicks.
+      if (job.start_date) {
+        const jobDates: string[] = []
+        const start = new Date(job.start_date + 'T12:00:00')
+        const end = job.end_date
+          ? new Date(job.end_date + 'T12:00:00')
+          : start
+        const cur = new Date(start)
+        while (cur <= end) {
+          jobDates.push(cur.toISOString().slice(0, 10))
+          cur.setDate(cur.getDate() + 1)
+        }
+        if (jobDates.length > 0) {
+          const { data: unavailRows } = await supabase
+            .from('talent_unavailability')
+            .select('talent_id, date')
+            .in('date', jobDates)
+          if (!cancelled) {
+            setUnavailableIds(
+              new Set(
+                (unavailRows ?? []).map(
+                  (r: { talent_id: string }) => r.talent_id
+                )
+              )
+            )
+          }
+        }
+      }
+
       setLoading(false)
     }
     load()
@@ -1321,6 +1353,39 @@ function AssignTalentSheet({
     if (assigning) return
     setAssigning(t.id)
     setError('')
+
+    // ─── Availability check — block booking on dates the talent has marked unavailable.
+    if (job.start_date) {
+      const jobDates: string[] = []
+      const start = new Date(job.start_date + 'T12:00:00')
+      const end = job.end_date
+        ? new Date(job.end_date + 'T12:00:00')
+        : start
+      const cur = new Date(start)
+      while (cur <= end) {
+        jobDates.push(cur.toISOString().slice(0, 10))
+        cur.setDate(cur.getDate() + 1)
+      }
+      if (jobDates.length > 0) {
+        const { data: blocked } = await supabase
+          .from('talent_unavailability')
+          .select('date')
+          .eq('talent_id', t.id)
+          .in('date', jobDates)
+        if (blocked && blocked.length > 0) {
+          const name =
+            [t.first_name, t.last_name].filter(Boolean).join(' ') ||
+            t.full_name ||
+            'This talent'
+          setError(
+            `${name} is unavailable on ${blocked.map((r) => r.date).join(', ')}. Choose a different date or talent.`
+          )
+          setAssigning(null)
+          return
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('job_bookings')
       .insert({
@@ -1471,22 +1536,43 @@ function AssignTalentSheet({
                   <button
                     type="button"
                     onClick={() => assign(t)}
-                    disabled={already || isAssigning}
+                    disabled={already || isAssigning || unavailableIds.has(t.id)}
+                    title={
+                      unavailableIds.has(t.id)
+                        ? 'Talent is unavailable on these dates'
+                        : undefined
+                    }
                     style={{
                       padding: '7px 12px',
                       borderRadius: 10,
-                      background: already ? 'rgba(255,255,255,0.08)' : '#fff',
-                      color: already ? TEXT_MUTED : BUTTON_PRIMARY,
+                      background:
+                        already || unavailableIds.has(t.id)
+                          ? 'rgba(255,255,255,0.08)'
+                          : '#fff',
+                      color:
+                        already || unavailableIds.has(t.id)
+                          ? TEXT_MUTED
+                          : BUTTON_PRIMARY,
                       border: 'none',
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: 'uppercase',
                       letterSpacing: '0.06em',
-                      cursor: already || isAssigning ? 'default' : 'pointer',
+                      cursor:
+                        already || isAssigning || unavailableIds.has(t.id)
+                          ? 'not-allowed'
+                          : 'pointer',
                       whiteSpace: 'nowrap',
+                      opacity: unavailableIds.has(t.id) ? 0.6 : 1,
                     }}
                   >
-                    {already ? 'Assigned' : isAssigning ? 'Adding…' : 'Assign'}
+                    {already
+                      ? 'Assigned'
+                      : isAssigning
+                        ? 'Adding…'
+                        : unavailableIds.has(t.id)
+                          ? '⚠️ Unavailable'
+                          : 'Assign'}
                   </button>
                 </div>
               )
