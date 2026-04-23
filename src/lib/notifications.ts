@@ -61,6 +61,7 @@ export async function sendNotification(payload: NotificationPayload) {
         body: payload.body,
         action_url: payload.actionUrl ?? null,
         channel: 'in_app',
+        clearable: true,
       })
     } catch (err) {
       // eslint-disable-next-line no-console

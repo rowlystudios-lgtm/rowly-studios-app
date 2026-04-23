@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
       action_url: link,
       sent_by: user.id,
       channel: 'in_app',
+      clearable: true,
       created_at: now,
     }))
   )

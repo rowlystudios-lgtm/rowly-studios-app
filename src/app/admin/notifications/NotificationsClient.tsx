@@ -737,7 +737,12 @@ function SendForm() {
                     <button
                       key={h.id}
                       type="button"
-                      onClick={() => setPicked(h)}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setPicked(h)
+                        setHits([])
+                        setQuery('')
+                      }}
                       className="w-full flex items-center gap-3 text-left hover:bg-gray-50"
                       style={{
                         padding: '10px 12px',

@@ -3,12 +3,32 @@
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-auth'
 
-type NotificationType = 'booking' | 'job' | 'payment' | 'general'
+type NotificationType =
+  | 'booking'
+  | 'job'
+  | 'payment'
+  | 'general'
+  | 'admin_status'
+  | 'new_application'
+  | 'booking_sent'
+  | 'booking_confirmed'
+  | 'booking_declined'
+  | 'client_budget_changed'
+  | 'job_fully_crewed'
+  | 'job_offer'
 const ALLOWED_TYPES: NotificationType[] = [
   'booking',
   'job',
   'payment',
   'general',
+  'admin_status',
+  'new_application',
+  'booking_sent',
+  'booking_confirmed',
+  'booking_declined',
+  'client_budget_changed',
+  'job_fully_crewed',
+  'job_offer',
 ]
 
 export async function sendNotification(formData: FormData) {
@@ -60,6 +80,7 @@ export async function sendNotification(formData: FormData) {
       link,
       sent_by: user.id,
       channel: 'in_app',
+      clearable: true,
       created_at: now,
     }))
   )

@@ -154,7 +154,7 @@ async function sendJobWrappedToClient(
       link: `/app`,
       action_url: `/app`,
       priority: 'normal',
-      clearable: false,
+      clearable: true,
     })
   }
 

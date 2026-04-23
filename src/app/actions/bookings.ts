@@ -226,6 +226,7 @@ export async function declineBookingOffer(formData: FormData) {
         body: `${talentName} has declined your offer for "${jobTitle}". Go to the roster to make a new offer.`,
         link: rosterLink,
         action_url: rosterLink,
+        clearable: true,
         metadata: {
           booking_id: bookingId,
           job_id: existing?.job_id,
@@ -248,6 +249,7 @@ export async function declineBookingOffer(formData: FormData) {
           body: `${talentName} declined an offer for "${jobTitle}".`,
           link: `/app/jobs`,
           action_url: `/app/jobs`,
+          clearable: true,
           metadata: {
             booking_id: bookingId,
             job_id: existing?.job_id,
