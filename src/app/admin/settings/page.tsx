@@ -7,6 +7,7 @@ import { isSmsConfigured } from '@/lib/sms'
 import { saveNotionSettings } from './actions'
 import { SyncButton, SyncAllButton } from './SyncButtons'
 import { CalendarCopyField } from './CalendarCopyField'
+import { NotionTokenInput } from './NotionTokenInput'
 
 export const dynamic = 'force-dynamic'
 
@@ -348,8 +349,7 @@ export default async function AdminSettingsPage() {
           className="mt-4 flex flex-col gap-3"
         >
           <DarkField label="Integration token">
-            <input
-              type="password"
+            <NotionTokenInput
               name="notion_token"
               defaultValue=""
               placeholder={

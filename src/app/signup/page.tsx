@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { RSLogo } from '@/components/RSLogo'
+import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'sent' | 'error'
@@ -116,14 +117,12 @@ export default function SignupPage() {
               autoComplete="email"
             />
 
-            <input
-              type="password"
+            <PasswordInput
               required
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password (min 8 characters)"
-              className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-rs-blue-fusion/15 focus:border-rs-blue-logo focus:outline-none"
               disabled={status === 'submitting'}
               autoComplete="new-password"
             />
