@@ -103,6 +103,7 @@ export const DEPARTMENTS: DepartmentDef[] = [
     crewLabel: 'Production Manager',
     roles: [
       'Producer',
+      'Creative Director',
       'Production Manager',
       'Production Coordinator',
       'Line Producer',
@@ -138,6 +139,11 @@ export const DEPARTMENTS: DepartmentDef[] = [
       'VFX Artist',
       'Sound Designer',
       'Post Supervisor',
+      'Editor',
+      'Graphic Designer',
+      'Color Grading',
+      'Sound',
+      'Retouching',
     ],
   },
   {
