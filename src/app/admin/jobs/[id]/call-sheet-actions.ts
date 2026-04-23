@@ -214,8 +214,11 @@ async function loadCallSheetContext(jobId: string): Promise<CallSheetContext | n
  * Render the branded HTML body for the call-sheet email.
  * Same body for client + talent recipients — only the subject + greeting differ
  * via the `recipientLabel` slot inserted by sendCallSheet().
+ *
+ * Internal-only because Next 14 'use server' files can only export async
+ * functions. Move to a sibling file if external callers ever need it.
  */
-export function callSheetHtml(ctx: CallSheetContext): string {
+function callSheetHtml(ctx: CallSheetContext): string {
   const NAVY = '#1E3A6B'
   const AMBER = '#F0A500'
   const CREAM = '#FBF5E4'
