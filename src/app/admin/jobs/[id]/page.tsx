@@ -7,6 +7,7 @@ import { StatusActionButtons } from './StatusActionButtons'
 import { BookingAdminActions } from './BookingAdminActions'
 import { AdminBudgetRow } from './AdminBudgetRow'
 import { CallSheetButtons } from './CallSheetButtons'
+import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -326,6 +327,21 @@ export default async function AdminJobDetailPage({
             />
           )}
         </div>
+
+        {job.start_date && (
+          <div className="mt-3">
+            <AddToCalendarButton
+              title={`${job.title} — ${clientName}`}
+              startDate={job.start_date}
+              endDate={job.end_date ?? undefined}
+              callTime={job.call_time}
+              location={fullAddress || job.location || undefined}
+              jobCode={job.job_code ?? undefined}
+              variant="ghost"
+              size="sm"
+            />
+          </div>
+        )}
       </section>
 
       {/* ─── Job budget (inline admin edit) ─── */}
