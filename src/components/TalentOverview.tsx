@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
-import { AddToCalendar } from '@/components/AddToCalendar'
+import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 import { JobDetailSheet } from '@/components/JobDetailSheet'
 import {
   formatLongDate,
@@ -510,7 +510,17 @@ function JobCard({
             {job.title}
           </h3>
         </div>
-        <AddToCalendar job={job} />
+        {!isOffer && job.start_date && (
+          <AddToCalendarButton
+            title={`${job.title} — Rowly Studios`}
+            startDate={job.start_date}
+            endDate={job.end_date ?? undefined}
+            callTime={job.call_time}
+            location={job.location ?? undefined}
+            variant="ghost"
+            size="sm"
+          />
+        )}
       </div>
 
       {/* Date row */}

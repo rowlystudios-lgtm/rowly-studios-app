@@ -9,7 +9,7 @@ import {
   resolveShootDays,
   type Booking,
 } from '@/lib/jobs'
-import { AddToCalendar } from './AddToCalendar'
+import { AddToCalendarButton } from './AddToCalendarButton'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170, 189, 224, 0.15)'
@@ -134,7 +134,17 @@ export function JobDetailSheet({
                 {job.title}
               </h2>
             </div>
-            <AddToCalendar job={job} />
+            {booking.status === 'confirmed' && job.start_date && (
+              <AddToCalendarButton
+                title={`${job.title} — Rowly Studios`}
+                startDate={job.start_date}
+                endDate={job.end_date ?? undefined}
+                callTime={job.call_time}
+                location={job.location ?? undefined}
+                variant="ghost"
+                size="sm"
+              />
+            )}
           </div>
 
           <Card>
