@@ -6,6 +6,7 @@ import { generateInvoice } from '../actions'
 import { StatusActionButtons } from './StatusActionButtons'
 import { BookingAdminActions } from './BookingAdminActions'
 import { AdminBudgetRow } from './AdminBudgetRow'
+import { CallSheetButtons } from './CallSheetButtons'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +52,7 @@ type Job = {
   description: string | null
   client_notes: string | null
   admin_notes: string | null
+  call_sheet_sent_at: string | null
   profiles:
     | {
         full_name: string | null
@@ -242,6 +244,11 @@ export default async function AdminJobDetailPage({
     : null
 
   const isTerminal = job.status === 'wrapped' || job.status === 'cancelled'
+  const confirmedTalentCount = bookings.filter(
+    (b) => b.status === 'confirmed'
+  ).length
+  const billingEmail =
+    clientProfile?.billing_email || clientRow?.email || null
 
   return (
     <div
@@ -618,6 +625,18 @@ export default async function AdminJobDetailPage({
           </div>
         )}
       </section>
+
+      {/* ─── Call sheet ─── */}
+      {job.status !== 'cancelled' && (
+        <div className="mt-4">
+          <CallSheetButtons
+            jobId={job.id}
+            clientEmail={billingEmail}
+            confirmedTalentCount={confirmedTalentCount}
+            callSheetSentAt={job.call_sheet_sent_at}
+          />
+        </div>
+      )}
 
       {/* ─── Notes ─── */}
       {(job.client_notes || job.admin_notes) && (
