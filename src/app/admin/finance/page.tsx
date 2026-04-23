@@ -1,12 +1,11 @@
-import type { Metadata } from 'next'
-import FinancePageServer from './FinancePageServer'
+import { FinancePageServer } from './FinancePageServer'
 
 export const dynamic = 'force-dynamic'
 
-export const metadata: Metadata = {
-  title: 'Finance — RS Admin',
-}
-
-export default function AdminFinancePage() {
-  return <FinancePageServer />
+export default async function FinancePage({
+  searchParams,
+}: {
+  searchParams: { month?: string; quarter?: string }
+}) {
+  return <FinancePageServer searchParams={searchParams} />
 }
