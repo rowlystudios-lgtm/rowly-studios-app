@@ -6,18 +6,50 @@ type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & {
   label?: string
 }
 
+/**
+ * Password input with show/hide eye toggle.
+ *
+ * iOS note: the toggle is a SIBLING (flex row), not an absolute overlay
+ * over the input. iPhone Safari draws its native AutoFill key icon at the
+ * right edge of password fields, which would otherwise sit on top of an
+ * absolutely-positioned button and make it invisible. Sibling layout
+ * pushes the AutoFill chrome aside and keeps the toggle clickable.
+ */
 export const PasswordInput = forwardRef<HTMLInputElement, Props>(function PasswordInput(
-  { className = '', ...rest },
+  { className = '', style, ...rest },
   ref
 ) {
   const [visible, setVisible] = useState(false)
 
   return (
-    <div className="relative">
+    <div
+      className={className}
+      style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        width: '100%',
+        border: '1px solid rgba(26, 60, 107, 0.15)',
+        borderRadius: 10,
+        background: '#fff',
+        overflow: 'hidden',
+        ...style,
+      }}
+    >
       <input
         ref={ref}
         type={visible ? 'text' : 'password'}
-        className={`w-full pl-3 pr-11 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border border-[#1A3C6B]/15 focus:border-[#1A3C6B] focus:outline-none ${className}`}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          padding: '12px 14px',
+          fontSize: 14,
+          color: 'var(--rs-ink)',
+          fontFamily: 'inherit',
+          boxSizing: 'border-box',
+        }}
         {...rest}
       />
       <button
@@ -26,7 +58,17 @@ export const PasswordInput = forwardRef<HTMLInputElement, Props>(function Passwo
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? 'Hide password' : 'Show password'}
         aria-pressed={visible}
-        className="absolute top-1/2 right-2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-[#9AA0AD] hover:text-[#1A3C6B] transition-colors"
+        style={{
+          flexShrink: 0,
+          width: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'transparent',
+          border: 'none',
+          color: '#9AA0AD',
+          cursor: 'pointer',
+        }}
       >
         {visible ? (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

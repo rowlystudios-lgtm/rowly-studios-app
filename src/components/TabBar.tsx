@@ -119,7 +119,7 @@ export function TabBar() {
 
   return (
     <nav
-      className="flex justify-around border-t border-rs-blue-fusion/10 px-3 pt-2"
+      className="flex justify-around border-t border-rs-blue-fusion/10 px-2 pt-2"
       style={{
         background: 'var(--rs-cream, #FBF5E4)',
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
@@ -134,7 +134,7 @@ export function TabBar() {
           <Link
             key={tab.href}
             href={tab.href}
-            className={`flex flex-col items-center gap-1 px-3 py-1.5 text-[10px] tracking-wider uppercase font-semibold ${
+            className={`flex flex-col items-center gap-1 px-1 py-1.5 text-[10px] tracking-wider uppercase font-semibold ${
               active ? 'text-rs-blue-logo' : 'text-rs-blue-fusion/40'
             }`}
             style={{ position: 'relative' }}
