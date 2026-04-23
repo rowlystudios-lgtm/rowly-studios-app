@@ -66,10 +66,10 @@ async function nextInvoiceNumber(
 /**
  * Recompute invoices.total_cents / rs_fee_cents / client_total_cents.
  *
- * Invariants:
- *   total_cents        = Σ line items + tax   ← what talent get paid
- *   rs_fee_cents       = round(total_cents * rs_fee_percent / 100)
- *   client_total_cents = total_cents + rs_fee_cents
+ * Invariants (line items are CLIENT-FACING — talent_net × 1.15):
+ *   client_total_cents = Σ line items + tax       ← what client owes
+ *   rs_fee_cents       = round(client_total × feePercent / (100 + feePercent))
+ *   total_cents        = client_total - rs_fee    ← talent net portion
  */
 async function recalcTotal(
   supabase: Awaited<ReturnType<typeof requireAdmin>>['supabase'],
@@ -91,15 +91,16 @@ async function recalcTotal(
     0
   )
   const tax = inv?.tax_cents ?? 0
-  const total = itemSum + tax
+  const clientTotal = itemSum + tax
   const feePercent = Number(inv?.rs_fee_percent ?? 15)
-  const rsFee = Math.round((total * feePercent) / 100)
+  const rsFee = Math.round((clientTotal * feePercent) / (100 + feePercent))
+  const total = clientTotal - rsFee
   await supabase
     .from('invoices')
     .update({
       total_cents: total,
       rs_fee_cents: rsFee,
-      client_total_cents: total + rsFee,
+      client_total_cents: clientTotal,
     })
     .eq('id', invoiceId)
 }
@@ -125,13 +126,15 @@ export async function createInvoice(formData: FormData) {
   const items = parseLineItems((formData.get('line_items') as string) ?? null)
   if (!clientId) return
 
+  // Line items are stored as CLIENT-FACING amounts (talent_net × 1.15).
+  // Subtotal + tax = what the client owes. RS fee is the 15/115 portion of
+  // that, talent-net portion is the remainder.
   const subtotal = items.reduce((s, i) => s + i.total_cents, 0)
   const taxCents = Math.round(subtotal * (taxRate / 100))
-  const total = subtotal + taxCents
-  // total_cents is what talent get paid; RS takes rs_fee_cents on top.
+  const clientTotalCents = subtotal + taxCents
   const rsFeePercent = 15
-  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
-  const clientTotalCents = total + rsFeeCents
+  const rsFeeCents = Math.round((clientTotalCents * rsFeePercent) / (100 + rsFeePercent))
+  const total = clientTotalCents - rsFeeCents
   const invoiceNumber = await nextInvoiceNumber(supabase)
 
   const { data: inv, error } = await supabase
@@ -191,9 +194,12 @@ export async function updateInvoiceDraft(formData: FormData) {
     .maybeSingle()
   if (!existing || existing.status !== 'draft') return
 
+  // Line items are stored as CLIENT-FACING amounts (talent_net × 1.15).
+  // Subtotal + tax = what the client owes. RS fee is the embedded portion
+  // (rsFeePercent / (100 + rsFeePercent)) of that; talent-net is the rest.
   const subtotal = items.reduce((s, i) => s + i.total_cents, 0)
   const taxCents = Math.round(subtotal * (taxRate / 100))
-  const total = subtotal + taxCents
+  const clientTotalCents = subtotal + taxCents
   // Pull the active fee % so edits keep the same fee contract the invoice was
   // created with (defaults to 15 if unset).
   const { data: feeRow } = await supabase
@@ -202,8 +208,8 @@ export async function updateInvoiceDraft(formData: FormData) {
     .eq('id', invoiceId)
     .maybeSingle()
   const rsFeePercent = Number(feeRow?.rs_fee_percent ?? 15)
-  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
-  const clientTotalCents = total + rsFeeCents
+  const rsFeeCents = Math.round((clientTotalCents * rsFeePercent) / (100 + rsFeePercent))
+  const total = clientTotalCents - rsFeeCents
 
   await supabase
     .from('invoices')
@@ -624,7 +630,7 @@ export async function generateDraftInvoiceFromJob(formData: FormData) {
       p?.full_name ||
       'Talent'
     const role = tp?.primary_role ?? null
-    // Invoice line items ALWAYS use the client-facing rate (talent net ÷ 0.85).
+    // Invoice line items ALWAYS use the client-facing rate (talent net × 1.15).
     const talentNet = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
     const unit = Math.round(talentNet * 1.15)
     return {
@@ -637,12 +643,13 @@ export async function generateDraftInvoiceFromJob(formData: FormData) {
     }
   })
 
+  // Line items are CLIENT-FACING (unit_price_cents = talent_net × 1.15 above).
   const subtotal = lineItems.reduce((s, li) => s + li.total_cents, 0)
   const taxCents = 0
-  const total = subtotal + taxCents
+  const clientTotalCents = subtotal + taxCents
   const rsFeePercent = 15
-  const rsFeeCents = Math.round((total * rsFeePercent) / 100)
-  const clientTotalCents = total + rsFeeCents
+  const rsFeeCents = Math.round((clientTotalCents * rsFeePercent) / (100 + rsFeePercent))
+  const total = clientTotalCents - rsFeeCents
   const invoiceNumber = await nextInvoiceNumber(supabase)
 
   const periodStart = job.end_date ? addDaysIso(job.end_date, 1) : todayIsoLA()
