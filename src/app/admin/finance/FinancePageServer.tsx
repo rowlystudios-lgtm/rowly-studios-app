@@ -117,31 +117,32 @@ export async function FinancePageServer({
 
   // ── MONTHLY METRICS ──────────────────────────────────────────────────────
   // 1. Jobs Pending = total client-facing value of sent/overdue invoices in this month
+  // total_cents on invoices is the talent-net portion; client_total_cents
+  // is talent_net × 1.15. RS fee = talent_net × 0.15.
   const jobsPendingTotal = monthInvoices.reduce((s, inv) => {
-    const clientAmt = inv.client_total_cents ?? Math.round((inv.total_cents ?? 0) / 0.85)
+    const clientAmt = inv.client_total_cents ?? Math.round((inv.total_cents ?? 0) * 1.15)
     return s + clientAmt
   }, 0)
   const jobsPendingCount = monthInvoices.length
 
   // 2. Jobs Paid = total client-facing value of invoices paid this month
   const jobsPaidTotal = paidInvoices.reduce((s, inv) => {
-    const clientAmt = inv.client_total_cents ?? Math.round((inv.total_cents ?? 0) / 0.85)
+    const clientAmt = inv.client_total_cents ?? Math.round((inv.total_cents ?? 0) * 1.15)
     return s + clientAmt
   }, 0)
   const jobsPaidCount = paidInvoices.length
 
-  // 3. Talent Paid = 85% of paid invoices (talent net portion)
+  // 3. Talent Paid = the talent-net portion of paid invoices
   const talentPaidTotal = paidInvoices.reduce((s, inv) => {
     const talentAmt = inv.rs_fee_cents
       ? (inv.client_total_cents ?? 0) - inv.rs_fee_cents
-      : Math.round((inv.total_cents ?? 0) * 0.85)
+      : (inv.total_cents ?? 0)
     return s + talentAmt
   }, 0)
 
-  // 4. RS Income = 15% of paid invoices (RS platform fee)
+  // 4. RS Income = 15% markup on talent net
   const rsIncomeTotal = paidInvoices.reduce((s, inv) => {
-    const fee = inv.rs_fee_cents
-      ?? Math.round((inv.client_total_cents ?? Math.round((inv.total_cents ?? 0) / 0.85)) * 0.15)
+    const fee = inv.rs_fee_cents ?? Math.round((inv.total_cents ?? 0) * 0.15)
     return s + fee
   }, 0)
 
@@ -294,7 +295,7 @@ function InvoiceRowCard({ inv, today }: { inv: InvoiceRow; today: string }) {
   const job = unwrap(inv.jobs)
   const client = clientLabel(inv.profiles)
   const clientAmt = inv.client_total_cents
-    ?? Math.round(((inv.total_cents ?? 0) / 0.85))
+    ?? Math.round((inv.total_cents ?? 0) * 1.15)
   const isOverdue = inv.status === 'sent' && inv.due_date && inv.due_date < today
   const statusLabel = isOverdue ? 'overdue' : inv.status
   const lateFee = Number(inv.late_fee_rate ?? 0)

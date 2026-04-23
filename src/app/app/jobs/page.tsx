@@ -1060,7 +1060,11 @@ function CrewRequestCard({
               whiteSpace: 'nowrap',
             }}
           >
-            {[role, formatMoney(booking.confirmed_rate_cents ?? job.day_rate_cents)]
+            {[role, booking.confirmed_rate_cents
+                ? formatMoney(Math.round(booking.confirmed_rate_cents * 1.15))
+                : job.day_rate_cents
+                  ? formatMoney(Math.round(job.day_rate_cents * 1.15))
+                  : null]
               .filter(Boolean)
               .join(' · ') || 'Talent'}
           </p>
@@ -1182,7 +1186,8 @@ function JobDetailLines({ job }: { job: JobRow }) {
       {(job.day_rate_cents || typeof job.num_talent === 'number') && (
         <p style={{ fontSize: 12, color: TEXT_PRIMARY }}>
           <span style={{ color: TEXT_MUTED }}>Rate: </span>
-          {formatMoney(job.day_rate_cents)} / day
+          {job.day_rate_cents ? formatMoney(Math.round(job.day_rate_cents * 1.15)) : '—'} / day
+          <span style={{ color: TEXT_MUTED, fontSize: 11 }}> (incl. RS service fee)</span>
           {typeof job.num_talent === 'number' && (
             <span style={{ color: TEXT_MUTED }}> · {job.num_talent} talent</span>
           )}
@@ -1322,7 +1327,8 @@ function AssignTalentSheet({
         job_id: job.id,
         talent_id: t.id,
         status: 'requested',
-        confirmed_rate_cents: job.day_rate_cents,
+        offered_rate_cents: job.day_rate_cents,
+        confirmed_rate_cents: null,
       })
       .select(
         `id, status, confirmed_rate_cents, talent_id,

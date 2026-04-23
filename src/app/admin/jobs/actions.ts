@@ -426,7 +426,7 @@ export async function generateInvoice(formData: FormData) {
     // The talent_net stored on the booking is take-home; the client owes
     // the grossed-up figure that includes the RS platform fee.
     const talentNet = b.confirmed_rate_cents ?? 0
-    const unit = Math.round(talentNet / 0.85)
+    const unit = Math.round(talentNet * 1.15)
     rows.push({
       invoice_id: inv.id,
       booking_id: b.id,

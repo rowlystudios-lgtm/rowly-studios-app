@@ -626,7 +626,7 @@ export async function generateDraftInvoiceFromJob(formData: FormData) {
     const role = tp?.primary_role ?? null
     // Invoice line items ALWAYS use the client-facing rate (talent net ÷ 0.85).
     const talentNet = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
-    const unit = Math.round(talentNet / 0.85)
+    const unit = Math.round(talentNet * 1.15)
     return {
       description: role ? `${name} — ${role} (${shootDays} day${shootDays === 1 ? '' : 's'})` : name,
       quantity: shootDays,

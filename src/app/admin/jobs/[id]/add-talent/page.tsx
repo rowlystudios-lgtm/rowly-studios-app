@@ -43,10 +43,10 @@ function fmtUsd(c: number | null | undefined): string {
   return `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
-/** Talent net cents → client-billed cents (talent net ÷ 0.85). */
+/** Talent net cents → client-billed cents (talent net × 1.15 markup). */
 function clientRate(talentNetCents: number | null | undefined): string {
   if (!talentNetCents) return '—'
-  return `$${(Math.round(talentNetCents / 0.85) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+  return `$${(Math.round(talentNetCents * 1.15) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
 export default function AddTalentPage() {

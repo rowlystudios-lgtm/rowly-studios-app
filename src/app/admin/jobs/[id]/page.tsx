@@ -537,7 +537,7 @@ export default async function AdminJobDetailPage({
                       {b.confirmed_rate_cents != null && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                           <span style={{ fontSize: 12, color: '#F0A500', fontWeight: 700 }}>
-                            Client: {centsToUsd(Math.round(b.confirmed_rate_cents / 0.85))}/day
+                            Client: {centsToUsd(Math.round(b.confirmed_rate_cents * 1.15))}/day
                           </span>
                           <span style={{ fontSize: 11, color: '#4ADE80' }}>
                             ✓ Talent: {centsToUsd(b.confirmed_rate_cents)}/day
@@ -547,7 +547,7 @@ export default async function AdminJobDetailPage({
                       {b.confirmed_rate_cents == null && b.offered_rate_cents != null && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                           <span style={{ fontSize: 12, color: 'rgba(240,165,0,0.7)', fontWeight: 600 }}>
-                            Client: {centsToUsd(Math.round(b.offered_rate_cents / 0.85))}/day
+                            Client: {centsToUsd(Math.round(b.offered_rate_cents * 1.15))}/day
                           </span>
                           <span style={{ fontSize: 11, color: '#AABDE0' }}>
                             Offered: {centsToUsd(b.offered_rate_cents)}/day
