@@ -43,6 +43,12 @@ function fmtUsd(c: number | null | undefined): string {
   return `$${(c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
+/** Talent net cents → client-billed cents (talent net ÷ 0.85). */
+function clientRate(talentNetCents: number | null | undefined): string {
+  if (!talentNetCents) return '—'
+  return `$${(Math.round(talentNetCents / 0.85) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+}
+
 export default function AddTalentPage() {
   const params = useParams<{ id: string }>()
   const jobId = params?.id ?? ''
@@ -498,10 +504,13 @@ function TalentCard({
               }}
             >
               <div style={{ fontSize: 9, color: '#7A90AA', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Standard rate
+                Client rate (incl. RS fee)
               </div>
-              <div style={{ color: '#fff', fontWeight: 600, marginTop: 2 }}>
-                {dayRate != null ? `${fmtUsd(dayRate)}/day` : '—'}
+              <div style={{ color: '#fff', fontWeight: 700, marginTop: 2 }}>
+                {dayRate != null ? `${clientRate(dayRate)}/day` : '—'}
+              </div>
+              <div style={{ fontSize: 9, color: '#7A90AA', marginTop: 1 }}>
+                Talent net: {dayRate != null ? `${fmtUsd(dayRate)}/day` : '—'}
               </div>
             </div>
             <div
@@ -557,7 +566,7 @@ function TalentCard({
                   whiteSpace: 'nowrap',
                 }}
               >
-                Accept full rate ({fmtUsd(dayRate)})
+                Accept full rate ({clientRate(dayRate)}/day)
               </button>
             )}
             {jobBudgetCents != null && (
@@ -619,7 +628,7 @@ function TalentCard({
                   marginBottom: 4,
                 }}
               >
-                {isShortShoot ? 'Flat fee $' : 'Offer $/day'}
+                {isShortShoot ? 'Flat fee $' : 'Talent net $/day (client billed +15%)'}
               </span>
               <div style={{ position: 'relative' }}>
                 <span
@@ -705,7 +714,7 @@ function TalentCard({
                 padding: '4px 2px',
               }}
             >
-              {fmtUsd((dayRate ?? 0) - (draftCents ?? 0))} below their standard rate — talent can still accept.
+              {fmtUsd((dayRate ?? 0) - (draftCents ?? 0))} below their standard rate (client billed: {clientRate(draftCents)}/day) — talent can still accept.
             </p>
           )}
           {atOrAboveRate && (
@@ -717,7 +726,7 @@ function TalentCard({
                 padding: '4px 2px',
               }}
             >
-              At or above standard rate ✓
+              At or above standard rate ✓ — client billed {clientRate(draftCents)}/day
             </p>
           )}
         </>
