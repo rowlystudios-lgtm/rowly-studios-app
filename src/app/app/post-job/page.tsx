@@ -612,7 +612,9 @@ function PostJobInner() {
 
         <Section title="Shoot day(s)">
           <p style={{ fontSize: 12, color: TEXT_MUTED, marginTop: -2, lineHeight: 1.5 }}>
-            Add a row for each day of the shoot — set the budget you&rsquo;re offering per person.
+            Add a row for each day of the shoot — set the day rate you&rsquo;re paying per talent.
+            This figure is what you&rsquo;ll be billed and includes the 15% Rowly Studios service fee.
+            Talents receive this amount minus the service fee.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

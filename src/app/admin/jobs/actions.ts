@@ -505,7 +505,7 @@ export async function addTalentToJob(formData: FormData) {
   const [{ data: tp }, { data: job }] = await Promise.all([
     supabase
       .from('talent_profiles')
-      .select('day_rate_cents')
+      .select('day_rate_cents, rate_floor_cents')
       .eq('id', talentId)
       .maybeSingle(),
     supabase
@@ -552,6 +552,14 @@ export async function addTalentToJob(formData: FormData) {
       job?.day_rate_cents ??
       tp?.day_rate_cents ??
       null
+  }
+
+  // Enforce talent rate floor — silently bump up to the floor rather
+  // than fail the booking. Better UX than a redirect-with-error here
+  // because admins are often booking with the floor in mind anyway.
+  const floor = tp?.rate_floor_cents ?? null
+  if (offeredCents != null && floor != null && offeredCents < floor) {
+    offeredCents = floor
   }
 
   // ─── Auto-accept check ───

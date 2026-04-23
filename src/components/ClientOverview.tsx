@@ -24,8 +24,8 @@ const CONFIRMED_GREEN = '#4ade80'
 const REQUESTED_AMBER = '#d4950a'
 
 type TalentProfileMini =
-  | { department: Department | null; primary_role: string | null }
-  | { department: Department | null; primary_role: string | null }[]
+  | { department: Department | null; primary_role: string | null; rate_floor_cents: number | null }
+  | { department: Department | null; primary_role: string | null; rate_floor_cents: number | null }[]
   | null
 
 type BookingProfile = {
@@ -344,7 +344,7 @@ export function ClientOverview() {
            response_deadline_at, is_short_shoot,
            profiles (
              id, first_name, last_name, avatar_url,
-             talent_profiles (department, primary_role)
+             talent_profiles (department, primary_role, rate_floor_cents)
            )
          )`
       )
@@ -1504,9 +1504,11 @@ function BudgetTracker({
 }) {
   const budgetCents =
     job.total_budget_cents ?? job.client_budget_cents ?? null
+  // Talent rates are stored as NET amounts. Client owes net × 1.15.
   const spendCents = activeBookings.reduce((sum, b) => {
-    const rate = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
-    return sum + rate
+    const talentNet = b.confirmed_rate_cents ?? b.offered_rate_cents ?? 0
+    const clientFacing = Math.round(talentNet * 1.15)
+    return sum + clientFacing
   }, 0)
   const remaining =
     budgetCents != null ? budgetCents - spendCents : null
@@ -1679,12 +1681,19 @@ function BookingRateRow({
     tp?.primary_role ??
     (tp?.department ? DEPARTMENT_LABELS[tp.department as Department] : '')
 
-  const currentCents =
+  // Stored cents on the booking are TALENT NET. The client always sees
+  // and types the grossed-up rate (net × 1.15).
+  const talentNetCents =
     booking.confirmed_rate_cents ?? booking.offered_rate_cents ?? null
+  const clientCents =
+    talentNetCents != null ? Math.round(talentNetCents * 1.15) : null
+  const talentFloorCents = tp?.rate_floor_cents ?? null
+  const minClientCents =
+    talentFloorCents != null ? Math.round(talentFloorCents * 1.15) : null
 
   const [editing, setEditing] = useState(false)
   const [dollars, setDollars] = useState(
-    currentCents ? String(Math.round(currentCents / 100)) : ''
+    clientCents ? String(Math.round(clientCents / 100)) : ''
   )
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -1698,11 +1707,21 @@ function BookingRateRow({
       setErr('Enter a valid amount')
       return
     }
+    // The client typed a CLIENT-facing rate. Convert back to talent net
+    // before storing and enforce the floor against the gross figure.
+    const newClientCents = Math.round(num * 100)
+    if (minClientCents != null && newClientCents < minClientCents) {
+      setErr(
+        `Minimum offer is $${Math.round(minClientCents / 100).toLocaleString('en-US')}/day (this talent's rate floor is $${Math.round((talentFloorCents ?? 0) / 100).toLocaleString('en-US')}/day net).`
+      )
+      return
+    }
+    const newTalentNetCents = Math.round(newClientCents / 1.15)
     setSaving(true)
     setErr('')
     const { error } = await supabase
       .from('job_bookings')
-      .update({ offered_rate_cents: Math.round(num * 100) })
+      .update({ offered_rate_cents: newTalentNetCents })
       .eq('id', booking.id)
     setSaving(false)
     if (error) {
@@ -1823,8 +1842,8 @@ function BookingRateRow({
               color: TEXT_PRIMARY,
             }}
           >
-            {currentCents
-              ? `$${(currentCents / 100).toLocaleString()}/day`
+            {clientCents
+              ? `$${(clientCents / 100).toLocaleString()}/day`
               : '—'}
           </p>
           {!isLocked && (
@@ -1832,8 +1851,8 @@ function BookingRateRow({
               type="button"
               onClick={() => {
                 setDollars(
-                  currentCents
-                    ? String(Math.round(currentCents / 100))
+                  clientCents
+                    ? String(Math.round(clientCents / 100))
                     : ''
                 )
                 setEditing(true)
@@ -2086,10 +2105,13 @@ function CrewGroup({
             new Date(b.response_deadline_at).getTime() < Date.now()
           // For confirmed rows show the confirmed rate; for everyone else
           // show the offered amount so the client always has context.
-          const displayCents =
+          // Stored value is talent NET — client sees net × 1.15.
+          const talentNetCents =
             b.status === 'confirmed'
               ? b.confirmed_rate_cents ?? b.offered_rate_cents
               : b.offered_rate_cents
+          const displayCents =
+            talentNetCents != null ? Math.round(talentNetCents * 1.15) : null
           const shortShoot = Boolean(b.is_short_shoot)
           const moneyText = displayCents
             ? shortShoot

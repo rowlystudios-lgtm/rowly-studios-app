@@ -255,7 +255,7 @@ type BookingContext = {
  *
  * STRICT RATE RULE: cents stored on bookings is the talent net.
  *   forTalent=true  → display the talent net (their take-home).
- *   forTalent=false → display the client-facing rate (talentNet ÷ 0.85).
+ *   forTalent=false → display the client-facing rate (talentNet × 1.15).
  * Defaults to false because most surfaces (client emails, admin digests
  * paired with explicit dual labels) expect client-facing.
  */
@@ -268,6 +268,22 @@ function rateLabel(
   const display = forTalent ? cents : clientRateCents(cents)
   const usd = fmtUsd(display)
   return isShort ? `Flat fee: ${usd}` : `${usd}/day`
+}
+
+/**
+ * Named helpers for client / talent rate labels — wrap rateLabel to make
+ * intent obvious at the call site. Equivalent to rateLabel(cents, false)
+ * and rateLabel(cents, false, true) respectively. New code should prefer
+ * these over the boolean-flag form.
+ */
+export function rateLabelForClient(talentNetCents: number | null): string {
+  if (!talentNetCents) return 'TBD'
+  return `$${(clientRateCents(talentNetCents) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}/day`
+}
+
+export function rateLabelForTalent(talentNetCents: number | null): string {
+  if (!talentNetCents) return 'TBD'
+  return `$${(talentNetCents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}/day`
 }
 
 function durationLabel(ctx: BookingContext): string {
