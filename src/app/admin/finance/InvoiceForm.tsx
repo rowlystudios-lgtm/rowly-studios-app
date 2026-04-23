@@ -306,12 +306,14 @@ export function InvoiceForm({
     0
   )
   const taxCents = Math.round(subtotalCents * (taxPercent / 100))
-  const totalCents = subtotalCents + taxCents
-  // Mirror the 15% RS production fee so admins see the final client-billed
-  // amount while they build the invoice.
+  // Line items are CLIENT-FACING per the rate rule (auto-invoice path
+  // writes talent_net × 1.15 into unit_price_cents). totalCents is
+  // therefore what the client owes; the 15% RS fee is embedded inside
+  // it (not an addition on top), so we extract it as 15/115 of total.
   const RS_FEE_PERCENT = 15
-  const rsFeeCents = Math.round((totalCents * RS_FEE_PERCENT) / 100)
-  const clientTotalCents = totalCents + rsFeeCents
+  const clientTotalCents = subtotalCents + taxCents
+  const rsFeeCents = Math.round((clientTotalCents * 15) / 115)
+  const talentTotalCents = clientTotalCents - rsFeeCents
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -673,16 +675,16 @@ export function InvoiceForm({
             className="flex items-center justify-between mt-3 pt-3"
             style={{ borderTop: '1px solid #E5E7EB', fontSize: 13, color: '#496275' }}
           >
-            <span>Talent total</span>
+            <span>Talent total (net)</span>
             <span style={{ fontWeight: 600, color: '#1E3A6B' }}>
-              {fmtCents(totalCents)}
+              {fmtCents(talentTotalCents)}
             </span>
           </div>
           <div
             className="flex items-center justify-between mt-1"
             style={{ fontSize: 13, color: '#496275' }}
           >
-            <span>RS fee ({RS_FEE_PERCENT}%)</span>
+            <span>RS fee ({RS_FEE_PERCENT}% of client total)</span>
             <span style={{ fontWeight: 600, color: '#1E3A6B' }}>
               {fmtCents(rsFeeCents)}
             </span>

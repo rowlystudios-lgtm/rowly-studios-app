@@ -546,12 +546,20 @@ export async function addTalentToJob(formData: FormData) {
     const parsed = Math.round(parseFloat(offeredRaw) * 100)
     if (Number.isFinite(parsed) && parsed > 0) offeredCents = parsed
   }
+  // Fallback chain — must convert client-facing job budgets to talent
+  // net before storing as offered_rate_cents. jobs.client_budget_cents
+  // and jobs.day_rate_cents are CLIENT-facing per the rate rule;
+  // talent_profiles.day_rate_cents is already net.
   if (offeredCents == null) {
-    offeredCents =
-      job?.client_budget_cents ??
-      job?.day_rate_cents ??
-      tp?.day_rate_cents ??
-      null
+    const jobClientFacing =
+      job?.client_budget_cents ?? job?.day_rate_cents ?? null
+    if (jobClientFacing != null) {
+      offeredCents = Math.round(jobClientFacing / 1.15)
+    } else if (tp?.day_rate_cents != null) {
+      offeredCents = tp.day_rate_cents
+    } else {
+      offeredCents = null
+    }
   }
 
   // Enforce talent rate floor — silently bump up to the floor rather
