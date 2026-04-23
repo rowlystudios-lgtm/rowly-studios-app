@@ -8,6 +8,7 @@ import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
 import { adminSignIn } from './actions'
+import { createAccount } from '@/app/actions/create-account'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'error'
 type AdminStatus = 'idle' | 'submitting' | 'error'
@@ -223,144 +224,50 @@ function LoginInner() {
       return
     }
 
-    // 1. Create the user through Supabase auth (GoTrue handles hashing etc.)
-    const { data, error } = await supabase.auth.signUp({
+    // 1. Create the user server-side with email pre-confirmed. The
+    //    server action also handles profile/client_profiles/invite
+    //    setup so the resulting account is fully usable.
+    const res = await createAccount({
       email: cleanEmail,
       password,
+      firstName: first,
+      lastName: last,
+      role: selectedRole as 'talent' | 'client' | 'admin',
+      companyName: company || undefined,
     })
 
-    if (error) {
+    if (!res.ok) {
       setStatus('error')
-      const lower = error.message.toLowerCase()
-      if (lower.includes('already registered') || lower.includes('already exists')) {
-        setErrorMsg('An account already exists with this email. Sign in instead.')
-      } else if (lower.includes('password should be at least')) {
-        setErrorMsg('Password must be at least 8 characters.')
-      } else {
-        setErrorMsg(error.message)
+      setErrorMsg(res.error)
+      if (res.code === 'already_registered') {
+        setMode('signin')
+        setConfirmPassword('')
       }
       return
     }
 
-    const userId = data.user?.id
-    if (!userId) {
-      setStatus('error')
-      setErrorMsg('Something went wrong. Please try again.')
-      return
-    }
-
-    // 2. Auto-confirm email via edge function (bypasses free-tier email delivery)
-    try {
-      await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=confirm-email`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId }),
-        }
-      )
-    } catch {
-      // Non-fatal — if confirmation fails, signInWithPassword below will surface it.
-    }
-
-    // 3. Sign in so subsequent updates run as an authenticated user (RLS).
+    // 2. Sign in immediately. Email is confirmed, so this just works.
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: cleanEmail,
       password,
     })
     if (signInError) {
       setStatus('error')
-      setErrorMsg('Account created but sign-in failed. Please sign in manually.')
-      setMode('signin')
-      setConfirmPassword('')
+      setErrorMsg(signInError.message)
       return
     }
 
-    // 4. For talent, check whether this email has a pre-approval invite.
-    //    Pre-approved talent (invited) → verified immediately, straight to /app.
-    //    Uninvited talent → not verified, shown the website redirect screen.
-    let isInvited = false
-    if (selectedRole === 'talent') {
-      try {
-        const inviteRes = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=check-invite`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail.toLowerCase() }),
-          }
-        )
-        const inviteData = await inviteRes.json().catch(() => ({}))
-        isInvited = inviteData?.invited === true
-      } catch {
-        // Non-fatal — fall through as uninvited.
-      }
-    }
-
-    // 5. Populate the profile row created by the handle_new_user trigger.
-    const fullName = `${first} ${last}`
-    const profileUpdate = await supabase
-      .from('profiles')
-      .update({
-        first_name: first,
-        last_name: last,
-        full_name: fullName,
-        role: selectedRole,
-        // Client → verified immediately.
-        // Talent with invite → verified immediately.
-        // Talent without invite → unverified, sent to website.
-        verified: selectedRole === 'client' ? true : isInvited,
-      })
-      .eq('id', userId)
-
-    if (profileUpdate.error) {
-      setStatus('error')
-      setErrorMsg(profileUpdate.error.message)
-      return
-    }
-
-    // 6. Clients: make sure client_profiles has a row with the company name.
-    if (selectedRole === 'client') {
-      const clientUpsert = await supabase
-        .from('client_profiles')
-        .upsert({ id: userId, company_name: company }, { onConflict: 'id' })
-      if (clientUpsert.error) {
-        setStatus('error')
-        setErrorMsg(clientUpsert.error.message)
-        return
-      }
-    }
-
-    // 7. If invited talent, mark the invite as signed up so admin sees it.
-    if (selectedRole === 'talent' && isInvited) {
-      try {
-        await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/set-user-password?action=mark-signed-up`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: cleanEmail.toLowerCase(),
-              profileId: userId,
-            }),
-          }
-        )
-      } catch {
-        // Non-fatal — admin can reconcile manually.
-      }
-    }
-
-    // 8. Route based on role / invite status.
-    if (selectedRole === 'client' || isInvited) {
+    // 3. Route based on role / invite status.
+    //    Clients and invited talent → /app.
+    //    Uninvited talent → sign out, show website redirect screen so
+    //    they know to apply through the marketing site.
+    if (selectedRole === 'client' || res.isInvited) {
       setStatus('idle')
       router.replace('/app')
       router.refresh()
       return
     }
 
-    // Uninvited talent → sign out, show website redirect screen.
-    // Their auth user remains in Supabase; once admin adds an invite they
-    // can sign in and they'll pass the unverified-but-invited check.
     await supabase.auth.signOut()
     resetSignupFields()
     setShowWebsiteRedirect(true)

@@ -4,9 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-auth'
 import { createServiceClient } from '@/lib/supabase-service'
 
-const APP_REDIRECT = 'https://app.rowlystudios.com/app'
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.rowlystudios.com'
 
 /**
  * Save admin notes inline. Called with formData { id, notes }.
@@ -77,46 +75,62 @@ export async function acceptApplication(formData: FormData) {
       { onConflict: 'email' }
     )
 
-  // 3) invite via Supabase auth admin
-  const { error: inviteErr } = await service.auth.admin.inviteUserByEmail(
-    app.email,
-    {
-      redirectTo: APP_REDIRECT,
-      data: {
-        application_type: app.type,
-        first_name: app.first_name,
-      },
-    }
-  )
-  // If the user already has an auth identity, inviteUserByEmail fails with
-  // "User already registered". That's fine — they can sign in as usual.
+  // 3) Create the auth user (if not already present), email already
+  //    confirmed so first sign-in is frictionless.
+  const { error: createErr } = await service.auth.admin.createUser({
+    email: app.email,
+    email_confirm: true,
+    user_metadata: {
+      application_id: app.id,
+      application_type: app.type,
+      first_name: app.first_name,
+      last_name: app.last_name,
+    },
+  })
   const alreadyRegistered =
-    inviteErr && /already|registered|exists/i.test(inviteErr.message)
-  if (inviteErr && !alreadyRegistered) {
-    return { ok: false, error: inviteErr.message }
+    createErr && /already|registered|exists/i.test(createErr.message)
+  if (createErr && !alreadyRegistered) {
+    return { ok: false, error: createErr.message }
   }
 
-  // 4) send acceptance email via edge function
-  try {
-    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-      await fetch(
-        `${SUPABASE_URL}/functions/v1/set-user-password?action=send-acceptance-email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            email: app.email,
-            first_name: app.first_name,
-            type: app.type,
-          }),
-        }
-      )
+  // 4) Generate a one-time magic link that lands them on /welcome with
+  //    a valid session attached.
+  const welcomeUrl = `${APP_URL}/welcome`
+  const { data: linkData, error: linkErr } =
+    await service.auth.admin.generateLink({
+      type: 'magiclink',
+      email: app.email,
+      options: {
+        redirectTo: welcomeUrl,
+      },
+    })
+  if (linkErr || !linkData?.properties?.action_link) {
+    return {
+      ok: false,
+      error: linkErr?.message ?? 'Failed to generate welcome link',
     }
-  } catch {
-    // Non-fatal — status is already approved.
+  }
+  const actionLink = linkData.properties.action_link
+
+  // 5) Send branded welcome email via Resend.
+  const { renderWelcomeEmail } = await import('@/lib/emails/welcome-email')
+  const { sendTransactionalEmail } = await import('@/lib/email')
+  const { subject, html } = renderWelcomeEmail({
+    firstName: app.first_name ?? '',
+    applicationType: app.type ?? 'talent',
+    actionLink,
+  })
+  const emailRes = await sendTransactionalEmail({
+    to: app.email,
+    subject,
+    html,
+    replyTo: 'hello@rowlystudios.com',
+  })
+  // Non-fatal: application is still approved even if email fails — admin
+  // can resend from the applications list. But surface it in the return.
+  if (emailRes?.error) {
+    // eslint-disable-next-line no-console
+    console.warn('[applications.approve] email send failed:', emailRes.error)
   }
 
   revalidatePath('/admin/applications')
