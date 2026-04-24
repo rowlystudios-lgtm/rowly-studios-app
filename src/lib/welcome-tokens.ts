@@ -3,49 +3,49 @@ import { createServiceClient } from '@/lib/supabase-service'
 
 const TOKEN_TTL_DAYS = 30
 
-export type WelcomeTokenLookup =
+export type WelcomeInviteLookup =
   | {
       state: 'valid'
       token: string
-      userId: string
       email: string
-      firstName: string | null
+      firstName: string
+      lastName: string
+      type: 'talent' | 'client'
+      companyName: string | null
       expiresAt: Date
     }
   | { state: 'consumed'; email: string }
   | { state: 'expired' }
   | { state: 'not_found' }
 
-export async function createWelcomeToken(params: {
-  userId: string
+export async function createWelcomeInvite(params: {
+  applicationId: string
   email: string
-  applicationId?: string | null
 }): Promise<{ token: string; expiresAt: Date }> {
   const service = createServiceClient()
   const token = crypto.randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000)
 
   const { error } = await service.from('welcome_tokens').insert({
-    user_id: params.userId,
+    application_id: params.applicationId,
     email: params.email,
     token,
-    application_id: params.applicationId ?? null,
     expires_at: expiresAt.toISOString(),
   })
-  if (error) throw new Error(`createWelcomeToken: ${error.message}`)
+  if (error) throw new Error(`createWelcomeInvite: ${error.message}`)
 
   return { token, expiresAt }
 }
 
-export async function lookupWelcomeToken(
+export async function lookupWelcomeInvite(
   token: string
-): Promise<WelcomeTokenLookup> {
+): Promise<WelcomeInviteLookup> {
   if (!token || typeof token !== 'string') return { state: 'not_found' }
   const service = createServiceClient()
 
   const { data, error } = await service
     .from('welcome_tokens')
-    .select('id, user_id, email, expires_at, consumed_at')
+    .select('id, email, application_id, expires_at, consumed_at')
     .eq('token', token)
     .maybeSingle()
 
@@ -53,96 +53,51 @@ export async function lookupWelcomeToken(
   if (data.consumed_at) return { state: 'consumed', email: data.email }
   if (new Date(data.expires_at) < new Date()) return { state: 'expired' }
 
-  // Pull first_name from user metadata for friendly greeting.
-  const { data: userRes } = await service.auth.admin.getUserById(data.user_id)
-  const meta = userRes?.user?.user_metadata as Record<string, unknown> | null
-  const firstName =
-    (meta?.first_name as string | undefined) ??
-    (meta?.firstName as string | undefined) ??
-    null
+  // Resolve the application to pull first/last/type/company.
+  const { data: app } = await service
+    .from('talent_applications')
+    .select('first_name, last_name, type, company_name')
+    .eq('id', data.application_id)
+    .maybeSingle()
+
+  if (!app) return { state: 'not_found' }
 
   return {
     state: 'valid',
     token,
-    userId: data.user_id,
     email: data.email,
-    firstName,
+    firstName: (app.first_name ?? '').trim(),
+    lastName: (app.last_name ?? '').trim(),
+    type: app.type === 'client' ? 'client' : 'talent',
+    companyName: app.company_name ?? null,
     expiresAt: new Date(data.expires_at),
   }
 }
 
 /**
- * Consumes the token AND sets the user's password in one atomic-ish flow.
- * If the DB update races with a second consumer, the second one gets
- * "already consumed" back.
+ * Claim the token atomically (only one caller wins) and link it to the
+ * newly-created auth user. Must be called AFTER createAccount has
+ * successfully created or updated the auth user.
  */
-export async function consumeWelcomeToken(params: {
+export async function consumeWelcomeInvite(params: {
   token: string
-  password: string
-}): Promise<
-  | { ok: true; email: string }
-  | {
-      ok: false
-      error: string
-      code: 'not_found' | 'expired' | 'consumed' | 'weak_password' | 'other'
-    }
-> {
-  if (!params.password || params.password.length < 8) {
-    return {
-      ok: false,
-      error: 'Password must be at least 8 characters.',
-      code: 'weak_password',
-    }
-  }
-
+  userId: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
   const service = createServiceClient()
 
-  // Mark consumed_at with a conditional update so only ONE caller wins.
-  // Returns the row if and only if it was not previously consumed and
-  // not expired.
-  const { data: claimed, error: claimErr } = await service
+  const { data: claimed, error } = await service
     .from('welcome_tokens')
-    .update({ consumed_at: new Date().toISOString() })
+    .update({
+      consumed_at: new Date().toISOString(),
+      user_id: params.userId,
+    })
     .eq('token', params.token)
     .is('consumed_at', null)
     .gt('expires_at', new Date().toISOString())
-    .select('user_id, email')
+    .select('id')
     .maybeSingle()
 
-  if (claimErr) return { ok: false, error: claimErr.message, code: 'other' }
-  if (!claimed) {
-    // Figure out the specific failure for a helpful message.
-    const status = await lookupWelcomeToken(params.token)
-    if (status.state === 'consumed')
-      return {
-        ok: false,
-        error: 'This link has already been used.',
-        code: 'consumed',
-      }
-    if (status.state === 'expired')
-      return { ok: false, error: 'This link has expired.', code: 'expired' }
-    return { ok: false, error: 'Invalid link.', code: 'not_found' }
-  }
-
-  const { error: pwErr } = await service.auth.admin.updateUserById(
-    claimed.user_id,
-    { password: params.password }
-  )
-  if (pwErr) {
-    // Rollback the consumption so the user can retry.
-    await service
-      .from('welcome_tokens')
-      .update({ consumed_at: null })
-      .eq('token', params.token)
-    const isPasswordIssue = pwErr.message.toLowerCase().includes('password')
-    return {
-      ok: false,
-      error: isPasswordIssue
-        ? 'Password must be at least 8 characters.'
-        : pwErr.message,
-      code: isPasswordIssue ? 'weak_password' : 'other',
-    }
-  }
-
-  return { ok: true, email: claimed.email }
+  if (error) return { ok: false, error: error.message }
+  if (!claimed) return { ok: false, error: 'Invite already used or expired' }
+  return { ok: true }
 }

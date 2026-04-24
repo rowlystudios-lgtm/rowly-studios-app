@@ -75,54 +75,16 @@ export async function acceptApplication(formData: FormData) {
       { onConflict: 'email' }
     )
 
-  // 3) Create the auth user (if not already present), email already
-  //    confirmed so first sign-in is frictionless.
-  const { data: createData, error: createErr } =
-    await service.auth.admin.createUser({
-      email: app.email,
-      email_confirm: true,
-      user_metadata: {
-        application_id: app.id,
-        application_type: app.type,
-        first_name: app.first_name,
-        last_name: app.last_name,
-      },
-    })
-  const alreadyRegistered =
-    createErr && /already|registered|exists/i.test(createErr.message)
-  if (createErr && !alreadyRegistered) {
-    return { ok: false, error: createErr.message }
-  }
-
-  // 4) Issue a long-lived welcome token. This replaces Supabase magic
-  //    links: the URL is safe to prefetch, can be opened on desktop
-  //    then mobile, and the token is only consumed when the user
-  //    actually submits the set-password form.
-  let userId: string | null =
-    (createData as { user?: { id?: string } } | undefined)?.user?.id ?? null
-  if (!userId) {
-    // Pre-existing user (alreadyRegistered === true). Look up via profiles.
-    const { data: prof } = await service
-      .from('profiles')
-      .select('id')
-      .eq('email', app.email)
-      .maybeSingle()
-    userId = prof?.id ?? null
-  }
-  if (!userId) {
-    return {
-      ok: false,
-      error: 'Could not resolve user id for welcome token',
-    }
-  }
-
-  const { createWelcomeToken } = await import('@/lib/welcome-tokens')
-  const { token } = await createWelcomeToken({
-    userId,
-    email: app.email,
+  // 3) Issue a long-lived welcome invite. We do NOT create the auth
+  //    user here — the user is created when they submit the Create
+  //    Account form, which is what consumes this token.
+  const { createWelcomeInvite } = await import('@/lib/welcome-tokens')
+  const { token } = await createWelcomeInvite({
     applicationId: app.id,
+    email: app.email,
   })
-  const actionLink = `${APP_URL}/welcome?token=${encodeURIComponent(token)}`
+  const roleParam = app.type === 'client' ? 'client' : 'talent'
+  const actionLink = `${APP_URL}/login?mode=create&role=${roleParam}&invite=${encodeURIComponent(token)}`
 
   // 5) Send branded welcome email via Resend.
   const { renderWelcomeEmail } = await import('@/lib/emails/welcome-email')

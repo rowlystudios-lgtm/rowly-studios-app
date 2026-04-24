@@ -7,7 +7,7 @@ import { RSLogo } from '@/components/RSLogo'
 import { InstallBanner } from '@/components/InstallBanner'
 import { PasswordInput } from '@/components/PasswordInput'
 import { createClient } from '@/lib/supabase-browser'
-import { adminSignIn } from './actions'
+import { adminSignIn, lookupInviteAction, consumeInviteAction } from './actions'
 import { createAccount } from '@/app/actions/create-account'
 
 type Status = 'checking' | 'idle' | 'submitting' | 'error'
@@ -66,7 +66,9 @@ function friendlyError(message: string): string {
 function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const pageMode = searchParams.get('mode') // 'reset' when arriving from /auth/callback
+  const pageMode = searchParams.get('mode') // 'reset' when arriving from /auth/callback; 'create' when arriving from a welcome invite
+  const urlRole = searchParams.get('role')
+  const urlInvite = searchParams.get('invite')
   const supabase = createClient()
 
   const [email, setEmail] = useState('')
@@ -94,6 +96,63 @@ function LoginInner() {
   const [companyName, setCompanyName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showWebsiteRedirect, setShowWebsiteRedirect] = useState(false)
+
+  type InviteState =
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | {
+        status: 'valid'
+        email: string
+        firstName: string
+        lastName: string
+        type: 'talent' | 'client'
+      }
+    | { status: 'consumed'; email: string }
+    | { status: 'expired' }
+    | { status: 'not_found' }
+  const [inviteState, setInviteState] = useState<InviteState>({ status: 'idle' })
+
+  // Welcome-invite lookup: pre-fills the create-account form with the
+  // applicant's name, email, and role; locks the email field.
+  useEffect(() => {
+    if (!urlInvite) return
+    setInviteState({ status: 'loading' })
+    lookupInviteAction(urlInvite).then((res) => {
+      if (res.state === 'valid') {
+        setInviteState({
+          status: 'valid',
+          email: res.email,
+          firstName: res.firstName,
+          lastName: res.lastName,
+          type: res.type,
+        })
+        setEmail(res.email)
+        setFirstName(res.firstName)
+        setLastName(res.lastName)
+        setSelectedRole(res.type)
+        setMode('signup')
+      } else if (res.state === 'consumed') {
+        setInviteState({ status: 'consumed', email: res.email })
+        setEmail(res.email)
+        setMode('signin')
+      } else if (res.state === 'expired') {
+        setInviteState({ status: 'expired' })
+      } else {
+        setInviteState({ status: 'not_found' })
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlInvite])
+
+  // Respect ?mode=create / ?role=... when there's no invite token, so
+  // /login?mode=create&role=talent works standalone.
+  useEffect(() => {
+    if (urlInvite) return
+    if (pageMode === 'create') setMode('signup')
+    if (urlRole === 'client') setSelectedRole('client')
+    else if (urlRole === 'talent') setSelectedRole('talent')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlInvite, pageMode, urlRole])
 
   const [showAdminForm, setShowAdminForm] = useState(false)
   const [adminEmail, setAdminEmail] = useState('')
@@ -239,14 +298,17 @@ function LoginInner() {
     if (!res.ok) {
       setStatus('error')
       setErrorMsg(res.error)
-      if (res.code === 'already_registered') {
-        setMode('signin')
-        setConfirmPassword('')
-      }
       return
     }
 
-    // 2. Sign in immediately. Email is confirmed, so this just works.
+    // 2. If the user came from a welcome invite, mark the token consumed
+    //    so re-using the URL surfaces the friendly "already used" state.
+    //    Fire-and-forget: a failure here doesn't block sign-in.
+    if (urlInvite && res.userId) {
+      await consumeInviteAction({ token: urlInvite, userId: res.userId })
+    }
+
+    // 3. Sign in immediately. Email is confirmed, so this just works.
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: cleanEmail,
       password,
@@ -257,11 +319,11 @@ function LoginInner() {
       return
     }
 
-    // 3. Route based on role / invite status.
+    // 4. Route based on role / invite status.
     //    Clients and invited talent → /app.
-    //    Uninvited talent → sign out, show website redirect screen so
-    //    they know to apply through the marketing site.
-    if (selectedRole === 'client' || res.isInvited) {
+    //    Uninvited talent (no invite token) → sign out, show website
+    //    redirect screen so they know to apply through the marketing site.
+    if (selectedRole === 'client' || Boolean(urlInvite)) {
       setStatus('idle')
       router.replace('/app')
       router.refresh()
@@ -857,6 +919,26 @@ function LoginInner() {
                 </form>
               ) : (
                 <form onSubmit={handleSignUp} className="space-y-3">
+                  {inviteState.status === 'valid' && (
+                    <div style={{ padding: '10px 14px', marginBottom: 16, background: '#E8F0FC', border: '1px solid #B7CFF0', borderRadius: 8, fontSize: 13, color: '#1A2030' }}>
+                      Welcome{inviteState.firstName ? `, ${inviteState.firstName}` : ''} — your Rowly Studios application was accepted. Finish creating your account below.
+                    </div>
+                  )}
+                  {inviteState.status === 'consumed' && (
+                    <div style={{ padding: '10px 14px', marginBottom: 16, background: '#FFF7E6', border: '1px solid #F0D88E', borderRadius: 8, fontSize: 13, color: '#1A2030' }}>
+                      Your account was already created. Sign in below with the password you set.
+                    </div>
+                  )}
+                  {inviteState.status === 'expired' && (
+                    <div style={{ padding: '10px 14px', marginBottom: 16, background: '#FFEBEB', border: '1px solid #F3B8B8', borderRadius: 8, fontSize: 13, color: '#1A2030' }}>
+                      This invite link has expired. Please contact Rowly Studios to request a new one.
+                    </div>
+                  )}
+                  {inviteState.status === 'not_found' && urlInvite && (
+                    <div style={{ padding: '10px 14px', marginBottom: 16, background: '#FFEBEB', border: '1px solid #F3B8B8', borderRadius: 8, fontSize: 13, color: '#1A2030' }}>
+                      This invite link is not valid. You can still create an account below.
+                    </div>
+                  )}
                   <label
                     className="block text-[11px] uppercase tracking-wider font-semibold"
                     style={{ color: '#1A3C6B' }}
@@ -909,9 +991,16 @@ function LoginInner() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@email.com"
-                    className="w-full px-3 py-3 text-[14px] text-rs-ink bg-white rounded-[10px] border focus:outline-none"
-                    style={{ borderColor: '#AABDE0' }}
+                    className="w-full px-3 py-3 text-[14px] text-rs-ink rounded-[10px] border focus:outline-none"
+                    style={{
+                      borderColor: '#AABDE0',
+                      background:
+                        inviteState.status === 'valid' ? '#F4F7FC' : '#FFFFFF',
+                      cursor:
+                        inviteState.status === 'valid' ? 'not-allowed' : 'text',
+                    }}
                     disabled={status === 'submitting'}
+                    readOnly={inviteState.status === 'valid'}
                     autoComplete="email"
                   />
 

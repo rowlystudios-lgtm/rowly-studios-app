@@ -12,24 +12,25 @@ type CreateAccountArgs = {
 }
 
 type CreateAccountResult =
-  | { ok: true; userId: string; isInvited: boolean }
-  | {
-      ok: false
-      error: string
-      code?: 'already_registered' | 'weak_password' | 'other'
-    }
+  | { ok: true; userId: string }
+  | { ok: false; error: string; code?: 'weak_password' | 'other' }
+
+export type { CreateAccountResult }
 
 /**
- * Server-side account creation for SELF-SERVE signups from /login.
+ * Server-side account creation. Used by:
+ *   - /login Create-account form (self-serve signup)
+ *   - /login Create-account form when a welcome invite is in the URL
  *
- * Uses the admin API to create the user with email_confirm=true so the
- * client can sign in immediately with signInWithPassword — no email
- * confirmation race, no "account created but sign-in failed" error.
+ * If the user already exists (pre-existing partial account from earlier
+ * broken flows, or a re-application), we OVERWRITE the password +
+ * metadata via auth.admin.updateUserById rather than failing — this
+ * makes the welcome-invite flow recoverable.
  *
- * Also runs the post-signup profile setup that used to live inline in
- * handleSignUp (role, verified flag, name fields, client_profiles
- * upsert, talent invite check). Returns isInvited so the caller can
- * route appropriately for talent.
+ * Profile/client_profiles/invite-acknowledgement work no longer happens
+ * here. The handle_new_user trigger seeds full_name from metadata; any
+ * additional row setup is the caller's responsibility (or relies on a
+ * richer DB trigger that reads role/first_name/etc from metadata).
  */
 export async function createAccount(
   args: CreateAccountArgs
@@ -40,7 +41,6 @@ export async function createAccount(
   const password = args.password
   const first = args.firstName.trim()
   const last = args.lastName.trim()
-  const fullName = `${first} ${last}`.trim()
 
   if (!email || !password || !first || !last) {
     return { ok: false, error: 'Missing required fields.', code: 'other' }
@@ -53,101 +53,72 @@ export async function createAccount(
     }
   }
 
-  const { data: created, error } = await service.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      first_name: first,
-      last_name: last,
-      full_name: fullName,
-      role: args.role,
-      company_name: args.companyName ?? null,
-    },
-  })
-
-  if (error) {
-    const lower = error.message.toLowerCase()
-    if (
-      lower.includes('already') ||
-      lower.includes('registered') ||
-      lower.includes('exists')
-    ) {
-      return {
-        ok: false,
-        error: 'An account already exists with this email. Sign in instead.',
-        code: 'already_registered',
-      }
-    }
-    if (lower.includes('password should be at least')) {
-      return {
-        ok: false,
-        error: 'Password must be at least 8 characters.',
-        code: 'weak_password',
-      }
-    }
-    return { ok: false, error: error.message, code: 'other' }
+  const metadata = {
+    first_name: first,
+    last_name: last,
+    full_name: `${first} ${last}`,
+    role: args.role,
+    company_name: args.companyName ?? null,
   }
 
-  const userId = created?.user?.id
-  if (!userId) {
-    return {
-      ok: false,
-      error: 'Account created but no user id returned.',
-      code: 'other',
-    }
-  }
+  // Try to create the user. If they already exist, update their
+  // password instead so welcome invites are robust to retries.
+  const { data: createData, error: createErr } =
+    await service.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: metadata,
+    })
 
-  // Talent invite check: pre-approved talent are invited via an entry
-  // in talent_invites; that pre-approval flips them to verified=true on
-  // first signup. Uninvited talent stay unverified until admin approves
-  // their separate application.
-  let isInvited = false
-  if (args.role === 'talent') {
-    const { data: invite } = await service
-      .from('talent_invites')
-      .select('email')
+  if (createErr) {
+    const msg = createErr.message.toLowerCase()
+    const alreadyRegistered =
+      msg.includes('already') ||
+      msg.includes('registered') ||
+      msg.includes('exists')
+
+    if (!alreadyRegistered) {
+      if (msg.includes('password should be at least')) {
+        return {
+          ok: false,
+          error: 'Password must be at least 8 characters.',
+          code: 'weak_password',
+        }
+      }
+      return { ok: false, error: createErr.message, code: 'other' }
+    }
+
+    // User exists — look them up and overwrite password + metadata.
+    const { data: prof } = await service
+      .from('profiles')
+      .select('id')
       .eq('email', email)
       .maybeSingle()
-    isInvited = Boolean(invite)
-  }
 
-  // Populate the profile row created by the handle_new_user trigger
-  // (which only sets full_name from metadata). Clients are auto-verified;
-  // talent verification follows the invite gate.
-  await service
-    .from('profiles')
-    .update({
-      first_name: first,
-      last_name: last,
-      full_name: fullName,
-      role: args.role,
-      verified: args.role === 'client' ? true : isInvited,
-    })
-    .eq('id', userId)
-
-  // Clients need a client_profiles row with their company name.
-  if (args.role === 'client' && args.companyName?.trim()) {
-    await service
-      .from('client_profiles')
-      .upsert(
-        { id: userId, company_name: args.companyName.trim() },
-        { onConflict: 'id' }
-      )
-  }
-
-  // Mark the invite as signed-up so admin can see the talent has come
-  // through. Best-effort — ignored if the column / row doesn't exist.
-  if (args.role === 'talent' && isInvited) {
-    try {
-      await service
-        .from('talent_invites')
-        .update({ signed_up_at: new Date().toISOString(), profile_id: userId })
-        .eq('email', email)
-    } catch {
-      // non-fatal
+    const existingId = prof?.id
+    if (!existingId) {
+      return {
+        ok: false,
+        error: 'Account exists but could not be located. Contact support.',
+        code: 'other',
+      }
     }
+
+    const { error: updateErr } = await service.auth.admin.updateUserById(
+      existingId,
+      { password, user_metadata: metadata, email_confirm: true }
+    )
+    if (updateErr) {
+      return { ok: false, error: updateErr.message, code: 'other' }
+    }
+
+    return { ok: true, userId: existingId }
   }
 
-  return { ok: true, userId, isInvited }
+  const newId = createData?.user?.id
+  if (!newId) {
+    return { ok: false, error: 'Could not retrieve new user id.', code: 'other' }
+  }
+  return { ok: true, userId: newId }
 }

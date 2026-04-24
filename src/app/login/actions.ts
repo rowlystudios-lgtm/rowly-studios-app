@@ -68,3 +68,21 @@ export async function adminSignIn(email: string, password: string) {
 
   redirect('/admin')
 }
+
+/* ─── Welcome-invite helpers ─── */
+
+import {
+  lookupWelcomeInvite,
+  consumeWelcomeInvite,
+} from '@/lib/welcome-tokens'
+
+export async function lookupInviteAction(token: string) {
+  return lookupWelcomeInvite(token)
+}
+
+export async function consumeInviteAction(params: {
+  token: string
+  userId: string
+}) {
+  return consumeWelcomeInvite(params)
+}
