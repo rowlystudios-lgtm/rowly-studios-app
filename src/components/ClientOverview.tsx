@@ -488,7 +488,14 @@ export function ClientOverview() {
 
   return (
     <>
-      <style>{`@keyframes rs-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
+      <style>{`
+        @keyframes rs-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
+        @keyframes rsChatLivePulse {
+          0%   { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); }
+          70%  { box-shadow: 0 0 0 6px rgba(225, 29, 72, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0); }
+        }
+      `}</style>
 
       {restriction.restricted && (
         <ClientRestrictedBanner
@@ -1072,7 +1079,13 @@ function ClientJobRow({
           )}
 
           {isChatOpen(job) && user?.id && (
-            <ExpandedSection label="Group chat" divider>
+            <ExpandedSection
+              label="Group chat"
+              divider
+              labelColor="#FACC15"
+              chevronSize={20}
+              liveIndicator
+            >
               <JobChatPanel
                 jobId={job.id}
                 currentUserId={user.id}
@@ -1192,31 +1205,102 @@ function ExpandedSection({
   label,
   children,
   divider,
+  labelColor,
+  chevronSize,
+  liveIndicator,
 }: {
   label: string
   children: React.ReactNode
   divider?: boolean
+  labelColor?: string
+  chevronSize?: number
+  liveIndicator?: boolean
 }) {
+  // Any decoration prop flips this into a tappable collapsible (closed
+  // by default). Existing non-decorated callers stay static, matching
+  // the pre-existing visual pattern on the client card.
+  const decorated =
+    labelColor !== undefined ||
+    chevronSize !== undefined ||
+    liveIndicator === true
+  const [open, setOpen] = useState(false)
+
+  const wrapperStyle: React.CSSProperties = {
+    borderTop: divider ? `1px solid ${SOFT_BORDER}` : undefined,
+    paddingTop: divider ? 12 : 0,
+  }
+
+  if (!decorated) {
+    return (
+      <div style={wrapperStyle}>
+        <p
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            color: TEXT_MUTED,
+            marginBottom: 8,
+          }}
+        >
+          {label}
+        </p>
+        {children}
+      </div>
+    )
+  }
+
   return (
-    <div
-      style={{
-        borderTop: divider ? `1px solid ${SOFT_BORDER}` : undefined,
-        paddingTop: divider ? 12 : 0,
-      }}
-    >
-      <p
+    <div style={wrapperStyle}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         style={{
-          fontSize: 10,
-          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: labelColor ?? TEXT_MUTED,
+          fontSize: labelColor ? 13 : 10,
+          fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
-          color: TEXT_MUTED,
-          marginBottom: 8,
         }}
       >
+        <span
+          aria-hidden
+          style={{
+            display: 'inline-block',
+            transition: 'transform 150ms ease',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            fontSize: chevronSize ?? 'inherit',
+            lineHeight: 1,
+          }}
+        >
+          ▸
+        </span>
         {label}
-      </p>
-      {children}
+        {liveIndicator && (
+          <span
+            aria-label="live"
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: '#E11D48',
+              boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.55)',
+              animation: 'rsChatLivePulse 1.6s ease-out infinite',
+              marginLeft: 4,
+            }}
+          />
+        )}
+      </button>
+      {open && <div style={{ marginTop: 10 }}>{children}</div>}
     </div>
   )
 }

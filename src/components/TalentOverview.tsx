@@ -262,6 +262,15 @@ export function TalentOverview() {
       className="rounded-t-rs-lg"
       style={{ background: BG, color: '#fff', minHeight: 'calc(100dvh - 64px)' }}
     >
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `@keyframes rsChatLivePulse {
+            0%   { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); }
+            70%  { box-shadow: 0 0 0 6px rgba(225, 29, 72, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0); }
+          }`,
+        }}
+      />
       <div className="max-w-md mx-auto px-5 pt-6 pb-10">
         <header
           style={{
@@ -383,9 +392,15 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 function CollapsibleSection({
   label,
   children,
+  labelColor,
+  chevronSize,
+  liveIndicator,
 }: {
   label: string
   children: React.ReactNode
+  labelColor?: string
+  chevronSize?: number
+  liveIndicator?: boolean
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -406,18 +421,42 @@ function CollapsibleSection({
           border: 'none',
           padding: 0,
           cursor: 'pointer',
-          color: TEXT_MUTED,
-          fontSize: 10,
+          color: labelColor ?? TEXT_MUTED,
+          fontSize: labelColor ? 13 : 10,
           fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
         }}
         aria-expanded={open}
       >
-        <span aria-hidden style={{ display: 'inline-block', transition: 'transform 150ms ease', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+        <span
+          aria-hidden
+          style={{
+            display: 'inline-block',
+            transition: 'transform 150ms ease',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            fontSize: chevronSize ?? 'inherit',
+            lineHeight: 1,
+          }}
+        >
           ▸
         </span>
         {label}
+        {liveIndicator && (
+          <span
+            aria-label="live"
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: '#E11D48',
+              boxShadow: '0 0 0 0 rgba(225, 29, 72, 0.55)',
+              animation: 'rsChatLivePulse 1.6s ease-out infinite',
+              marginLeft: 4,
+            }}
+          />
+        )}
       </button>
       {open && <div style={{ marginTop: 10 }}>{children}</div>}
     </div>
@@ -654,7 +693,12 @@ function JobCard({
 
       {/* Group chat — open from crewed_at through end-of-day-after-end */}
       {isChatOpen(job) && currentUserId && (
-        <CollapsibleSection label="Group chat">
+        <CollapsibleSection
+          label="Group chat"
+          labelColor="#FACC15"
+          chevronSize={20}
+          liveIndicator
+        >
           <JobChatPanel
             jobId={job.id}
             currentUserId={currentUserId}
