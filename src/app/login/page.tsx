@@ -137,12 +137,18 @@ function LoginInner() {
         setMode('signin')
       } else if (res.state === 'expired') {
         setInviteState({ status: 'expired' })
+        if (urlRole === 'client') setSelectedRole('client')
+        else if (urlRole === 'talent') setSelectedRole('talent')
+        if (pageMode === 'create') setMode('signup')
       } else {
         setInviteState({ status: 'not_found' })
+        if (urlRole === 'client') setSelectedRole('client')
+        else if (urlRole === 'talent') setSelectedRole('talent')
+        if (pageMode === 'create') setMode('signup')
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlInvite])
+  }, [urlInvite, urlRole, pageMode])
 
   // Respect ?mode=create / ?role=... when there's no invite token, so
   // /login?mode=create&role=talent works standalone.

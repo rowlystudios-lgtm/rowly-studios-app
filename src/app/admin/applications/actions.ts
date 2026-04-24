@@ -79,10 +79,19 @@ export async function acceptApplication(formData: FormData) {
   //    user here — the user is created when they submit the Create
   //    Account form, which is what consumes this token.
   const { createWelcomeInvite } = await import('@/lib/welcome-tokens')
-  const { token } = await createWelcomeInvite({
-    applicationId: app.id,
-    email: app.email,
-  })
+  let token: string
+  try {
+    const result = await createWelcomeInvite({
+      applicationId: app.id,
+      email: app.email,
+    })
+    token = result.token
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // eslint-disable-next-line no-console
+    console.error('[applications.approve] createWelcomeInvite failed:', msg, { email: app.email, applicationId: app.id })
+    return { ok: false, error: `Welcome invite creation failed: ${msg}` }
+  }
   const roleParam = app.type === 'client' ? 'client' : 'talent'
   const actionLink = `${APP_URL}/login?mode=create&role=${roleParam}&invite=${encodeURIComponent(token)}`
 
