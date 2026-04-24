@@ -77,40 +77,52 @@ export async function acceptApplication(formData: FormData) {
 
   // 3) Create the auth user (if not already present), email already
   //    confirmed so first sign-in is frictionless.
-  const { error: createErr } = await service.auth.admin.createUser({
-    email: app.email,
-    email_confirm: true,
-    user_metadata: {
-      application_id: app.id,
-      application_type: app.type,
-      first_name: app.first_name,
-      last_name: app.last_name,
-    },
-  })
+  const { data: createData, error: createErr } =
+    await service.auth.admin.createUser({
+      email: app.email,
+      email_confirm: true,
+      user_metadata: {
+        application_id: app.id,
+        application_type: app.type,
+        first_name: app.first_name,
+        last_name: app.last_name,
+      },
+    })
   const alreadyRegistered =
     createErr && /already|registered|exists/i.test(createErr.message)
   if (createErr && !alreadyRegistered) {
     return { ok: false, error: createErr.message }
   }
 
-  // 4) Generate a one-time magic link that lands them on /welcome with
-  //    a valid session attached.
-  const welcomeUrl = `${APP_URL}/welcome`
-  const { data: linkData, error: linkErr } =
-    await service.auth.admin.generateLink({
-      type: 'magiclink',
-      email: app.email,
-      options: {
-        redirectTo: welcomeUrl,
-      },
-    })
-  if (linkErr || !linkData?.properties?.action_link) {
+  // 4) Issue a long-lived welcome token. This replaces Supabase magic
+  //    links: the URL is safe to prefetch, can be opened on desktop
+  //    then mobile, and the token is only consumed when the user
+  //    actually submits the set-password form.
+  let userId: string | null =
+    (createData as { user?: { id?: string } } | undefined)?.user?.id ?? null
+  if (!userId) {
+    // Pre-existing user (alreadyRegistered === true). Look up via profiles.
+    const { data: prof } = await service
+      .from('profiles')
+      .select('id')
+      .eq('email', app.email)
+      .maybeSingle()
+    userId = prof?.id ?? null
+  }
+  if (!userId) {
     return {
       ok: false,
-      error: linkErr?.message ?? 'Failed to generate welcome link',
+      error: 'Could not resolve user id for welcome token',
     }
   }
-  const actionLink = linkData.properties.action_link
+
+  const { createWelcomeToken } = await import('@/lib/welcome-tokens')
+  const { token } = await createWelcomeToken({
+    userId,
+    email: app.email,
+    applicationId: app.id,
+  })
+  const actionLink = `${APP_URL}/welcome?token=${encodeURIComponent(token)}`
 
   // 5) Send branded welcome email via Resend.
   const { renderWelcomeEmail } = await import('@/lib/emails/welcome-email')
