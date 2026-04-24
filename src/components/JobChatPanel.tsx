@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { sendChatMessage } from '@/app/actions/job-chat'
 
@@ -12,23 +12,86 @@ type ChatMessage = {
   created_at: string
 }
 
+type Author = {
+  name: string
+  avatarUrl: string | null
+  role: 'admin' | 'client' | 'talent' | null
+}
+
+type Variant = 'full' | 'embedded'
+
 export default function JobChatPanel({
   jobId,
   currentUserId,
   canPost,
-  participants,
+  variant = 'full',
 }: {
   jobId: string
   currentUserId: string
   canPost: boolean
-  participants: Record<string, { name: string; role: string }>
+  variant?: Variant
 }) {
   const supabase = createClient()
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [authors, setAuthors] = useState<Record<string, Author>>({})
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const enrichAuthors = useCallback(
+    async (userIds: string[]) => {
+      const fresh = userIds.filter((id) => !authors[id])
+      if (fresh.length === 0) return
+      const { data } = await supabase
+        .from('profiles')
+        .select(
+          `id, full_name, first_name, role, avatar_url,
+           talent_profiles(avatar_url),
+           client_profiles(logo_url, company_name)`
+        )
+        .in('id', fresh)
+      const next: Record<string, Author> = {}
+      ;((data ?? []) as Array<{
+        id: string
+        full_name: string | null
+        first_name: string | null
+        role: string | null
+        avatar_url: string | null
+        talent_profiles:
+          | { avatar_url: string | null }
+          | { avatar_url: string | null }[]
+          | null
+        client_profiles:
+          | { logo_url: string | null; company_name: string | null }
+          | { logo_url: string | null; company_name: string | null }[]
+          | null
+      }>).forEach((p) => {
+        const tp = Array.isArray(p.talent_profiles)
+          ? p.talent_profiles[0]
+          : p.talent_profiles
+        const cp = Array.isArray(p.client_profiles)
+          ? p.client_profiles[0]
+          : p.client_profiles
+        const avatar =
+          p.avatar_url || tp?.avatar_url || cp?.logo_url || null
+        const companyName = cp?.company_name ?? null
+        const name =
+          p.role === 'client' && companyName
+            ? companyName
+            : p.first_name || p.full_name || 'User'
+        next[p.id] = {
+          name,
+          avatarUrl: avatar,
+          role: (p.role as Author['role']) ?? null,
+        }
+      })
+      if (Object.keys(next).length) {
+        setAuthors((prev) => ({ ...prev, ...next }))
+      }
+    },
+    [authors, supabase]
+  )
 
   useEffect(() => {
     let alive = true
@@ -40,7 +103,13 @@ export default function JobChatPanel({
         .order('created_at', { ascending: true })
         .limit(500)
       if (!alive) return
-      if (!error && data) setMessages(data as ChatMessage[])
+      if (!error && data) {
+        setMessages(data as ChatMessage[])
+        const uniqueAuthors = [
+          ...new Set((data as ChatMessage[]).map((m) => m.author_user_id)),
+        ]
+        void enrichAuthors(uniqueAuthors)
+      }
     })()
 
     const channel = supabase
@@ -54,11 +123,12 @@ export default function JobChatPanel({
           filter: `job_id=eq.${jobId}`,
         },
         (payload) => {
+          const msg = payload.new as ChatMessage
           setMessages((prev) => {
-            const next = payload.new as ChatMessage
-            if (prev.some((m) => m.id === next.id)) return prev
-            return [...prev, next]
+            if (prev.some((m) => m.id === msg.id)) return prev
+            return [...prev, msg]
           })
+          void enrichAuthors([msg.author_user_id])
         }
       )
       .subscribe()
@@ -67,7 +137,7 @@ export default function JobChatPanel({
       alive = false
       supabase.removeChannel(channel)
     }
-  }, [jobId, supabase])
+  }, [jobId, supabase, enrichAuthors])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -91,41 +161,48 @@ export default function JobChatPanel({
     setSending(false)
   }
 
+  const embedded = variant === 'embedded'
+  const maxHeight = embedded ? 360 : 520
+  // currentUserId is available for future "is me" styling if we want it.
+  void currentUserId
+
   return (
     <div
       style={{
         border: '1px solid #E8EDF5',
-        borderRadius: 10,
+        borderRadius: embedded ? 8 : 10,
         background: '#FFFFFF',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        maxHeight: 520,
+        maxHeight,
       }}
     >
-      <div
-        style={{
-          padding: '14px 18px',
-          background: '#0F1B2E',
-          color: '#FFFFFF',
-          fontFamily: "'brandon-grotesque','Helvetica Neue',Arial,sans-serif",
-          fontSize: 12,
-          fontWeight: 700,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-        }}
-      >
-        Job chat
-      </div>
+      {!embedded && (
+        <div
+          style={{
+            padding: '14px 18px',
+            background: '#0F1B2E',
+            color: '#FFFFFF',
+            fontFamily: "'brandon-grotesque','Helvetica Neue',Arial,sans-serif",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Job chat
+        </div>
+      )}
 
       <div
         ref={scrollRef}
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '14px 18px',
+          padding: embedded ? '10px 12px' : '14px 18px',
           background: '#F4F7FC',
-          minHeight: 240,
+          minHeight: embedded ? 160 : 240,
         }}
       >
         {messages.length === 0 ? (
@@ -142,56 +219,84 @@ export default function JobChatPanel({
           </div>
         ) : (
           messages.map((m) => {
-            const isMe = m.author_user_id === currentUserId
-            const p = participants[m.author_user_id]
-            const name = p?.name ?? 'Someone'
-            const role =
-              p?.role === 'admin'
-                ? ' · Admin'
-                : p?.role === 'client'
-                ? ' · Client'
-                : ''
+            const a = authors[m.author_user_id]
+            const name = a?.name ?? 'User'
+            const roleTag =
+              a?.role === 'admin'
+                ? 'Admin'
+                : a?.role === 'client'
+                ? 'Client'
+                : null
+            const time = new Date(m.created_at).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
             return (
               <div
                 key={m.id}
                 style={{
-                  marginBottom: 10,
                   display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: isMe ? 'flex-end' : 'flex-start',
+                  gap: 10,
+                  marginBottom: 12,
+                  alignItems: 'flex-start',
                 }}
               >
-                <div
-                  style={{
-                    fontFamily: "'DM Sans',sans-serif",
-                    fontSize: 11,
-                    color: '#8A96AA',
-                    marginBottom: 3,
-                  }}
-                >
-                  {name}
-                  {role} ·{' '}
-                  {new Date(m.created_at).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </div>
-                <div
-                  style={{
-                    maxWidth: '80%',
-                    background: isMe ? '#2B4780' : '#FFFFFF',
-                    color: isMe ? '#FFFFFF' : '#1A2030',
-                    border: isMe ? 'none' : '1px solid #E8EDF5',
-                    borderRadius: 10,
-                    padding: '9px 13px',
-                    fontFamily: "'DM Sans',sans-serif",
-                    fontSize: 14,
-                    lineHeight: 1.4,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {m.body}
+                <Avatar name={name} src={a?.avatarUrl ?? null} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      marginBottom: 2,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "'DM Sans',sans-serif",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#1A2030',
+                      }}
+                    >
+                      {name}
+                    </span>
+                    {roleTag && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: '#8A96AA',
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {roleTag}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        fontFamily: "'DM Sans',sans-serif",
+                        fontSize: 11,
+                        color: '#8A96AA',
+                      }}
+                    >
+                      {time}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'DM Sans',sans-serif",
+                      fontSize: 14,
+                      lineHeight: 1.45,
+                      color: '#1A2030',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {m.body}
+                  </div>
                 </div>
               </div>
             )
@@ -205,7 +310,7 @@ export default function JobChatPanel({
           style={{
             display: 'flex',
             gap: 8,
-            padding: '12px 14px',
+            padding: embedded ? '10px 12px' : '12px 14px',
             borderTop: '1px solid #E8EDF5',
             background: '#FFFFFF',
           }}
@@ -232,7 +337,7 @@ export default function JobChatPanel({
             type="submit"
             disabled={sending || !draft.trim()}
             style={{
-              padding: '10px 20px',
+              padding: '10px 18px',
               background: sending || !draft.trim() ? '#8A96AA' : '#2B4780',
               color: '#FFFFFF',
               border: 'none',
@@ -251,7 +356,7 @@ export default function JobChatPanel({
       ) : (
         <div
           style={{
-            padding: '12px 14px',
+            padding: '10px 12px',
             borderTop: '1px solid #E8EDF5',
             fontSize: 12,
             color: '#8A96AA',
@@ -276,6 +381,42 @@ export default function JobChatPanel({
         >
           {error}
         </div>
+      )}
+    </div>
+  )
+}
+
+function Avatar({ name, src }: { name: string; src: string | null }) {
+  const initial = (name || 'U').trim().charAt(0).toUpperCase()
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50%',
+        flexShrink: 0,
+        background: '#E8EDF5',
+        color: '#4A5368',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: "'DM Sans',sans-serif",
+        fontWeight: 700,
+        fontSize: 13,
+        overflow: 'hidden',
+      }}
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={name}
+          width={32}
+          height={32}
+          style={{ width: 32, height: 32, objectFit: 'cover' }}
+        />
+      ) : (
+        initial
       )}
     </div>
   )

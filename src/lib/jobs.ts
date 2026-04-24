@@ -13,6 +13,7 @@ export type JobRow = {
   call_time: string | null
   day_rate_cents: number | null
   client_notes: string | null
+  crewed_at?: string | null
   shoot_days?: ShootDay[] | null
   crew_needed?: string[] | null
 }

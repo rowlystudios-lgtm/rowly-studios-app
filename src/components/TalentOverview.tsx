@@ -19,6 +19,22 @@ import {
   declineBookingOffer,
   markBookingViewed,
 } from '@/app/actions/bookings'
+import JobChatPanel from '@/components/JobChatPanel'
+
+// Chat opens when the job is fully crewed and stays open until end-of-day
+// on the day AFTER the job's end (or start, for single-day shoots).
+function isChatOpen(job: {
+  crewed_at?: string | null
+  end_date: string | null
+  start_date: string | null
+}): boolean {
+  if (!job.crewed_at) return false
+  const endStr = job.end_date || job.start_date
+  if (!endStr) return false
+  const end = new Date(endStr + 'T23:59:59')
+  end.setDate(end.getDate() + 1)
+  return Date.now() <= end.getTime()
+}
 
 const BG = '#1A3C6B'
 const CARD_BG = '#2E5099'
@@ -73,7 +89,7 @@ export function TalentOverview() {
          jobs (
            id, title, description, location,
            start_date, end_date, call_time,
-           day_rate_cents, client_notes,
+           day_rate_cents, client_notes, crewed_at,
            shoot_days, crew_needed
          )`
       )
@@ -298,6 +314,7 @@ export function TalentOverview() {
                   variant="confirmed"
                   errorMsg={cardError[b.id]}
                   ownDayRateCents={ownDayRateCents}
+                  currentUserId={user?.id}
                 />
               ))
             )}
@@ -315,6 +332,7 @@ export function TalentOverview() {
                   variant="offer"
                   errorMsg={cardError[b.id]}
                   ownDayRateCents={ownDayRateCents}
+                  currentUserId={user?.id}
                   onViewDetails={() => {
                     setSheetError('')
                     setSheetBooking(b)
@@ -386,6 +404,8 @@ type JobCardProps = {
   errorMsg?: string
   /** Talent's own day rate, for contextual short-shoot copy. */
   ownDayRateCents?: number | null
+  /** Current talent user's auth id; required for the embedded chat. */
+  currentUserId?: string | null
   onViewDetails?: () => void
   onConfirm?: () => void
   onDecline?: () => void
@@ -396,6 +416,7 @@ function JobCard({
   variant,
   errorMsg,
   ownDayRateCents,
+  currentUserId,
   onViewDetails,
   onConfirm,
   onDecline,
@@ -584,6 +605,36 @@ function JobCard({
             Notes
           </span>
           {job.client_notes}
+        </div>
+      )}
+
+      {/* Group chat — open from crewed_at through end-of-day-after-end */}
+      {isChatOpen(job) && currentUserId && (
+        <div
+          style={{
+            padding: '12px 14px',
+            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: TEXT_MUTED,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              display: 'block',
+              marginBottom: 8,
+            }}
+          >
+            Group chat
+          </span>
+          <JobChatPanel
+            jobId={job.id}
+            currentUserId={currentUserId}
+            canPost={true}
+            variant="embedded"
+          />
         </div>
       )}
 

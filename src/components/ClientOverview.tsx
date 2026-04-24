@@ -13,6 +13,22 @@ import {
 import type { JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 import { ClientRestrictedBanner } from '@/components/AccountManagement'
+import JobChatPanel from '@/components/JobChatPanel'
+
+// Chat opens when the job is fully crewed and stays open until end-of-day
+// on the day AFTER the job's end (or start, for single-day shoots).
+function isChatOpen(job: {
+  crewed_at?: string | null
+  end_date: string | null
+  start_date: string | null
+}): boolean {
+  if (!job.crewed_at) return false
+  const endStr = job.end_date || job.start_date
+  if (!endStr) return false
+  const end = new Date(endStr + 'T23:59:59')
+  end.setDate(end.getDate() + 1)
+  return Date.now() <= end.getTime()
+}
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -111,6 +127,7 @@ type JobRow = {
   total_budget_cents: number | null
   shoot_duration_hours: number | null
   created_at: string
+  crewed_at: string | null
   cancelled_at: string | null
   wrapped_at: string | null
   job_bookings: JobBooking[] | null
@@ -337,7 +354,7 @@ export function ClientOverview() {
          shoot_days, start_date, end_date, call_time,
          crew_needed, num_talent, client_budget_cents, total_budget_cents,
          shoot_duration_hours,
-         created_at,
+         created_at, crewed_at,
          cancelled_at, wrapped_at,
          job_bookings (
            id, status, confirmed_rate_cents, offered_rate_cents,
@@ -654,7 +671,7 @@ function ClientJobRow({
   onRefresh: () => void | Promise<void>
   muted?: boolean
 }) {
-  const { supabase } = useAuth()
+  const { user, supabase } = useAuth()
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
@@ -1051,6 +1068,17 @@ function ClientJobRow({
               >
                 {job.client_notes}
               </p>
+            </ExpandedSection>
+          )}
+
+          {isChatOpen(job) && user?.id && (
+            <ExpandedSection label="Group chat" divider>
+              <JobChatPanel
+                jobId={job.id}
+                currentUserId={user.id}
+                canPost={true}
+                variant="embedded"
+              />
             </ExpandedSection>
           )}
 

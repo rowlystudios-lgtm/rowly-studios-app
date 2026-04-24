@@ -252,50 +252,12 @@ export default async function AdminJobDetailPage({
   const billingEmail =
     clientProfile?.billing_email || clientRow?.email || null
 
-  // ─── Job chat: participants + posting gate ───
+  // ─── Job chat: posting gate ───
   const { data: canPostRes } = await supabase.rpc('can_access_job_chat', {
     p_job_id: params.id,
     p_user_id: user.id,
   })
   const canPost = canPostRes === true
-
-  const participantIds = new Set<string>()
-  if (job.client_id) participantIds.add(job.client_id)
-  bookings
-    .filter((b) => b.status === 'confirmed')
-    .forEach((b) => {
-      const tp = unwrap(b.profiles)
-      if (tp?.id) participantIds.add(tp.id)
-    })
-  const { data: adminRows } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('role', 'admin')
-  ;((adminRows ?? []) as Array<{ id: string }>).forEach((a) =>
-    participantIds.add(a.id)
-  )
-
-  type ParticipantRow = {
-    id: string
-    full_name: string | null
-    first_name: string | null
-    role: string | null
-  }
-  const idList = Array.from(participantIds)
-  const { data: participantProfiles } = idList.length
-    ? await supabase
-        .from('profiles')
-        .select('id, full_name, first_name, role')
-        .in('id', idList)
-    : { data: [] as ParticipantRow[] }
-
-  const participants: Record<string, { name: string; role: string }> = {}
-  ;((participantProfiles ?? []) as ParticipantRow[]).forEach((p) => {
-    participants[p.id] = {
-      name: p.first_name ?? p.full_name ?? 'User',
-      role: p.role ?? 'user',
-    }
-  })
 
   return (
     <div
@@ -840,16 +802,11 @@ export default async function AdminJobDetailPage({
       </section>
 
       {/* ─── Job chat ─── */}
-      {/* TODO(chat-v2): mount JobChatPanel on src/app/app/jobs/[id]/page.tsx
-          once that route exists, so talent and clients can chat from their
-          own job view. The RPC + RLS already cover them — only the UI hook
-          is missing. */}
       <section id="chat" style={{ marginTop: 24 }}>
         <JobChatPanel
           jobId={params.id}
           currentUserId={user.id}
           canPost={canPost}
-          participants={participants}
         />
       </section>
 
