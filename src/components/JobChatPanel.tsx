@@ -43,14 +43,15 @@ export default function JobChatPanel({
     async (userIds: string[]) => {
       const fresh = userIds.filter((id) => !authors[id])
       if (fresh.length === 0) return
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
-        .select(
-          `id, full_name, first_name, role, avatar_url,
-           talent_profiles(avatar_url),
-           client_profiles(logo_url, company_name)`
-        )
+        .select('id, full_name, first_name, role, avatar_url')
         .in('id', fresh)
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('[JobChatPanel] enrichAuthors failed:', error.message)
+        return
+      }
       const next: Record<string, Author> = {}
       ;((data ?? []) as Array<{
         id: string
@@ -58,31 +59,11 @@ export default function JobChatPanel({
         first_name: string | null
         role: string | null
         avatar_url: string | null
-        talent_profiles:
-          | { avatar_url: string | null }
-          | { avatar_url: string | null }[]
-          | null
-        client_profiles:
-          | { logo_url: string | null; company_name: string | null }
-          | { logo_url: string | null; company_name: string | null }[]
-          | null
       }>).forEach((p) => {
-        const tp = Array.isArray(p.talent_profiles)
-          ? p.talent_profiles[0]
-          : p.talent_profiles
-        const cp = Array.isArray(p.client_profiles)
-          ? p.client_profiles[0]
-          : p.client_profiles
-        const avatar =
-          p.avatar_url || tp?.avatar_url || cp?.logo_url || null
-        const companyName = cp?.company_name ?? null
-        const name =
-          p.role === 'client' && companyName
-            ? companyName
-            : p.first_name || p.full_name || 'User'
+        const name = p.first_name || p.full_name || 'Member'
         next[p.id] = {
           name,
-          avatarUrl: avatar,
+          avatarUrl: p.avatar_url,
           role: (p.role as Author['role']) ?? null,
         }
       })
@@ -220,7 +201,7 @@ export default function JobChatPanel({
         ) : (
           messages.map((m) => {
             const a = authors[m.author_user_id]
-            const name = a?.name ?? 'User'
+            const name = a?.name ?? '…'
             const roleTag =
               a?.role === 'admin'
                 ? 'Admin'

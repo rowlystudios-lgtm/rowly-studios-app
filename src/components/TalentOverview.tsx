@@ -380,6 +380,50 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   )
 }
 
+function CollapsibleSection({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div
+      style={{
+        borderTop: `1px solid ${CARD_BORDER_SOFT}`,
+        padding: '10px 14px 12px',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: TEXT_MUTED,
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}
+        aria-expanded={open}
+      >
+        <span aria-hidden style={{ display: 'inline-block', transition: 'transform 150ms ease', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          ▸
+        </span>
+        {label}
+      </button>
+      {open && <div style={{ marginTop: 10 }}>{children}</div>}
+    </div>
+  )
+}
+
 function EmptyCard({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -610,32 +654,14 @@ function JobCard({
 
       {/* Group chat — open from crewed_at through end-of-day-after-end */}
       {isChatOpen(job) && currentUserId && (
-        <div
-          style={{
-            padding: '12px 14px',
-            borderTop: `1px solid ${CARD_BORDER_SOFT}`,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: TEXT_MUTED,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              display: 'block',
-              marginBottom: 8,
-            }}
-          >
-            Group chat
-          </span>
+        <CollapsibleSection label="Group chat">
           <JobChatPanel
             jobId={job.id}
             currentUserId={currentUserId}
             canPost={true}
             variant="embedded"
           />
-        </div>
+        </CollapsibleSection>
       )}
 
       {errorMsg && (

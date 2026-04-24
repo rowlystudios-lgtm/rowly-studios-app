@@ -72,6 +72,7 @@ async function notifyJobChatParticipants(params: {
   const authorLabel =
     author?.first_name ?? author?.full_name ?? 'Someone'
 
+  // Non-admin recipients: owning client + confirmed talent (excluding author).
   const recipients = new Set<string>()
   if (job.client_id && job.client_id !== params.authorUserId) {
     recipients.add(job.client_id)
@@ -88,17 +89,37 @@ async function notifyJobChatParticipants(params: {
       }
     }
   )
-  const { data: admins } = await service
-    .from('profiles')
-    .select('id')
-    .eq('role', 'admin')
-  ;((admins ?? []) as Array<{ id: string }>).forEach((a) => {
-    if (a.id && a.id !== params.authorUserId) recipients.add(a.id)
-  })
 
-  // Throttle on type + user + recency (notifications table has no job_id
-  // column and link is plain text, not jsonb, so this is coarser than
-  // per-job throttling — good enough for v1).
+  // Admins: one in-app ping on the FIRST message only, no email, no
+  // per-message chatter. The just-inserted row is counted, so
+  // totalMessages <= 1 means this is the first.
+  const { count: totalMessages } = await service
+    .from('job_chat_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('job_id', job.id)
+
+  if ((totalMessages ?? 0) <= 1) {
+    const { data: admins } = await service
+      .from('profiles')
+      .select('id')
+      .eq('role', 'admin')
+    for (const a of ((admins ?? []) as Array<{ id: string }>)) {
+      if (!a.id || a.id === params.authorUserId) continue
+      await sendNotification({
+        userId: a.id,
+        type: 'job_chat_message',
+        title: `Group chat started: ${job.title}`,
+        body: `${authorLabel} posted the first message. You can read the thread in admin → jobs.`,
+        actionUrl: `/admin/jobs/${job.id}#chat`,
+        channels: ['in_app'],
+      })
+    }
+  }
+
+  // Per-message in-app + throttled email for talent + client. Throttle
+  // on type + user + recency (notifications table has no job_id column
+  // and link is plain text, not jsonb, so this is coarser than per-job
+  // throttling — good enough for v1).
   const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
 
   for (const uid of recipients) {
@@ -116,7 +137,7 @@ async function notifyJobChatParticipants(params: {
       type: 'job_chat_message',
       title: `${authorLabel}: ${job.title}`,
       body: params.preview,
-      actionUrl: `/admin/jobs/${job.id}#chat`,
+      actionUrl: `/app#job-${job.id}`,
       channels: suppressEmail ? ['in_app'] : ['in_app', 'email'],
     })
   }
