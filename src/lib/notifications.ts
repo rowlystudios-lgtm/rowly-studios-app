@@ -226,13 +226,88 @@ function fmtDateTime(iso: string | null): string {
   })
 }
 
+/**
+ * Format a single HH:MM (24h) call time as 12-hour US format, e.g. "8:00 AM".
+ * Returns empty string if input is null/invalid.
+ */
+function fmtTime12(hhmm: string | null | undefined): string {
+  if (!hhmm) return ''
+  const [hStr, mStr] = hhmm.split(':')
+  const h = Number(hStr)
+  const m = Number(mStr ?? '0')
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return ''
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = ((h + 11) % 12) + 1
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
+
+function fmtWeekdayDate(iso: string | null): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(y, (m ?? 1) - 1, d ?? 1)
+  if (Number.isNaN(dt.getTime())) return ''
+  return dt.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+/**
+ * Email-ready human date label.
+ *
+ *   Single-day w/ call_time, 10h default   → "Wed Apr 30, 8:00 AM – 6:00 PM"
+ *   Multi-day  w/ call_time                → "Wed Apr 30, 8:00 AM – Thu May 1, 6:00 PM"
+ *   Single-day w/o call_time               → "Wed Apr 30"
+ *   Multi-day  w/o call_time               → "Wed Apr 30 – Thu May 1"
+ *
+ * Shoot duration is read from shoot_duration_hours, with is_half_day
+ * collapsing to 4h. Defaults to 10h if neither is set.
+ */
+export function formatJobDateLabel(job: {
+  start_date: string | null
+  end_date: string | null
+  call_time: string | null
+  shoot_duration_hours?: number | null
+  is_half_day?: boolean | null
+}): string {
+  const start = job.start_date
+  if (!start) return ''
+  const end = job.end_date && job.end_date !== start ? job.end_date : null
+  const startLabel = fmtWeekdayDate(start)
+  const endLabel = end ? fmtWeekdayDate(end) : ''
+
+  if (!job.call_time) {
+    return end ? `${startLabel} – ${endLabel}` : startLabel
+  }
+
+  const [hStr, mStr] = job.call_time.split(':')
+  const startHour = Number(hStr)
+  const startMin = Number(mStr ?? '0')
+  const duration = job.is_half_day ? 4 : job.shoot_duration_hours ?? 10
+  const totalMinutes = startHour * 60 + startMin + duration * 60
+  const endHour = Math.min(23, Math.floor(totalMinutes / 60))
+  const endMinute = totalMinutes % 60
+  const startTimeLabel = fmtTime12(job.call_time)
+  const endTimeLabel = fmtTime12(
+    `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`
+  )
+
+  if (end) {
+    return `${startLabel}, ${startTimeLabel} – ${endLabel}, ${endTimeLabel}`
+  }
+  return `${startLabel}, ${startTimeLabel} – ${endTimeLabel}`
+}
+
 type BookingContext = {
   bookingId: string
   talentUserId: string
   talentName: string
+  talentFirstName: string
   talentEmail: string | null
   clientUserId: string | null
   clientName: string
+  clientFirstName: string
   clientEmail: string | null
   jobId: string
   jobTitle: string
@@ -241,6 +316,8 @@ type BookingContext = {
   jobEnd: string | null
   jobLocation: string | null
   jobCallTime: string | null
+  jobShootDurationHours: number | null
+  jobIsHalfDay: boolean | null
   offeredRateCents: number | null
   confirmedRateCents: number | null
   isShortShoot: boolean
@@ -309,7 +386,7 @@ async function loadBookingContext(
        profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name, email),
        jobs (id, title, job_code, start_date, end_date, location, call_time,
          shoot_duration_hours, is_half_day, client_id,
-         profiles!jobs_client_id_fkey (full_name, email,
+         profiles!jobs_client_id_fkey (full_name, first_name, email,
            client_profiles (company_name, billing_email)))`
     )
     .eq('id', bookingId)
@@ -322,6 +399,7 @@ async function loadBookingContext(
   }
   type ClientProfile = {
     full_name: string | null
+    first_name: string | null
     email: string | null
     client_profiles: ClientProfiles | ClientProfiles[] | null
   }
@@ -387,9 +465,19 @@ async function loadBookingContext(
       [talent?.first_name, talent?.last_name].filter(Boolean).join(' ') ||
       talent?.full_name ||
       'Talent',
+    talentFirstName:
+      talent?.first_name ||
+      (talent?.full_name ? talent.full_name.split(/\s+/)[0] : '') ||
+      '',
     talentEmail: talent?.email ?? null,
     clientUserId: job.client_id ?? null,
     clientName: cp?.company_name || clientProfile?.full_name || 'Client',
+    clientFirstName:
+      clientProfile?.first_name ||
+      (clientProfile?.full_name
+        ? clientProfile.full_name.split(/\s+/)[0]
+        : '') ||
+      '',
     clientEmail: cp?.billing_email || clientProfile?.email || null,
     jobId: job.id,
     jobTitle: job.title,
@@ -398,6 +486,8 @@ async function loadBookingContext(
     jobEnd: job.end_date,
     jobLocation: job.location,
     jobCallTime: job.call_time,
+    jobShootDurationHours: job.shoot_duration_hours,
+    jobIsHalfDay: job.is_half_day,
     offeredRateCents: row.offered_rate_cents,
     confirmedRateCents: row.confirmed_rate_cents,
     isShortShoot,
@@ -406,6 +496,20 @@ async function loadBookingContext(
     responseDeadlineAt: row.response_deadline_at,
     talentReviewedAt: row.talent_reviewed_at,
   }
+}
+
+function jobDateLabelFromCtx(ctx: BookingContext): string {
+  return formatJobDateLabel({
+    start_date: ctx.jobStart,
+    end_date: ctx.jobEnd,
+    call_time: ctx.jobCallTime,
+    shoot_duration_hours: ctx.jobShootDurationHours,
+    is_half_day: ctx.jobIsHalfDay,
+  })
+}
+
+function icsUrlFor(bookingId: string): string {
+  return `${APP_URL}/api/ics/${bookingId}`
 }
 
 /**
@@ -436,6 +540,7 @@ async function notifyAdminStatus(
       : 'Pending'
     const actionUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
     const html = EmailTemplates.adminStatus({
+      firstName: '',
       statusLabel,
       jobTitle: ctx.jobTitle,
       jobCode: ctx.jobCode,
@@ -480,24 +585,28 @@ export async function notifyJobOffer(bookingId: string) {
   try {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
-    const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const dateLabel = jobDateLabelFromCtx(ctx)
+    const shortDateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const ics = icsUrlFor(bookingId)
     // Talent sees their net rate; client sees the +15% client-facing rate.
     const talentRate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot, true)
     const clientRate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot)
 
     // Email 1: talent
     const talentHtml = EmailTemplates.jobOffer({
+      firstName: ctx.talentFirstName,
       jobTitle: ctx.jobTitle,
       dateLabel,
       location: ctx.jobLocation ?? '',
       rateLabel: talentRate,
       actionUrl: `${APP_URL}/app`,
+      icsUrl: ics,
     })
     await sendNotification({
       userId: ctx.talentUserId,
       type: 'job_offer',
       title: `New job offer: ${ctx.jobTitle}`,
-      body: `You have been offered ${ctx.jobTitle} on ${dateLabel} at ${talentRate}. Tap to respond.`,
+      body: `You have been offered ${ctx.jobTitle} on ${shortDateLabel} at ${talentRate}. Tap to respond.`,
       actionUrl: '/app',
       bookingId,
       jobId: ctx.jobId,
@@ -513,9 +622,11 @@ export async function notifyJobOffer(bookingId: string) {
     // Email 2: client — receipt that we've sent their request
     if (ctx.clientUserId) {
       const clientHtml = EmailTemplates.clientBookingSent({
+        firstName: ctx.clientFirstName,
         talentName: ctx.talentName,
         jobTitle: ctx.jobTitle,
         dateLabel,
+        location: ctx.jobLocation,
         rateLabel: clientRate,
         actionUrl: `${APP_URL}/app`,
       })
@@ -544,7 +655,9 @@ export async function notifyConfirmation(bookingId: string) {
   try {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx) return
-    const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const dateLabel = jobDateLabelFromCtx(ctx)
+    const shortDateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const ics = icsUrlFor(bookingId)
     const confirmed = ctx.confirmedRateCents ?? ctx.offeredRateCents
     // Talent gets their net; client sees the +15% client-facing rate.
     const talentRate = rateLabel(confirmed, ctx.isShortShoot, true)
@@ -553,18 +666,20 @@ export async function notifyConfirmation(bookingId: string) {
     // Email 1: talent
     if (ctx.talentUserId) {
       const talentHtml = EmailTemplates.talentConfirmation({
+        firstName: ctx.talentFirstName,
         jobTitle: ctx.jobTitle,
         dateLabel,
         rateLabel: talentRate,
         location: ctx.jobLocation,
         callTime: ctx.jobCallTime,
         actionUrl: `${APP_URL}/app`,
+        icsUrl: ics,
       })
       await sendNotification({
         userId: ctx.talentUserId,
         type: 'booking_confirmed',
-        title: `Confirmed: ${ctx.jobTitle} — ${dateLabel}`,
-        body: `You're confirmed for ${ctx.jobTitle} on ${dateLabel} at ${talentRate}.`,
+        title: `Confirmed: ${ctx.jobTitle} — ${shortDateLabel}`,
+        body: `You're confirmed for ${ctx.jobTitle} on ${shortDateLabel} at ${talentRate}.`,
         actionUrl: '/app',
         bookingId,
         jobId: ctx.jobId,
@@ -576,17 +691,20 @@ export async function notifyConfirmation(bookingId: string) {
     // Email 2: client
     if (ctx.clientUserId) {
       const clientHtml = EmailTemplates.talentConfirmed({
+        firstName: ctx.clientFirstName,
         talentName: ctx.talentName,
         jobTitle: ctx.jobTitle,
         dateLabel,
+        location: ctx.jobLocation,
         rateLabel: clientRate,
         actionUrl: `${APP_URL}/app`,
+        icsUrl: ics,
       })
       await sendNotification({
         userId: ctx.clientUserId,
         type: 'booking_confirmed',
         title: `${ctx.talentName} is confirmed for ${ctx.jobTitle}`,
-        body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${dateLabel} at ${clientRate}.`,
+        body: `${ctx.talentName} has confirmed for ${ctx.jobTitle} on ${shortDateLabel} at ${clientRate}.`,
         actionUrl: '/app',
         bookingId,
         jobId: ctx.jobId,
@@ -608,12 +726,16 @@ export async function notifyDecline(bookingId: string, reason: string | null) {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx) return
     const supabase = createServiceClient()
+    const dateLabel = jobDateLabelFromCtx(ctx)
 
     // Email to client — a soft "someone else will be found" note
     if (ctx.clientUserId) {
       const clientHtml = EmailTemplates.clientDecline({
+        firstName: ctx.clientFirstName,
         talentName: ctx.talentName,
         jobTitle: ctx.jobTitle,
+        dateLabel,
+        location: ctx.jobLocation,
         actionUrl: `${APP_URL}/app`,
       })
       await sendNotification({
@@ -632,8 +754,11 @@ export async function notifyDecline(bookingId: string, reason: string | null) {
     // Admin receipt — keep the per-admin in-app notification with reason
     const adminUrl = `${APP_URL}/admin/jobs/${ctx.jobId}`
     const adminHtml = EmailTemplates.adminDecline({
+      firstName: '',
       talentName: ctx.talentName,
       jobTitle: ctx.jobTitle,
+      dateLabel,
+      location: ctx.jobLocation,
       reason,
       actionUrl: adminUrl,
     })
@@ -667,20 +792,23 @@ export async function notifyNudge(bookingId: string) {
   try {
     const ctx = await loadBookingContext(bookingId)
     if (!ctx || !ctx.talentUserId) return
-    const dateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
+    const dateLabel = jobDateLabelFromCtx(ctx)
+    const shortDateLabel = fmtDateRange(ctx.jobStart, ctx.jobEnd)
     // Nudge goes to the talent — show their net rate.
     const rate = rateLabel(ctx.offeredRateCents, ctx.isShortShoot, true)
     const html = EmailTemplates.nudge({
+      firstName: ctx.talentFirstName,
       jobTitle: ctx.jobTitle,
       rateLabel: rate,
       dateLabel,
+      location: ctx.jobLocation,
       actionUrl: `${APP_URL}/app`,
     })
     await sendNotification({
       userId: ctx.talentUserId,
       type: 'nudge',
       title: 'Reminder: Pending job offer',
-      body: `Your response is needed for ${ctx.jobTitle} (${dateLabel}).`,
+      body: `Your response is needed for ${ctx.jobTitle} (${shortDateLabel}).`,
       actionUrl: '/app',
       bookingId,
       jobId: ctx.jobId,
@@ -705,8 +833,11 @@ export async function notifyCounterOffer(bookingId: string, notes: string | null
       ? `Talent: ${fmtUsd(ctx.offeredRateCents)}/day · Client: ${fmtUsd(clientRateCents(ctx.offeredRateCents))}/day (was offered)`
       : 'see notes'
     const html = EmailTemplates.counterOffer({
+      firstName: '',
       talentName: ctx.talentName,
       jobTitle: ctx.jobTitle,
+      dateLabel: jobDateLabelFromCtx(ctx),
+      location: ctx.jobLocation,
       counterLabel,
       notes,
       actionUrl,
@@ -744,8 +875,9 @@ export async function notifyFullyCrewed(jobId: string) {
     const { data: job } = await supabase
       .from('jobs')
       .select(
-        `id, title, job_code, start_date, end_date, location, client_id, num_talent,
-         profiles!jobs_client_id_fkey (full_name, email,
+        `id, title, job_code, start_date, end_date, location, call_time,
+         shoot_duration_hours, is_half_day, client_id, num_talent,
+         profiles!jobs_client_id_fkey (full_name, first_name, email,
            client_profiles (company_name, billing_email))`
       )
       .eq('id', jobId)
@@ -755,7 +887,7 @@ export async function notifyFullyCrewed(jobId: string) {
     const { data: confirmed } = await supabase
       .from('job_bookings')
       .select(
-        `confirmed_rate_cents, is_short_shoot,
+        `id, confirmed_rate_cents, is_short_shoot,
          profiles!job_bookings_talent_id_fkey (full_name, first_name, last_name,
           talent_profiles (primary_role))`
       )
@@ -772,6 +904,7 @@ export async function notifyFullyCrewed(jobId: string) {
         | null
     }
     type ConfirmedRow = {
+      id: string
       confirmed_rate_cents: number | null
       is_short_shoot: boolean | null
       profiles: TalentJoin | TalentJoin[] | null
@@ -812,6 +945,11 @@ export async function notifyFullyCrewed(jobId: string) {
     const talentList = buildList(false)
     const adminTalentList = buildList(true)
 
+    type ClientJoin = {
+      full_name: string | null
+      first_name: string | null
+      email: string | null
+    }
     const jobRow = job as {
       id: string
       title: string
@@ -819,15 +957,42 @@ export async function notifyFullyCrewed(jobId: string) {
       start_date: string | null
       end_date: string | null
       location: string | null
+      call_time: string | null
+      shoot_duration_hours: number | null
+      is_half_day: boolean | null
       client_id: string | null
+      profiles: ClientJoin | ClientJoin[] | null
     }
-    const dateLabel = fmtDateRange(jobRow.start_date, jobRow.end_date)
+    const clientProfile = Array.isArray(jobRow.profiles)
+      ? jobRow.profiles[0] ?? null
+      : jobRow.profiles
+    const clientFirstName =
+      clientProfile?.first_name ||
+      (clientProfile?.full_name
+        ? clientProfile.full_name.split(/\s+/)[0]
+        : '') ||
+      ''
+    const shortDateLabel = fmtDateRange(jobRow.start_date, jobRow.end_date)
+    const dateLabel = formatJobDateLabel({
+      start_date: jobRow.start_date,
+      end_date: jobRow.end_date,
+      call_time: jobRow.call_time,
+      shoot_duration_hours: jobRow.shoot_duration_hours,
+      is_half_day: jobRow.is_half_day,
+    })
+    // ICS endpoint is booking-keyed, so pick any confirmed booking's id —
+    // all of them reference the same underlying job dates.
+    const repBookingId = confirmedRows[0]?.id ?? null
+    const ics = repBookingId ? icsUrlFor(repBookingId) : null
     const clientActionUrl = `${APP_URL}/app`
     const clientHtml = EmailTemplates.fullyCrewed({
+      firstName: clientFirstName,
       jobTitle: jobRow.title,
       dateLabel,
+      location: jobRow.location,
       talentList,
       actionUrl: clientActionUrl,
+      icsUrl: ics,
     })
 
     if (jobRow.client_id) {
@@ -835,7 +1000,7 @@ export async function notifyFullyCrewed(jobId: string) {
         userId: jobRow.client_id,
         type: 'job_fully_crewed',
         title: `${jobRow.title} is fully crewed!`,
-        body: `All talent confirmed for ${jobRow.title} on ${dateLabel}.`,
+        body: `All talent confirmed for ${jobRow.title} on ${shortDateLabel}.`,
         actionUrl: '/app',
         jobId,
         channels: ['in_app', 'email', 'sms'],
@@ -851,10 +1016,13 @@ export async function notifyFullyCrewed(jobId: string) {
       .eq('role', 'admin')
     const adminActionUrl = `${APP_URL}/admin/jobs/${jobId}`
     const adminHtml = EmailTemplates.fullyCrewed({
+      firstName: '',
       jobTitle: jobRow.title,
       dateLabel: `${dateLabel} · ${jobRow.job_code ?? ''}`.trim(),
+      location: jobRow.location,
       talentList: adminTalentList,
       actionUrl: adminActionUrl,
+      icsUrl: ics,
     })
     const adminSubject = `✓ Fully crewed: ${jobRow.job_code ?? jobRow.title}`
     for (const a of (admins ?? []) as Array<{ id: string }>) {

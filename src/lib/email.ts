@@ -3,6 +3,8 @@
  * we log a warning and return false — the caller treats email as optional.
  */
 
+import { renderBrandedEmail } from '@/lib/emails/template'
+
 export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY)
 }
@@ -80,262 +82,383 @@ export async function sendTransactionalEmail({
   }
 }
 
-/* ─────────── HTML templates ─────────── */
-
-function wrap(title: string, body: string, cta?: { label: string; url: string }): string {
-  const button = cta
-    ? `<div style="text-align:center;margin:28px 0 12px">
-         <a href="${cta.url}" style="display:inline-block;padding:12px 22px;border-radius:10px;background:#1E3A6B;color:#fff;font-weight:600;text-decoration:none;font-size:14px">
-           ${cta.label}
-         </a>
-       </div>`
-    : ''
-  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F5F6F8;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#1a1a1a">
-    <div style="max-width:560px;margin:0 auto;padding:24px 16px">
-      <div style="background:#0F1B2E;padding:24px 28px;border-radius:14px 14px 0 0;color:#fff">
-        <p style="margin:0;font-family:Georgia,serif;font-style:italic;font-size:22px;letter-spacing:0.02em">Rowly Studios</p>
-        <p style="margin:4px 0 0;font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:#F0A500;font-weight:700">Notification</p>
-      </div>
-      <div style="background:#fff;padding:28px;border-radius:0 0 14px 14px">
-        <h1 style="margin:0 0 14px;font-size:20px;color:#0F1B2E">${title}</h1>
-        <div style="font-size:14px;line-height:1.6;color:#374151">${body}</div>
-        ${button}
-      </div>
-      <p style="margin:14px 0 0;text-align:center;font-size:11px;color:#7A90AA">Rowly Studios · Los Angeles, CA</p>
-    </div>
-  </body></html>`
-}
+/* ─────────── Branded transactional templates ─────────── */
 
 export const EmailTemplates = {
   jobOffer({
+    firstName,
+    jobTitle,
+    dateLabel,
+    location,
+    rateLabel,
+    actionUrl,
+    icsUrl,
+  }: {
+    firstName: string
+    jobTitle: string
+    dateLabel: string
+    location: string
+    rateLabel: string
+    actionUrl: string
+    icsUrl?: string | null
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `New offer: ${jobTitle} on ${dateLabel}.`,
+      eyebrow: 'Job offer',
+      headline: 'You have a new job offer',
+      intro: 'Rowly Studios would like to book you for a job.',
+      blocks: [
+        {
+          type: 'paragraph',
+          body: 'Tap the button below to accept, counter, or decline.',
+        },
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location || null,
+          rateLabel,
+        },
+        { type: 'cta', label: 'Review offer', url: actionUrl },
+        ...(icsUrl
+          ? ([
+              {
+                type: 'calendar_cta',
+                label: 'Add these dates to my calendar',
+                icsUrl,
+              },
+            ] as const)
+          : []),
+      ],
+    }).html
+  },
+
+  talentConfirmed({
+    firstName,
+    talentName,
+    jobTitle,
+    dateLabel,
+    location,
+    rateLabel,
+    actionUrl,
+    icsUrl,
+  }: {
+    firstName: string
+    talentName: string
+    jobTitle: string
+    dateLabel: string
+    location: string | null
+    rateLabel: string
+    actionUrl: string
+    icsUrl?: string | null
+  }): string {
+    const selfConfirm = firstName.trim() === talentName.trim()
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${jobTitle} is locked in for ${dateLabel}.`,
+      eyebrow: 'Booking confirmed',
+      headline: selfConfirm ? 'You’re confirmed' : `${talentName} is confirmed`,
+      intro: 'The booking is locked in.',
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+          rateLabel,
+        },
+        { type: 'cta', label: 'View booking', url: actionUrl },
+        ...(icsUrl
+          ? ([
+              {
+                type: 'calendar_cta',
+                label: 'Add to my calendar',
+                icsUrl,
+              },
+            ] as const)
+          : []),
+      ],
+    }).html
+  },
+
+  fullyCrewed({
+    firstName,
+    jobTitle,
+    dateLabel,
+    location,
+    talentList,
+    actionUrl,
+    icsUrl,
+  }: {
+    firstName: string
+    jobTitle: string
+    dateLabel: string
+    location?: string | null
+    talentList: string[]
+    actionUrl: string
+    icsUrl?: string | null
+  }): string {
+    const listBody = talentList.length
+      ? talentList.map((t) => `• ${t}`).join('\n')
+      : ''
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${jobTitle} is fully crewed for ${dateLabel}.`,
+      eyebrow: 'Fully crewed',
+      headline: 'Your job is fully crewed',
+      intro: `Great news — ${jobTitle} is fully crewed.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+        },
+        ...(listBody
+          ? ([
+              {
+                type: 'callout',
+                heading: "Here's who's on it",
+                body: listBody,
+              },
+            ] as const)
+          : []),
+        { type: 'cta', label: 'View job', url: actionUrl },
+        ...(icsUrl
+          ? ([
+              {
+                type: 'calendar_cta',
+                label: 'Add to my calendar',
+                icsUrl,
+              },
+            ] as const)
+          : []),
+      ],
+    }).html
+  },
+
+  nudge({
+    firstName,
+    jobTitle,
+    rateLabel,
+    dateLabel,
+    location,
+    actionUrl,
+  }: {
+    firstName: string
+    jobTitle: string
+    rateLabel: string
+    dateLabel: string
+    location?: string | null
+    actionUrl: string
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `Your offer for ${jobTitle} is still waiting.`,
+      eyebrow: 'Reminder',
+      headline: 'Your job offer is still waiting',
+      intro: 'You have a pending offer that needs your response.',
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+          rateLabel,
+        },
+        { type: 'cta', label: 'Review offer', url: actionUrl },
+      ],
+    }).html
+  },
+
+  counterOffer({
+    firstName,
+    talentName,
+    jobTitle,
+    dateLabel,
+    location,
+    counterLabel,
+    notes,
+    actionUrl,
+  }: {
+    firstName: string
+    talentName: string
+    jobTitle: string
+    dateLabel: string
+    location?: string | null
+    counterLabel: string
+    notes: string | null
+    actionUrl: string
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${talentName} submitted a counter on ${jobTitle}.`,
+      eyebrow: 'Counter offer',
+      headline: 'Talent submitted a counter offer',
+      intro: `${talentName} sent a counter for ${jobTitle}.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+          rateLabel: counterLabel,
+        },
+        ...(notes
+          ? ([
+              {
+                type: 'callout',
+                heading: 'Notes from talent',
+                body: notes,
+              },
+            ] as const)
+          : []),
+        { type: 'cta', label: 'Review in admin', url: actionUrl },
+      ],
+    }).html
+  },
+
+  declined({
+    firstName,
+    talentName,
+    jobTitle,
+    dateLabel,
+    location,
+    reason,
+    actionUrl,
+  }: {
+    firstName: string
+    talentName: string
+    jobTitle: string
+    dateLabel: string
+    location?: string | null
+    reason: string | null
+    actionUrl: string
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${talentName} declined ${jobTitle}.`,
+      eyebrow: 'Decline',
+      headline: 'Talent declined the offer',
+      intro: `${talentName} is unable to take ${jobTitle}.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+        },
+        {
+          type: 'callout',
+          heading: 'Reason',
+          body: reason || 'Not provided',
+        },
+        { type: 'cta', label: 'Re-crew this job', url: actionUrl },
+      ],
+    }).html
+  },
+
+  // Confirms to the client that their booking request has been sent to a
+  // specific talent. Fires alongside jobOffer to talent.
+  clientBookingSent({
+    firstName,
+    talentName,
     jobTitle,
     dateLabel,
     location,
     rateLabel,
     actionUrl,
   }: {
-    jobTitle: string
-    dateLabel: string
-    location: string
-    rateLabel: string
-    actionUrl: string
-  }) {
-    return wrap(
-      'You have a new job offer',
-      `<p><strong>${jobTitle}</strong><br/>${dateLabel}${location ? `<br/>${location}` : ''}</p>
-       <p style="font-size:16px;color:#0F1B2E;font-weight:600;margin-top:12px">Rate: ${rateLabel}</p>
-       <p style="color:#7A90AA">Tap the button below to accept, counter, or decline.</p>`,
-      { label: 'View offer in app', url: actionUrl }
-    )
-  },
-  talentConfirmed({
-    talentName,
-    jobTitle,
-    dateLabel,
-    rateLabel,
-    actionUrl,
-  }: {
+    firstName: string
     talentName: string
     jobTitle: string
     dateLabel: string
+    location?: string | null
     rateLabel: string
     actionUrl: string
-  }) {
-    return wrap(
-      `${talentName} has confirmed`,
-      `<p><strong>${talentName}</strong> has confirmed your booking for <strong>${jobTitle}</strong> on ${dateLabel}.</p>
-       <p>Rate confirmed at <strong>${rateLabel}</strong>.</p>`,
-      { label: 'View job', url: actionUrl }
-    )
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `Request sent to ${talentName} for ${jobTitle}.`,
+      eyebrow: 'Booking request sent',
+      headline: 'Your booking request is out',
+      intro: `We’ve sent your request to ${talentName}. You’ll hear as soon as they respond.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+          rateLabel,
+        },
+        { type: 'cta', label: 'View job status', url: actionUrl },
+      ],
+    }).html
   },
-  fullyCrewed({
-    jobTitle,
-    dateLabel,
-    talentList,
-    actionUrl,
-  }: {
-    jobTitle: string
-    dateLabel: string
-    talentList: string[]
-    actionUrl: string
-  }) {
-    const list =
-      talentList.length > 0
-        ? `<ul style="margin:10px 0;padding-left:18px;color:#374151">${talentList
-            .map((t) => `<li>${t}</li>`)
-            .join('')}</ul>`
-        : ''
-    return wrap(
-      `${jobTitle} is fully crewed 🎉`,
-      `<p>Great news — <strong>${jobTitle}</strong> on ${dateLabel} is now fully crewed.</p>
-       <p style="font-size:12px;color:#7A90AA;margin-top:6px">Confirmed talent:</p>
-       ${list}`,
-      { label: 'View job', url: actionUrl }
-    )
-  },
-  nudge({
-    jobTitle,
-    rateLabel,
-    dateLabel,
-    actionUrl,
-  }: {
-    jobTitle: string
-    rateLabel: string
-    dateLabel: string
-    actionUrl: string
-  }) {
-    return wrap(
-      'Pending job offer — please respond',
-      `<p>You have a pending job offer that needs your response:</p>
-       <p><strong>${jobTitle}</strong> · ${dateLabel} · ${rateLabel}</p>`,
-      { label: 'View offer', url: actionUrl }
-    )
-  },
-  counterOffer({
-    talentName,
-    jobTitle,
-    counterLabel,
-    notes,
-    actionUrl,
-  }: {
-    talentName: string
-    jobTitle: string
-    counterLabel: string
-    notes: string | null
-    actionUrl: string
-  }) {
-    return wrap(
-      `${talentName} has counter-offered`,
-      `<p><strong>${talentName}</strong> has counter-offered on <strong>${jobTitle}</strong>.</p>
-       <p style="font-size:16px;color:#0F1B2E;font-weight:600;margin-top:10px">Counter: ${counterLabel}</p>
-       ${notes ? `<p style="color:#7A90AA;font-style:italic">${notes}</p>` : ''}`,
-      { label: 'Review in admin', url: actionUrl }
-    )
-  },
-  declined({
-    talentName,
-    jobTitle,
-    reason,
-    actionUrl,
-  }: {
-    talentName: string
-    jobTitle: string
-    reason: string | null
-    actionUrl: string
-  }) {
-    return wrap(
-      `${talentName} declined ${jobTitle}`,
-      `<p><strong>${talentName}</strong> has declined the offer for <strong>${jobTitle}</strong>.</p>
-       <p style="color:#7A90AA;margin-top:6px">Reason: ${reason || 'Not provided'}</p>`,
-      { label: 'Open job', url: actionUrl }
-    )
-  },
-  // Confirms to the client that their booking request has been sent to a
-  // specific talent. Fires alongside jobOffer to talent.
-  clientBookingSent({
-    talentName,
-    jobTitle,
-    dateLabel,
-    rateLabel,
-    actionUrl,
-  }: {
-    talentName: string
-    jobTitle: string
-    dateLabel: string
-    rateLabel: string
-    actionUrl: string
-  }) {
-    return wrap(
-      'Your booking request has been sent',
-      `<p>We&rsquo;ve sent your booking request to <strong>${talentName}</strong> for <strong>${jobTitle}</strong> on ${dateLabel}.</p>
-       <p style="font-size:15px;color:#0F1B2E;font-weight:600;margin-top:10px">Offered rate: ${rateLabel}</p>
-       <p style="color:#7A90AA;margin-top:8px">You&rsquo;ll be notified as soon as they respond.</p>`,
-      { label: 'View job status', url: actionUrl }
-    )
-  },
+
   // Talent-side confirmation email — sent to talent when they accept an offer.
   talentConfirmation({
+    firstName,
     jobTitle,
     dateLabel,
     rateLabel,
     location,
     callTime,
     actionUrl,
+    icsUrl,
   }: {
+    firstName: string
     jobTitle: string
     dateLabel: string
     rateLabel: string
     location: string | null
     callTime: string | null
     actionUrl: string
-  }) {
-    void actionUrl
-    return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
-<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:40px 0;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:560px;width:100%;">
-
-        <tr><td style="background:#0f1f3d;padding:28px 40px;">
-          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.08em;">ROWLY STUDIOS</p>
-          <p style="margin:4px 0 0;color:#7a9fd4;font-size:11px;letter-spacing:0.12em;">rowlystudios.com</p>
-        </td></tr>
-
-        <tr><td style="padding:40px 40px 32px;border-bottom:1px solid #f0f0f0;">
-          <p style="margin:0 0 8px;font-size:28px;font-weight:700;color:#0f1f3d;">You're booked.</p>
-          <p style="margin:0;font-size:15px;color:#666666;">Here are your confirmed job details.</p>
-        </td></tr>
-
-        <tr><td style="padding:32px 40px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;width:140px;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Job</td>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;font-weight:600;">${jobTitle}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Date</td>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${dateLabel}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Call time</td>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${callTime ?? 'TBC'}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Location</td>
-              <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-size:14px;color:#1a1a1a;">${location ?? 'TBC'}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 0;font-size:12px;color:#999999;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;vertical-align:top;">Your rate</td>
-              <td style="padding:10px 0;font-size:16px;color:#0f1f3d;font-weight:700;">${rateLabel}</td>
-            </tr>
-          </table>
-        </td></tr>
-
-        <tr><td style="padding:0 40px 32px;">
-          <p style="margin:0;font-size:13px;color:#888888;line-height:1.6;">
-            Your availability calendar updates automatically.
-            Questions? Reply to this email or message admin in the app.
-          </p>
-        </td></tr>
-
-        <tr><td style="background:#f8f8f8;padding:20px 40px;border-top:1px solid #eeeeee;">
-          <p style="margin:0;font-size:11px;color:#aaaaaa;">Rowly Studios · Los Angeles, CA · rowlystudios.com</p>
-        </td></tr>
-
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`
+    icsUrl?: string | null
+  }): string {
+    const dateWithCall = callTime ? `${dateLabel} · Call ${callTime}` : dateLabel
+    return renderBrandedEmail({
+      firstName,
+      preheader: `You’re booked on ${jobTitle}.`,
+      eyebrow: 'You’re booked',
+      headline: 'You’re booked',
+      intro: 'Here are your confirmed job details.',
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel: dateWithCall,
+          location: location ?? null,
+          rateLabel,
+        },
+        {
+          type: 'paragraph',
+          body:
+            'Your availability calendar updates automatically. Questions? Reply to this email or message admin in the app.',
+        },
+        { type: 'cta', label: 'Open in app', url: actionUrl },
+        ...(icsUrl
+          ? ([
+              {
+                type: 'calendar_cta',
+                label: 'Add to my calendar',
+                icsUrl,
+              },
+            ] as const)
+          : []),
+      ],
+    }).html
   },
+
   /**
    * Admin status digest — a management-brief style email for every booking
-   * event. Goes to rowlystudios@gmail.com (or whoever has role='admin'),
-   * giving them a single-glance view of the job without having to click.
+   * event. The render layout is intentionally information-dense (single
+   * card with grouped fields) rather than the marketing-style layout other
+   * transactional emails use, because admins want at-a-glance parsing.
    */
   adminStatus({
+    firstName,
     statusLabel,
     jobTitle,
     jobCode,
@@ -353,6 +476,7 @@ export const EmailTemplates = {
     respondedLabel,
     actionUrl,
   }: {
+    firstName: string
     statusLabel: string
     jobTitle: string
     jobCode: string | null
@@ -369,74 +493,119 @@ export const EmailTemplates = {
     deadlineLabel: string | null
     respondedLabel: string | null
     actionUrl: string
-  }) {
-    const row = (label: string, value: string) => `
-      <tr>
-        <td style="padding:4px 14px 4px 0;color:#7A90AA;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;vertical-align:top">${label}</td>
-        <td style="padding:4px 0;color:#0F1B2E;font-size:13px;vertical-align:top">${value}</td>
-      </tr>`
-    const header = (title: string) => `
-      <tr>
-        <td colspan="2" style="padding:14px 0 4px;border-top:1px solid #E5E7EB;color:#F0A500;font-size:10px;letter-spacing:0.16em;text-transform:uppercase;font-weight:700">─── ${title} ───</td>
-      </tr>`
-    return wrap(
-      `Booking status: ${statusLabel}`,
-      `<p style="margin:0 0 10px;padding:8px 12px;background:#F0A500;color:#0F1B2E;border-radius:8px;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;text-align:center">STATUS: ${statusLabel}</p>
-       <table style="width:100%;border-collapse:collapse">
-         ${header('Job')}
-         ${row('Title', jobTitle)}
-         ${jobCode ? row('Code', `<span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${jobCode}</span>`) : ''}
-         ${row('Date', jobDateLabel)}
-         ${jobLocation ? row('Location', jobLocation) : ''}
-         ${header('Booking')}
-         ${row('Talent', `${talentName}${talentEmail ? ` &lt;${talentEmail}&gt;` : ''}`)}
-         ${row('Client', `${clientName}${clientEmail ? ` &lt;${clientEmail}&gt;` : ''}`)}
-         ${row('Offered', offeredLabel)}
-         ${row('Confirmed', confirmedLabel)}
-         ${row('Duration', durationLabel)}
-         ${header('Timeline')}
-         ${offerSentLabel ? row('Offer sent', offerSentLabel) : ''}
-         ${deadlineLabel ? row('Deadline', deadlineLabel) : ''}
-         ${row('Responded', respondedLabel ?? 'Not yet')}
-       </table>`,
-      { label: 'View in admin', url: actionUrl }
-    )
+  }): string {
+    const row = (label: string, value: string) =>
+      `${label.toUpperCase()}: ${value}`
+    const lines = [
+      row('Title', jobTitle),
+      jobCode ? row('Code', jobCode) : null,
+      row('Date', jobDateLabel),
+      jobLocation ? row('Location', jobLocation) : null,
+      row('Talent', `${talentName}${talentEmail ? ` <${talentEmail}>` : ''}`),
+      row('Client', `${clientName}${clientEmail ? ` <${clientEmail}>` : ''}`),
+      row('Offered', offeredLabel),
+      row('Confirmed', confirmedLabel),
+      row('Duration', durationLabel),
+      offerSentLabel ? row('Offer sent', offerSentLabel) : null,
+      deadlineLabel ? row('Deadline', deadlineLabel) : null,
+      row('Responded', respondedLabel ?? 'Not yet'),
+    ].filter((x): x is string => Boolean(x))
+
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${statusLabel}: ${talentName} / ${jobTitle}`,
+      eyebrow: `Status · ${statusLabel}`,
+      headline: `Booking update: ${statusLabel}`,
+      intro: `${talentName} / ${jobTitle}${jobCode ? ` · ${jobCode}` : ''}`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel: jobDateLabel,
+          location: jobLocation,
+        },
+        {
+          type: 'callout',
+          heading: 'Booking',
+          body: lines.join('\n'),
+        },
+        { type: 'cta', label: 'View in admin', url: actionUrl },
+      ],
+    }).html
   },
+
   // Admin-side receipt when a booking is declined.
   adminDecline({
+    firstName,
     talentName,
     jobTitle,
+    dateLabel,
+    location,
     reason,
     actionUrl,
   }: {
+    firstName: string
     talentName: string
     jobTitle: string
+    dateLabel: string
+    location?: string | null
     reason: string | null
     actionUrl: string
-  }) {
-    return wrap(
-      `Declined: ${talentName} / ${jobTitle}`,
-      `<p><strong>${talentName}</strong> declined the offer for <strong>${jobTitle}</strong>.</p>
-       <p style="color:#7A90AA;margin-top:6px">Reason: ${reason || 'Not provided'}</p>
-       <p style="color:#374151">You&rsquo;ll need to offer the slot to someone else.</p>`,
-      { label: 'Open job in admin', url: actionUrl }
-    )
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `${talentName} declined ${jobTitle}.`,
+      eyebrow: 'Decline',
+      headline: 'Talent declined the offer',
+      intro: `${talentName} declined ${jobTitle}. You’ll need to offer the slot to someone else.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+        },
+        {
+          type: 'callout',
+          heading: 'Reason',
+          body: reason || 'Not provided',
+        },
+        { type: 'cta', label: 'Open job in admin', url: actionUrl },
+      ],
+    }).html
   },
+
   // Client-side receipt when a talent they requested declines.
   clientDecline({
+    firstName,
     talentName,
     jobTitle,
+    dateLabel,
+    location,
     actionUrl,
   }: {
+    firstName: string
     talentName: string
     jobTitle: string
+    dateLabel: string
+    location?: string | null
     actionUrl: string
-  }) {
-    return wrap(
-      `Update on ${jobTitle}`,
-      `<p><strong>${talentName}</strong> couldn&rsquo;t take <strong>${jobTitle}</strong>. We&rsquo;re already looking for a replacement.</p>
-       <p style="color:#7A90AA">No action needed from you — we&rsquo;ll update you as soon as someone new confirms.</p>`,
-      { label: 'View job', url: actionUrl }
-    )
+  }): string {
+    return renderBrandedEmail({
+      firstName,
+      preheader: `Update on ${jobTitle}.`,
+      eyebrow: 'Update',
+      headline: `Update on ${jobTitle}`,
+      intro: `${talentName} couldn’t take this one. We’re already looking for a replacement — no action needed from you.`,
+      blocks: [
+        {
+          type: 'job_card',
+          title: jobTitle,
+          dateLabel,
+          location: location ?? null,
+        },
+        { type: 'cta', label: 'View job', url: actionUrl },
+      ],
+    }).html
   },
 }
