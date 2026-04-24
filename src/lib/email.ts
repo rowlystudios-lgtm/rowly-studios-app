@@ -190,6 +190,7 @@ export const EmailTemplates = {
     talentList,
     actionUrl,
     icsUrl,
+    chatUrl,
   }: {
     firstName: string
     jobTitle: string
@@ -198,6 +199,7 @@ export const EmailTemplates = {
     talentList: string[]
     actionUrl: string
     icsUrl?: string | null
+    chatUrl?: string | null
   }): string {
     const listBody = talentList.length
       ? talentList.map((t) => `• ${t}`).join('\n')
@@ -224,7 +226,25 @@ export const EmailTemplates = {
               },
             ] as const)
           : []),
+        ...(chatUrl
+          ? ([
+              {
+                type: 'paragraph',
+                body:
+                  'Use the job chat to coordinate call times, last-minute changes, or questions during the shoot. Admin is always in the chat if you need help.',
+              },
+            ] as const)
+          : []),
         { type: 'cta', label: 'View job', url: actionUrl },
+        ...(chatUrl
+          ? ([
+              {
+                type: 'cta' as const,
+                label: 'Open job chat',
+                url: chatUrl,
+              },
+            ] as const)
+          : []),
         ...(icsUrl
           ? ([
               {

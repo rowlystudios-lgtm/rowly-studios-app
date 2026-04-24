@@ -113,10 +113,17 @@ export async function acceptBookingOffer(formData: FormData) {
   }
 
   // Fully-crewed check runs through the service client (RLS-neutral).
+  // Fully crewed = no outstanding bookings AND confirmed >= num_talent.
+  // Requires both so we don't fire prematurely when num_talent < actual
+  // bookings (admin may have added more talent than originally requested).
   if (existing.job_id) {
     try {
       const svc = createServiceClient()
-      const [{ data: job }, { count }] = await Promise.all([
+      const [
+        { data: job },
+        { count: confirmedCount },
+        { count: outstandingCount },
+      ] = await Promise.all([
         svc
           .from('jobs')
           .select('num_talent, crewed_at')
@@ -127,13 +134,17 @@ export async function acceptBookingOffer(formData: FormData) {
           .select('id', { count: 'exact', head: true })
           .eq('job_id', existing.job_id)
           .eq('status', 'confirmed'),
+        svc
+          .from('job_bookings')
+          .select('id', { count: 'exact', head: true })
+          .eq('job_id', existing.job_id)
+          .in('status', ['requested', 'negotiating']),
       ])
-      const needed = job?.num_talent ?? null
+      const needed = job?.num_talent ?? 1
       if (
-        needed != null &&
-        needed > 0 &&
-        (count ?? 0) >= needed &&
-        !job?.crewed_at
+        !job?.crewed_at &&
+        (confirmedCount ?? 0) >= needed &&
+        (outstandingCount ?? 0) === 0
       ) {
         await svc
           .from('jobs')

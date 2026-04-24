@@ -113,9 +113,13 @@ export async function confirmBooking(formData: FormData) {
     // non-fatal
   }
 
-  // Check fully-crewed state — lightweight: count confirmed vs num_talent.
+  // Fully crewed = no outstanding bookings AND confirmed >= num_talent.
   try {
-    const [{ data: job }, { count: confirmedCount }] = await Promise.all([
+    const [
+      { data: job },
+      { count: confirmedCount },
+      { count: outstandingCount },
+    ] = await Promise.all([
       supabase
         .from('jobs')
         .select('num_talent, crewed_at')
@@ -126,13 +130,17 @@ export async function confirmBooking(formData: FormData) {
         .select('id', { count: 'exact', head: true })
         .eq('job_id', jobId)
         .eq('status', 'confirmed'),
+      supabase
+        .from('job_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('job_id', jobId)
+        .in('status', ['requested', 'negotiating']),
     ])
-    const needed = job?.num_talent ?? null
+    const needed = job?.num_talent ?? 1
     if (
-      needed != null &&
-      needed > 0 &&
+      !job?.crewed_at &&
       (confirmedCount ?? 0) >= needed &&
-      !job?.crewed_at
+      (outstandingCount ?? 0) === 0
     ) {
       await supabase
         .from('jobs')
@@ -269,7 +277,11 @@ export async function acceptCounterOffer(formData: FormData) {
     // non-fatal
   }
   try {
-    const [{ data: job }, { count: confirmedCount }] = await Promise.all([
+    const [
+      { data: job },
+      { count: confirmedCount },
+      { count: outstandingCount },
+    ] = await Promise.all([
       supabase
         .from('jobs')
         .select('num_talent, crewed_at')
@@ -280,13 +292,17 @@ export async function acceptCounterOffer(formData: FormData) {
         .select('id', { count: 'exact', head: true })
         .eq('job_id', jobId)
         .eq('status', 'confirmed'),
+      supabase
+        .from('job_bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('job_id', jobId)
+        .in('status', ['requested', 'negotiating']),
     ])
-    const needed = job?.num_talent ?? null
+    const needed = job?.num_talent ?? 1
     if (
-      needed != null &&
-      needed > 0 &&
+      !job?.crewed_at &&
       (confirmedCount ?? 0) >= needed &&
-      !job?.crewed_at
+      (outstandingCount ?? 0) === 0
     ) {
       await supabase
         .from('jobs')
@@ -628,14 +644,26 @@ export async function addTalentToJob(formData: FormData) {
       if (autoAccept) {
         // Talent + client both get a confirmation notification — no "pending offer".
         await notifyConfirmation(inserted.id)
-        // Check if job is now fully crewed.
-        if (job?.num_talent != null && job.num_talent > 0 && !job.crewed_at) {
-          const { count: confirmedCount } = await supabase
-            .from('job_bookings')
-            .select('id', { count: 'exact', head: true })
-            .eq('job_id', jobId)
-            .eq('status', 'confirmed')
-          if ((confirmedCount ?? 0) >= job.num_talent) {
+        // Fully crewed = no outstanding bookings AND confirmed >= num_talent.
+        if (!job?.crewed_at) {
+          const [{ count: confirmedCount }, { count: outstandingCount }] =
+            await Promise.all([
+              supabase
+                .from('job_bookings')
+                .select('id', { count: 'exact', head: true })
+                .eq('job_id', jobId)
+                .eq('status', 'confirmed'),
+              supabase
+                .from('job_bookings')
+                .select('id', { count: 'exact', head: true })
+                .eq('job_id', jobId)
+                .in('status', ['requested', 'negotiating']),
+            ])
+          const needed = job?.num_talent ?? 1
+          if (
+            (confirmedCount ?? 0) >= needed &&
+            (outstandingCount ?? 0) === 0
+          ) {
             await supabase
               .from('jobs')
               .update({ crewed_at: new Date().toISOString() })

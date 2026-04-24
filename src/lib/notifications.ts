@@ -993,6 +993,10 @@ export async function notifyFullyCrewed(jobId: string) {
       talentList,
       actionUrl: clientActionUrl,
       icsUrl: ics,
+      // TODO(chat-v2): once src/app/app/jobs/[id]/page.tsx exists, switch
+      // this to `/app/jobs/${jobId}#chat` so the client lands directly in
+      // the chat panel.
+      chatUrl: `${APP_URL}/app/jobs#job-${jobId}`,
     })
 
     if (jobRow.client_id) {
@@ -1023,6 +1027,7 @@ export async function notifyFullyCrewed(jobId: string) {
       talentList: adminTalentList,
       actionUrl: adminActionUrl,
       icsUrl: ics,
+      chatUrl: `${APP_URL}/admin/jobs/${jobId}#chat`,
     })
     const adminSubject = `✓ Fully crewed: ${jobRow.job_code ?? jobRow.title}`
     for (const a of (admins ?? []) as Array<{ id: string }>) {
