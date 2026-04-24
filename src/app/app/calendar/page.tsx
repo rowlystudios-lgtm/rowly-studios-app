@@ -404,7 +404,7 @@ export default function CalendarPage() {
               }}
             >
               🔒 Green days are confirmed bookings and cannot be changed.
-              Contact hello@rowlystudios.com if there&apos;s an issue.
+              Contact rowlystudios@gmail.com if there&apos;s an issue.
             </p>
           )}
         </div>

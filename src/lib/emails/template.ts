@@ -91,8 +91,8 @@ export function renderBrandedEmail(args: BrandedEmailArgs): {
             <tr>
               <td style="padding:24px 40px 32px 40px;font-family:${FONT_SANS};font-size:12px;line-height:1.55;color:#8A96AA;border-top:1px solid #E8EDF5;">
                 <strong style="color:#1A2030;">Rowly Studios</strong> — Los Angeles, California<br />
-                Questions? Reply to this email or write to
-                <a href="mailto:hello@rowlystudios.com" style="color:#2B4780;text-decoration:none;">hello@rowlystudios.com</a>
+                Questions? Reply to this email — or write directly to
+                <a href="mailto:rowlystudios@gmail.com" style="color:#2B4780;text-decoration:none;">rowlystudios@gmail.com</a>
               </td>
             </tr>
 
@@ -111,7 +111,7 @@ export function renderBrandedEmail(args: BrandedEmailArgs): {
     blocksText,
     '',
     'Rowly Studios — Los Angeles, California',
-    'hello@rowlystudios.com',
+    'rowlystudios@gmail.com',
   ]
 
   return { html, text: textLines.filter((l) => l !== undefined).join('\n') }

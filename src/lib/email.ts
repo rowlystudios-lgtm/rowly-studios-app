@@ -31,6 +31,8 @@ type SendEmail = {
 // traffic switches over automatically.
 const DEFAULT_FROM =
   process.env.RESEND_FROM ?? 'Rowly Studios <onboarding@resend.dev>'
+const RESEND_REPLY_TO =
+  process.env.RESEND_REPLY_TO || 'rowlystudios@gmail.com'
 
 export async function sendTransactionalEmail({
   to,
@@ -57,7 +59,7 @@ export async function sendTransactionalEmail({
         to: [to],
         subject,
         html,
-        reply_to: replyTo,
+        reply_to: replyTo ?? RESEND_REPLY_TO,
         attachments: attachments?.map((a) => ({
           filename: a.filename,
           content: a.content,

@@ -107,7 +107,6 @@ export async function acceptApplication(formData: FormData) {
     to: app.email,
     subject,
     html,
-    replyTo: 'hello@rowlystudios.com',
   })
   // Non-fatal: application is still approved even if email fails — admin
   // can resend from the applications list. But surface it in the return.
