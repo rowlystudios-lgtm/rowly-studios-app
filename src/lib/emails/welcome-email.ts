@@ -1,11 +1,10 @@
 /**
- * Branded welcome email for accepted talent / client applications.
+ * Branded welcome email — aligns with rowlystudios.com (navy palette,
+ * DM Sans body, Playfair Display headlines, Brandon Grotesque CTA).
+ * External fonts won't load in Outlook/Gmail, so we layer safe fallbacks.
  *
- * Pure HTML template — no DB / auth access. Returns subject + html + text
- * for use with sendTransactionalEmail (Resend). NOT a 'use server' file:
- * Next 14 forbids non-async exports from 'use server' files, and this is
- * a synchronous render. It's only imported server-side via dynamic import
- * in admin/applications/actions.ts so it never ends up in client bundles.
+ * Button URL is the Supabase magic link: clicking it sets a session,
+ * lands on /welcome, user sets a password, and is signed into /app.
  */
 
 type WelcomeEmailArgs = {
@@ -20,11 +19,60 @@ export function renderWelcomeEmail({
   actionLink,
 }: WelcomeEmailArgs): { subject: string; html: string; text: string } {
   const isTalent = applicationType === 'talent'
-  const roleLine = isTalent ? 'as talent on our roster' : 'as a client'
-  const greeting = firstName?.trim() ? `Hi ${firstName.trim()},` : 'Hi,'
-  const subject = firstName?.trim()
-    ? `${firstName.trim()}, welcome to Rowly Studios — create your account`
-    : 'Welcome to Rowly Studios — create your account'
+  const roleLine = isTalent
+    ? 'as talent on the Rowly Studios roster'
+    : 'as a client of Rowly Studios'
+  const cleanFirst = (firstName || '').trim()
+  const greeting = cleanFirst ? `Hi ${cleanFirst},` : 'Hi,'
+  const subject = cleanFirst
+    ? `${cleanFirst}, your Rowly Studios application has been accepted`
+    : 'Your Rowly Studios application has been accepted'
+
+  const gettingStartedItems = isTalent
+    ? [
+        {
+          title: 'Complete your profile',
+          body:
+            'Add your bio, headshot, portfolio samples, and the crew roles you cover.',
+        },
+        {
+          title: 'Set your rates and floor',
+          body:
+            'Tell us your day rate and minimum floor — we handle the client-side markup.',
+        },
+        {
+          title: 'Keep your calendar current',
+          body:
+            'Mark unavailable dates so you only get booked when you can shoot.',
+        },
+        {
+          title: 'Get booked',
+          body:
+            'We send jobs that match your skills. Accept, counter, or decline in one tap.',
+        },
+      ]
+    : [
+        {
+          title: 'Set up your brand profile',
+          body:
+            'Add your company details and primary contact so talent know who they are working with.',
+        },
+        {
+          title: 'Post your first job',
+          body:
+            'Share dates, location, crew roles, and budget — we handle sourcing.',
+        },
+        {
+          title: 'Review proposed talent',
+          body:
+            'See curated profiles with rates, availability, and past work before confirming.',
+        },
+        {
+          title: 'Track budget and invoices',
+          body:
+            'Live spend tracking, call sheets, and invoicing all in one place.',
+        },
+      ]
 
   const html = `<!doctype html>
 <html lang="en">
@@ -34,112 +82,175 @@ export function renderWelcomeEmail({
     <meta name="color-scheme" content="light only" />
     <meta name="supported-color-schemes" content="light" />
     <title>${escapeHtml(subject)}</title>
+    <!--[if mso]>
+      <style>
+        * { font-family: Arial, Helvetica, sans-serif !important; }
+      </style>
+    <![endif]-->
   </head>
-  <body style="margin:0;padding:0;background:#f4f1ea;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A2030;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f4f1ea;">
+  <body style="margin:0;padding:0;background:#F4F7FC;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;color:#1A2030;-webkit-font-smoothing:antialiased;">
+    <!-- Preheader (hidden preview text in inbox list) -->
+    <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;opacity:0;color:transparent;">
+      Welcome to Rowly Studios. Create your account and get started.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F4F7FC;">
       <tr>
         <td align="center" style="padding:32px 16px;">
-          <table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(26,60,107,0.08);">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:10px;overflow:hidden;border:1px solid #E8EDF5;">
 
-            <!-- Header -->
+            <!-- ═══ NAVY HEADER BAND WITH CTA ═══ -->
             <tr>
-              <td align="left" style="padding:28px 32px 0 32px;">
-                <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#1A3C6B;font-weight:700;">Rowly Studios</div>
-              </td>
-            </tr>
-
-            <!-- Headline -->
-            <tr>
-              <td style="padding:24px 32px 8px 32px;">
-                <h1 style="margin:0;font-size:22px;line-height:1.25;color:#1A2030;font-weight:600;">
-                  Rowly Studios accepted your application
+              <td style="background:#0F1B2E;padding:36px 40px 32px 40px;" align="left">
+                <div style="font-family:'brandon-grotesque','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#8A96AA;font-weight:700;margin-bottom:18px;">
+                  Rowly Studios
+                </div>
+                <h1 style="margin:0 0 8px 0;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;color:#FFFFFF;font-weight:500;letter-spacing:-0.01em;">
+                  Your application has been accepted
                 </h1>
-              </td>
-            </tr>
+                <p style="margin:0 0 24px 0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#C7D1E0;">
+                  ${escapeHtml(greeting)} we're thrilled to welcome you ${escapeHtml(roleLine)}.
+                </p>
 
-            <!-- Body copy -->
-            <tr>
-              <td style="padding:12px 32px 20px 32px;font-size:15px;line-height:1.55;color:#3a3f4a;">
-                ${escapeHtml(greeting)}<br /><br />
-                We've reviewed your application to join Rowly Studios ${escapeHtml(roleLine)} — and we'd love to have you on board.
-                <br /><br />
-                Tap the button below to create your account. After you set a password, you're signed in — no extra sign-in step.
-              </td>
-            </tr>
-
-            <!-- CTA button -->
-            <tr>
-              <td align="center" style="padding:8px 32px 28px 32px;">
+                <!-- PRIMARY CTA — bulletproof email button -->
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                   <tr>
-                    <td align="center" bgcolor="#1A3C6B" style="background:#1A3C6B;border-radius:10px;">
+                    <td align="center" bgcolor="#2B4780" style="background:#2B4780;border-radius:6px;">
                       <a href="${escapeAttr(actionLink)}"
-                         style="display:inline-block;padding:14px 36px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:0.02em;">
+                         target="_blank"
+                         style="display:inline-block;padding:15px 36px;font-family:'brandon-grotesque','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;letter-spacing:0.08em;text-transform:uppercase;line-height:1;">
                         Create your account
                       </a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:14px 0 0 0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12.5px;line-height:1.5;color:#8A96AA;">
+                  One tap. Set a password and you're in — no extra sign-in step.
+                </p>
+              </td>
+            </tr>
+
+            <!-- ═══ GETTING STARTED ═══ -->
+            <tr>
+              <td style="padding:32px 40px 8px 40px;" align="left">
+                <div style="font-family:'brandon-grotesque','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:#2B4780;font-weight:700;margin-bottom:10px;">
+                  Getting started
+                </div>
+                <h2 style="margin:0 0 20px 0;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:20px;line-height:1.3;color:#1A2030;font-weight:500;">
+                  ${isTalent ? "Once you're in, here's the sequence" : "Here's what happens next"}
+                </h2>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                  ${gettingStartedItems
+                    .map(
+                      (item, i) => `
+                  <tr>
+                    <td valign="top" width="32" style="padding:0 12px 18px 0;">
+                      <div style="width:24px;height:24px;border-radius:50%;background:#4A90E2;color:#FFFFFF;font-family:'brandon-grotesque','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;font-weight:700;line-height:24px;text-align:center;">
+                        ${i + 1}
+                      </div>
+                    </td>
+                    <td valign="top" style="padding:0 0 18px 0;">
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14.5px;font-weight:600;color:#1A2030;line-height:1.35;margin-bottom:3px;">
+                        ${escapeHtml(item.title)}
+                      </div>
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13.5px;line-height:1.55;color:#4A5368;">
+                        ${escapeHtml(item.body)}
+                      </div>
+                    </td>
+                  </tr>`
+                    )
+                    .join('')}
+                </table>
+              </td>
+            </tr>
+
+            <!-- ═══ DIVIDER ═══ -->
+            <tr>
+              <td style="padding:8px 40px;">
+                <div style="height:1px;background:#D0D3DC;"></div>
+              </td>
+            </tr>
+
+            <!-- ═══ INSTALL ON MOBILE ═══ -->
+            <tr>
+              <td style="padding:28px 40px 8px 40px;" align="left">
+                <div style="font-family:'brandon-grotesque','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:#2B4780;font-weight:700;margin-bottom:10px;">
+                  Install on your phone
+                </div>
+                <h2 style="margin:0 0 16px 0;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:20px;line-height:1.3;color:#1A2030;font-weight:500;">
+                  Put Rowly Studios on your home screen
+                </h2>
+                <p style="margin:0 0 20px 0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#4A5368;">
+                  After you create your account, install the app for push notifications, camera uploads, and calendar on the go.
+                </p>
+
+                <!-- iPhone card -->
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F4F7FC;border-radius:8px;margin-bottom:12px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#0F1B2E;margin-bottom:8px;">
+                        iPhone — Safari
+                      </div>
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#4A5368;">
+                        1. Open <strong style="color:#1A2030;">app.rowlystudios.com</strong> in Safari<br/>
+                        2. Tap the <strong style="color:#1A2030;">Share</strong> icon at the bottom<br/>
+                        3. Scroll and tap <strong style="color:#1A2030;">Add to Home Screen</strong> → <strong style="color:#1A2030;">Add</strong>
+                      </div>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Android card -->
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F4F7FC;border-radius:8px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#0F1B2E;margin-bottom:8px;">
+                        Android — Chrome
+                      </div>
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#4A5368;">
+                        1. Open <strong style="color:#1A2030;">app.rowlystudios.com</strong> in Chrome<br/>
+                        2. Tap the <strong style="color:#1A2030;">⋮ menu</strong> (top right)<br/>
+                        3. Tap <strong style="color:#1A2030;">Install app</strong> or <strong style="color:#1A2030;">Add to Home screen</strong>
+                      </div>
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
 
-            <!-- Divider -->
+            <!-- ═══ DESKTOP NOTICE ═══ -->
             <tr>
-              <td style="padding:0 32px;">
-                <div style="height:1px;background:#e8e3d8;"></div>
+              <td style="padding:22px 40px 8px 40px;" align="left">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-left:3px solid #4A90E2;background:#F4F7FC;border-radius:0 8px 8px 0;">
+                  <tr>
+                    <td style="padding:14px 18px;">
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#0F1B2E;margin-bottom:4px;">
+                        Reading this on your desktop?
+                      </div>
+                      <div style="font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#4A5368;">
+                        That's fine — the web version works on any browser. But the full experience (notifications, on-set uploads, calendar) lives on mobile. Click the button above to create your account now, then open <strong style="color:#1A2030;">app.rowlystudios.com</strong> on your phone to install.
+                      </div>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
 
-            <!-- Mobile install instructions -->
+            <!-- ═══ FALLBACK LINK ═══ -->
             <tr>
-              <td style="padding:24px 32px 8px 32px;">
-                <h2 style="margin:0 0 6px 0;font-size:14px;line-height:1.3;color:#1A3C6B;font-weight:700;letter-spacing:0.02em;">
-                  📱 Opening this on your phone?
-                </h2>
-                <p style="margin:0 0 14px 0;font-size:14px;line-height:1.55;color:#3a3f4a;">
-                  Create your account first, then install Rowly Studios as an app on your home screen:
-                </p>
-                <div style="font-size:13.5px;line-height:1.55;color:#3a3f4a;">
-                  <strong style="color:#1A2030;">iPhone (Safari)</strong><br />
-                  1. After creating your account, tap the <strong>Share</strong> icon at the bottom of Safari.<br />
-                  2. Scroll down and tap <strong>Add to Home Screen</strong>.<br />
-                  3. Tap <strong>Add</strong>. Rowly Studios is now an app on your home screen.
-                </div>
-                <div style="font-size:13.5px;line-height:1.55;color:#3a3f4a;margin-top:14px;">
-                  <strong style="color:#1A2030;">Android (Chrome)</strong><br />
-                  1. Tap the <strong>⋮ menu</strong> in the top right of Chrome.<br />
-                  2. Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.<br />
-                  3. Confirm. Rowly Studios is now an app on your home screen.
-                </div>
-              </td>
-            </tr>
-
-            <!-- Desktop note -->
-            <tr>
-              <td style="padding:20px 32px 8px 32px;">
-                <div style="background:#f4f1ea;border-radius:10px;padding:16px 18px;">
-                  <div style="font-size:13px;line-height:1.5;color:#1A2030;">
-                    <strong>💻 Reading this on your desktop?</strong><br />
-                    That's fine — the web version works on a laptop too. For the full experience (mobile notifications, camera uploads, on-the-go calendar), open <strong>app.rowlystudios.com</strong> on your phone after creating your account, or forward this email to yourself and open it on mobile.
-                  </div>
-                </div>
-              </td>
-            </tr>
-
-            <!-- Fallback link -->
-            <tr>
-              <td style="padding:18px 32px 8px 32px;font-size:12px;line-height:1.5;color:#8a8f99;">
+              <td style="padding:24px 40px 8px 40px;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.55;color:#8A96AA;">
                 Button not working? Paste this link into your browser:<br />
-                <span style="word-break:break-all;color:#1A3C6B;">${escapeHtml(actionLink)}</span>
+                <span style="word-break:break-all;color:#2B4780;">${escapeHtml(actionLink)}</span>
               </td>
             </tr>
 
-            <!-- Footer -->
+            <!-- ═══ FOOTER ═══ -->
             <tr>
-              <td style="padding:20px 32px 32px 32px;font-size:12px;line-height:1.5;color:#8a8f99;border-top:1px solid #e8e3d8;margin-top:16px;">
-                Rowly Studios · Los Angeles, CA<br />
+              <td style="padding:24px 40px 32px 40px;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.55;color:#8A96AA;border-top:1px solid #E8EDF5;">
+                <strong style="color:#1A2030;">Rowly Studios</strong> — Los Angeles, California<br />
                 Questions? Reply to this email or write to
-                <a href="mailto:hello@rowlystudios.com" style="color:#1A3C6B;text-decoration:none;">hello@rowlystudios.com</a>
+                <a href="mailto:hello@rowlystudios.com" style="color:#2B4780;text-decoration:none;">hello@rowlystudios.com</a>
               </td>
             </tr>
 
@@ -150,29 +261,34 @@ export function renderWelcomeEmail({
   </body>
 </html>`
 
-  const text = [
-    `${greeting}`,
-    ``,
-    `Rowly Studios accepted your application ${roleLine}.`,
-    ``,
-    `Create your account:`,
-    `${actionLink}`,
-    ``,
-    `After you set a password, you're signed in automatically.`,
-    ``,
-    `— Installing the app on your phone —`,
-    `iPhone: Safari → Share icon → Add to Home Screen → Add`,
-    `Android: Chrome → ⋮ menu → Install app / Add to Home screen`,
-    ``,
-    `Opening this on your desktop? The web app works on desktop, but the`,
-    `full experience is on mobile. Forward this email to yourself and open`,
-    `on your phone when you're ready.`,
-    ``,
-    `Rowly Studios · Los Angeles, CA`,
-    `hello@rowlystudios.com`,
-  ].join('\n')
+  const textLines = [
+    greeting,
+    '',
+    `Your Rowly Studios application has been accepted — welcome ${roleLine}.`,
+    '',
+    'Create your account:',
+    actionLink,
+    '',
+    "One tap — set a password and you're in. No extra sign-in step.",
+    '',
+    '— Getting started —',
+    ...gettingStartedItems.map(
+      (it, i) => `${i + 1}. ${it.title}. ${it.body}`
+    ),
+    '',
+    '— Install on your phone —',
+    'iPhone (Safari): app.rowlystudios.com → Share → Add to Home Screen',
+    'Android (Chrome): app.rowlystudios.com → ⋮ → Install app',
+    '',
+    'Reading this on desktop? The web version works on any browser, but the',
+    'full experience is on mobile. Create your account now, then open',
+    'app.rowlystudios.com on your phone to install.',
+    '',
+    'Rowly Studios — Los Angeles, California',
+    'hello@rowlystudios.com',
+  ]
 
-  return { subject, html, text }
+  return { subject, html, text: textLines.join('\n') }
 }
 
 function escapeHtml(s: string): string {
