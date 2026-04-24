@@ -95,7 +95,6 @@ type TalentProfile = {
   secondary_roles: string[] | null
   bio: string | null
   day_rate_cents: number | null
-  half_day_rate_cents: number | null
   rate_floor_cents: number | null
   showreel_url: string | null
   equipment: string | null
@@ -435,11 +434,6 @@ export default async function AdminTalentDetailPage({
             {tp?.rate_floor_cents != null && (
               <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 6 }}>
                 Floor: {centsToUsd(tp.rate_floor_cents)}
-              </p>
-            )}
-            {tp?.half_day_rate_cents != null && (
-              <p style={{ fontSize: 11, color: '#AABDE0', marginTop: 2 }}>
-                Half day: {centsToUsd(tp.half_day_rate_cents)}
               </p>
             )}
           </div>

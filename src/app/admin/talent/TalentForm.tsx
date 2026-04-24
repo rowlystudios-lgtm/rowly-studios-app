@@ -15,7 +15,6 @@ export type TalentFormInitial = {
   primary_role?: string | null
   secondary_roles?: string[] | null
   day_rate_cents?: number | null
-  half_day_rate_cents?: number | null
   rate_floor_cents?: number | null
   bio?: string | null
   showreel_url?: string | null
@@ -69,11 +68,6 @@ export function TalentForm({
 
   const [dayRate, setDayRate] = useState(
     initial.day_rate_cents != null ? String(initial.day_rate_cents / 100) : ''
-  )
-  const [halfDayRate, setHalfDayRate] = useState(
-    initial.half_day_rate_cents != null
-      ? String(initial.half_day_rate_cents / 100)
-      : ''
   )
   const [rateFloor, setRateFloor] = useState(
     initial.rate_floor_cents != null
@@ -129,7 +123,6 @@ export function TalentForm({
     fd.set('primary_role', primaryRole)
     fd.set('secondary_roles', JSON.stringify(secondaryRoles))
     fd.set('day_rate', dayRate)
-    fd.set('half_day_rate', halfDayRate)
     fd.set('rate_floor', rateFloor)
     fd.set('bio', bio)
     fd.set('showreel_url', showreelUrl)
@@ -287,9 +280,6 @@ export function TalentForm({
         <div className="grid grid-cols-3 gap-3">
           <Field label="Day rate" required>
             <CurrencyInput value={dayRate} onChange={setDayRate} required min={300} />
-          </Field>
-          <Field label="Half day">
-            <CurrencyInput value={halfDayRate} onChange={setHalfDayRate} min={150} />
           </Field>
           <Field label="Rate floor">
             <CurrencyInput value={rateFloor} onChange={setRateFloor} min={300} />

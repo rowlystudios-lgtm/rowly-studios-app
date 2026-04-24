@@ -49,7 +49,6 @@ export default async function AdminEditTalentPage({
     secondary_roles: string[] | null
     bio: string | null
     day_rate_cents: number | null
-    half_day_rate_cents: number | null
     rate_floor_cents: number | null
     showreel_url: string | null
     equipment: string | null
@@ -70,7 +69,6 @@ export default async function AdminEditTalentPage({
       ? tp?.secondary_roles
       : [],
     day_rate_cents: tp?.day_rate_cents ?? null,
-    half_day_rate_cents: tp?.half_day_rate_cents ?? null,
     rate_floor_cents: tp?.rate_floor_cents ?? null,
     bio: tp?.bio ?? null,
     showreel_url: tp?.showreel_url ?? null,

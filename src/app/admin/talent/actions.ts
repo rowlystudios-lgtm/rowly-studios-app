@@ -111,7 +111,6 @@ type TalentInput = {
   primary_role: string | null
   secondary_roles: string[]
   day_rate_cents: number | null
-  half_day_rate_cents: number | null
   rate_floor_cents: number | null
   bio: string | null
   showreel_url: string | null
@@ -123,7 +122,6 @@ type TalentInput = {
 
 function parseFormTalent(formData: FormData): TalentInput {
   const dayRate = (formData.get('day_rate') as string) ?? ''
-  const halfDay = (formData.get('half_day_rate') as string) ?? ''
   const floor = (formData.get('rate_floor') as string) ?? ''
   const travel = (formData.get('travel_radius_miles') as string) ?? ''
   let secondary: string[] = []
@@ -149,7 +147,6 @@ function parseFormTalent(formData: FormData): TalentInput {
     day_rate_cents: dayRate
       ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(dayRate) * 100))
       : null,
-    half_day_rate_cents: halfDay ? Math.round(parseFloat(halfDay) * 100) : null,
     rate_floor_cents: floor
       ? Math.max(TALENT_FLOOR_CENTS, Math.round(parseFloat(floor) * 100))
       : null,
@@ -211,7 +208,6 @@ export async function createTalentProfile(formData: FormData) {
       primary_role: input.primary_role,
       secondary_roles: input.secondary_roles,
       day_rate_cents: input.day_rate_cents,
-      half_day_rate_cents: input.half_day_rate_cents,
       rate_floor_cents: input.rate_floor_cents,
       bio: input.bio,
       showreel_url: input.showreel_url,
@@ -273,7 +269,6 @@ export async function updateTalentProfile(formData: FormData) {
       primary_role: input.primary_role,
       secondary_roles: input.secondary_roles,
       day_rate_cents: input.day_rate_cents,
-      half_day_rate_cents: input.half_day_rate_cents,
       rate_floor_cents: input.rate_floor_cents,
       bio: input.bio,
       showreel_url: input.showreel_url,

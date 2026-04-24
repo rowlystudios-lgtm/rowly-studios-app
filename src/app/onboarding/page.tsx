@@ -56,7 +56,7 @@ export default function OnboardingPage() {
   const [primaryRole, setPrimaryRole] = useState('')
   const [bio, setBio] = useState('')
   const [dayRate, setDayRate] = useState('')
-  const [halfDayRate, setHalfDayRate] = useState('')
+  const [rateFloor, setRateFloor] = useState('')
   const [showreelUrl, setShowreelUrl] = useState('')
   const [equipment, setEquipment] = useState('')
 
@@ -97,8 +97,8 @@ export default function OnboardingPage() {
     const dayRateCents = dayRate.trim()
       ? Math.max(30000, Math.round(parseFloat(dayRate) * 100))
       : null
-    const halfDayRateCents = halfDayRate.trim()
-      ? Math.max(20000, Math.round(parseFloat(halfDayRate) * 100))
+    const rateFloorCents = rateFloor.trim()
+      ? Math.max(30000, Math.round(parseFloat(rateFloor) * 100))
       : null
 
     const profilePatch: Record<string, unknown> = {
@@ -127,7 +127,7 @@ export default function OnboardingPage() {
         primary_role: primaryRole.trim() || null,
         bio: bio.trim() || null,
         day_rate_cents: dayRateCents,
-        half_day_rate_cents: halfDayRateCents,
+        rate_floor_cents: rateFloorCents,
         showreel_url: showreelUrl.trim() || null,
         equipment: equipment.trim() || null,
       },
@@ -411,7 +411,7 @@ export default function OnboardingPage() {
                   />
                 </div>
               </Field>
-              <Field label="Half day rate">
+              <Field label="Rate floor">
                 <div style={{ position: 'relative' }}>
                   <span
                     aria-hidden
@@ -429,18 +429,23 @@ export default function OnboardingPage() {
                   </span>
                   <input
                     type="number"
-                    min={200}
+                    min={300}
                     step={25}
-                    value={halfDayRate}
-                    onChange={(e) => setHalfDayRate(e.target.value)}
-                    placeholder="200"
+                    value={rateFloor}
+                    onChange={(e) => setRateFloor(e.target.value)}
+                    placeholder="300"
                     className="rs-input"
                     style={{ paddingLeft: 24 }}
                   />
                 </div>
+                <p className="text-[11px] mt-1" style={{ color: 'rgba(73,98,117,0.7)' }}>
+                  The minimum rate you&apos;ll accept for a day&apos;s work. We
+                  won&apos;t offer you jobs below this. You can change it
+                  anytime.
+                </p>
               </Field>
               <p className="text-[10px]" style={{ color: TEXT_MUTED }}>
-                Minimum day rate $300 · Half day $200
+                Minimum day rate $300 · Minimum rate floor $300
               </p>
               <Field label="Showreel URL">
                 <input
