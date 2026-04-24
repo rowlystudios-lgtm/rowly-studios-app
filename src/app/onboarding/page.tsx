@@ -62,6 +62,7 @@ export default function OnboardingPage() {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [rateError, setRateError] = useState<string>('')
 
   // Auth gate: boot out if unsigned; skip wizard if already onboarded.
   useEffect(() => {
@@ -94,12 +95,28 @@ export default function OnboardingPage() {
     const dbDepartment =
       department === 'post_production' ? 'post' : department || null
 
-    const dayRateCents = dayRate.trim()
-      ? Math.max(30000, Math.round(parseFloat(dayRate) * 100))
-      : null
-    const rateFloorCents = rateFloor.trim()
-      ? Math.max(30000, Math.round(parseFloat(rateFloor) * 100))
-      : null
+    const dayRateNum = dayRate.trim() ? parseFloat(dayRate) : null
+    const rateFloorNum = rateFloor.trim() ? parseFloat(rateFloor) : null
+
+    if (dayRateNum !== null && (Number.isNaN(dayRateNum) || dayRateNum < 300)) {
+      setRateError('Day rate must be at least $300.')
+      setSaving(false)
+      return
+    }
+    if (rateFloorNum !== null && (Number.isNaN(rateFloorNum) || rateFloorNum < 300)) {
+      setRateError('Rate floor must be at least $300.')
+      setSaving(false)
+      return
+    }
+    if (dayRateNum !== null && rateFloorNum !== null && rateFloorNum > dayRateNum) {
+      setRateError('Rate floor cannot be higher than your day rate.')
+      setSaving(false)
+      return
+    }
+    setRateError('')
+
+    const dayRateCents = dayRateNum !== null ? Math.round(dayRateNum * 100) : null
+    const rateFloorCents = rateFloorNum !== null ? Math.round(rateFloorNum * 100) : null
 
     const profilePatch: Record<string, unknown> = {
       full_name: trimmedFullName || null,
@@ -403,9 +420,19 @@ export default function OnboardingPage() {
                     type="number"
                     min={300}
                     step={25}
+                    inputMode="numeric"
                     value={dayRate}
-                    onChange={(e) => setDayRate(e.target.value)}
-                    placeholder="300"
+                    onChange={(e) => {
+                      setDayRate(e.target.value)
+                      if (rateError) setRateError('')
+                    }}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim()
+                      if (!v) return
+                      const n = parseFloat(v)
+                      if (Number.isFinite(n) && n < 300) setDayRate('300')
+                    }}
+                    placeholder="500"
                     className="rs-input"
                     style={{ paddingLeft: 24 }}
                   />
@@ -431,8 +458,18 @@ export default function OnboardingPage() {
                     type="number"
                     min={300}
                     step={25}
+                    inputMode="numeric"
                     value={rateFloor}
-                    onChange={(e) => setRateFloor(e.target.value)}
+                    onChange={(e) => {
+                      setRateFloor(e.target.value)
+                      if (rateError) setRateError('')
+                    }}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim()
+                      if (!v) return
+                      const n = parseFloat(v)
+                      if (Number.isFinite(n) && n < 300) setRateFloor('300')
+                    }}
                     placeholder="300"
                     className="rs-input"
                     style={{ paddingLeft: 24 }}
@@ -447,6 +484,19 @@ export default function OnboardingPage() {
               <p className="text-[10px]" style={{ color: TEXT_MUTED }}>
                 Minimum day rate $300 · Minimum rate floor $300
               </p>
+              {rateError && (
+                <p
+                  role="alert"
+                  style={{
+                    margin: '8px 0 0 0',
+                    fontSize: 13,
+                    color: '#C23B22',
+                    fontFamily: "'DM Sans',Helvetica,Arial,sans-serif",
+                  }}
+                >
+                  {rateError}
+                </p>
+              )}
               <Field label="Showreel URL">
                 <input
                   type="url"
