@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import { addTalentToJob } from '../../actions'
+import { checkClientCanSendRequests } from '@/lib/stripe/gate'
 
 type TalentRow = {
   id: string
@@ -108,6 +109,9 @@ function AddTalentPageInner() {
   const [addingId, setAddingId] = useState<string | null>(null)
   // Per-talent offered rate override, keyed by talent id (as dollar string).
   const [offerDrafts, setOfferDrafts] = useState<Record<string, string>>({})
+  // Phase B-Gate: surfaces "client hasn't connected Stripe" when admin
+  // tries to add talent to a job whose client isn't payment-ready.
+  const [gateError, setGateError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -227,6 +231,29 @@ function AddTalentPageInner() {
   async function handleAdd(t: TalentRow) {
     if (addingId) return
     setAddingId(t.id)
+    setGateError(null)
+
+    // Phase B-Gate: hard-block dispatch when the job's client doesn't
+    // have a Stripe payment method. Client_id isn't held in page state,
+    // so fetch it on demand alongside the title for the error message.
+    const { data: jobRow } = await supabase
+      .from('jobs')
+      .select('client_id, title')
+      .eq('id', jobId)
+      .maybeSingle()
+    if (jobRow?.client_id) {
+      const gate = await checkClientCanSendRequests(supabase, jobRow.client_id)
+      if (!gate.ok) {
+        const link = gate.actionUrl ? ` (${gate.actionUrl})` : ''
+        setGateError(
+          `Cannot add talent — client for "${jobRow.title ?? 'this job'}" ` +
+            `has not connected a Stripe payment method yet. ${gate.message}${link}`
+        )
+        setAddingId(null)
+        return
+      }
+    }
+
     const fd = new FormData()
     fd.set('jobId', jobId)
     fd.set('talentId', t.id)
@@ -258,6 +285,23 @@ function AddTalentPageInner() {
       >
         ← Back to job
       </Link>
+      {gateError && (
+        <div
+          style={{
+            background: 'rgba(248,113,113,0.12)',
+            border: '1px solid rgba(248,113,113,0.35)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            marginTop: 12,
+            marginBottom: 4,
+            fontSize: 13,
+            color: '#F87171',
+            lineHeight: 1.5,
+          }}
+        >
+          {gateError}
+        </div>
+      )}
       {errorType === 'unavailable' && (
         <div
           style={{
