@@ -11,6 +11,9 @@ import { createAccountLink, createLoginLink } from '@/lib/stripe/connect';
  *  - mode=dashboard  → Issue an Express Dashboard login link so talent
  *    can manage their bank account, view payouts, download tax forms.
  *
+ * Profile path is configurable via NEXT_PUBLIC_PROFILE_PATH env var
+ * (defaults to /app/profile).
+ *
  * Auth: talent only (their own account).
  */
 export async function POST(req: NextRequest) {
@@ -29,9 +32,9 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = req.nextUrl.origin;
+    const profilePath = process.env.NEXT_PUBLIC_PROFILE_PATH ?? '/app/profile';
 
     if (mode === 'dashboard') {
-      // Express dashboard requires details_submitted = true
       if (talentProfile.stripe_account_status !== 'active') {
         return NextResponse.json(
           { error: 'Complete onboarding before accessing the dashboard' },
@@ -42,11 +45,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ url: loginLink.url, mode: 'dashboard' });
     }
 
-    // Default: re-onboarding link
     const accountLink = await createAccountLink({
       accountId: talentProfile.stripe_account_id,
-      returnUrl: `${origin}/profile?stripe_return=success`,
-      refreshUrl: `${origin}/profile?stripe_return=refresh`,
+      returnUrl: `${origin}${profilePath}?stripe_return=success#payment-settings`,
+      refreshUrl: `${origin}${profilePath}?stripe_return=refresh#payment-settings`,
     });
 
     return NextResponse.json({

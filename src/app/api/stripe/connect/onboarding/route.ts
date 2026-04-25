@@ -8,7 +8,10 @@ import { createConnectExpressAccount, createAccountLink } from '@/lib/stripe/con
  * Creates a Connect Express account for the authenticated talent
  * (if they don't already have one), then returns a one-time hosted
  * onboarding URL. Talent completes KYC, bank account, and tax info
- * in Stripe's hosted UI, then is redirected back to /profile.
+ * in Stripe's hosted UI, then is redirected back to the profile page.
+ *
+ * Profile path is configurable via NEXT_PUBLIC_PROFILE_PATH env var
+ * (defaults to /app/profile). Change it in one place if the route ever moves.
  *
  * Auth: talent only.
  */
@@ -16,7 +19,6 @@ export async function POST(req: NextRequest) {
   try {
     const { profile, supabase } = await requireAuth(['talent']);
 
-    // Get current talent_profile to see if account already exists
     const { data: talentProfile, error: tpErr } = await supabase
       .from('talent_profiles')
       .select('stripe_account_id, stripe_account_status')
@@ -29,7 +31,6 @@ export async function POST(req: NextRequest) {
 
     let stripeAccountId = talentProfile.stripe_account_id;
 
-    // Create the Connect account if this is their first time
     if (!stripeAccountId) {
       const account = await createConnectExpressAccount({
         email: profile.email,
@@ -55,12 +56,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Create one-time onboarding link
     const origin = req.nextUrl.origin;
+    const profilePath = process.env.NEXT_PUBLIC_PROFILE_PATH ?? '/app/profile';
     const accountLink = await createAccountLink({
       accountId: stripeAccountId,
-      returnUrl: `${origin}/profile?stripe_return=success`,
-      refreshUrl: `${origin}/profile?stripe_return=refresh`,
+      returnUrl: `${origin}${profilePath}?stripe_return=success#payment-settings`,
+      refreshUrl: `${origin}${profilePath}?stripe_return=refresh#payment-settings`,
     });
 
     return NextResponse.json({
