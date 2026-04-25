@@ -14,6 +14,7 @@ import type { JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 import { ClientRestrictedBanner } from '@/components/AccountManagement'
 import JobChatPanel from '@/components/JobChatPanel'
+import ClientStripeRequiredBanner from '@/components/payment-settings/ClientStripeRequiredBanner'
 
 // Chat opens when the job is fully crewed and stays open until end-of-day
 // on the day AFTER the job's end (or start, for single-day shoots).
@@ -939,6 +940,10 @@ function ClientJobRow({
           <ExpandedSection label="Full address" divider>
             <AddressBlock job={job} />
           </ExpandedSection>
+
+          {/* Phase B-Gate: surfaces a "connect Stripe" warning when the
+              client's payment method isn't ready. Self-hides when ready. */}
+          <ClientStripeRequiredBanner jobId={job.id} />
 
           <ExpandedSection label="Assigned crew" divider>
             {activeBookings.length === 0 && declinedBookings.length === 0 ? (
