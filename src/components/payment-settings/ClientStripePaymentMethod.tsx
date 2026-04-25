@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import StripeAddPaymentMethodModal from './StripeAddPaymentMethodModal';
+import { StripeWordmark, PoweredByStripe } from './StripeBranding';
 
 type BankAccount = {
   id: string;
@@ -49,6 +50,15 @@ export default function ClientStripePaymentMethod() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    if (window.location.hash === '#payment-settings') {
+      setOpen(true);
+      setTimeout(() => {
+        document.getElementById('payment-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, []);
+
   const setDefault = async (paymentMethodId: string) => {
     setError(null);
     try {
@@ -81,16 +91,20 @@ export default function ClientStripePaymentMethod() {
   const total = (data?.bankAccounts.length ?? 0) + (data?.cards.length ?? 0);
 
   return (
-    <section className="rounded-lg border border-stone-200 bg-white">
+    <section id="payment-settings" className="rounded-lg border border-stone-200 bg-white scroll-mt-20">
       <button
         type="button"
         className="flex w-full items-center justify-between px-5 py-4 text-left"
         onClick={() => setOpen((v) => !v)}
       >
-        <div>
-          <h3 className="text-base font-semibold text-stone-900">Payment settings</h3>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-stone-900">Payment settings</h3>
+            <span className="text-stone-300">·</span>
+            <StripeWordmark height={14} fill="#635BFF" />
+          </div>
           <p className="mt-0.5 text-sm text-stone-500">
-            How Rowly Studios charges you for jobs.
+            Add a Stripe payment method for invoicing. Optional until your first booking completes.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -110,7 +124,7 @@ export default function ClientStripePaymentMethod() {
 
       {open && (
         <div className="border-t border-stone-200 px-5 py-4">
-          {loading && <p className="text-sm text-stone-500">Loading…</p>}
+          {loading && <p className="text-sm text-stone-500">Loading...</p>}
           {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
 
           {!loading && data && (
@@ -122,7 +136,10 @@ export default function ClientStripePaymentMethod() {
               </div>
 
               {data.bankAccounts.length === 0 && data.cards.length === 0 && (
-                <p className="text-sm text-stone-600">No payment methods on file yet.</p>
+                <p className="text-sm text-stone-600">
+                  No payment methods on file yet. You can add one whenever you’re ready —
+                  it’s required before your first booking is invoiced.
+                </p>
               )}
 
               {data.bankAccounts.length > 0 && (
@@ -169,13 +186,28 @@ export default function ClientStripePaymentMethod() {
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={() => setShowAddModal(true)}
-                className="w-full rounded-md border border-dashed border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
-              >
-                + Add payment method
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(true)}
+                  className="flex-1 rounded-md border border-dashed border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+                >
+                  + Add payment method
+                </button>
+                {total === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm text-stone-700 hover:bg-stone-50"
+                  >
+                    Set up later
+                  </button>
+                )}
+              </div>
+
+              <div className="flex justify-end border-t border-stone-100 pt-3">
+                <PoweredByStripe />
+              </div>
             </div>
           )}
         </div>

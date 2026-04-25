@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { StripeWordmark, PoweredByStripe, StripeBrandedButton } from './StripeBranding';
 
 type ConnectStatus = 'not_connected' | 'pending' | 'active' | 'restricted' | 'rejected' | 'disabled';
 
@@ -16,7 +17,7 @@ type StatusPayload = {
 const STATUS_COPY: Record<ConnectStatus, { label: string; description: string; tone: string }> = {
   not_connected: {
     label: 'Not connected',
-    description: 'Connect a Stripe account to receive payments for jobs.',
+    description: 'Connect a Stripe account whenever you’re ready — you don’t need one to use Rowly Studios, only to receive payment for jobs.',
     tone: 'bg-stone-100 text-stone-700',
   },
   pending: {
@@ -26,7 +27,7 @@ const STATUS_COPY: Record<ConnectStatus, { label: string; description: string; t
   },
   active: {
     label: 'Connected',
-    description: 'You are ready to receive payments. Bank fees on payouts are your responsibility.',
+    description: 'You’re ready to receive payments. Bank fees on payouts are your responsibility.',
     tone: 'bg-emerald-50 text-emerald-800',
   },
   restricted: {
@@ -69,10 +70,15 @@ export default function TalentStripeConnect() {
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  // Auto-refresh on return from Stripe onboarding
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('stripe_return')) fetchStatus();
+    if (window.location.hash === '#payment-settings') {
+      setOpen(true);
+      setTimeout(() => {
+        document.getElementById('payment-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
   }, [fetchStatus]);
 
   const startOnboarding = async () => {
@@ -127,16 +133,20 @@ export default function TalentStripeConnect() {
   const copy = STATUS_COPY[status?.status ?? 'not_connected'];
 
   return (
-    <section className="rounded-lg border border-stone-200 bg-white">
+    <section id="payment-settings" className="rounded-lg border border-stone-200 bg-white scroll-mt-20">
       <button
         type="button"
         className="flex w-full items-center justify-between px-5 py-4 text-left"
         onClick={() => setOpen((v) => !v)}
       >
-        <div>
-          <h3 className="text-base font-semibold text-stone-900">Payment settings</h3>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-stone-900">Payment settings</h3>
+            <span className="text-stone-300">·</span>
+            <StripeWordmark height={14} fill="#635BFF" />
+          </div>
           <p className="mt-0.5 text-sm text-stone-500">
-            Connect a Stripe account to receive job payments.
+            Connect a Stripe account to receive job payments. Optional until you book your first job.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -164,14 +174,18 @@ export default function TalentStripeConnect() {
               <p className="text-sm text-stone-600">{copy.description}</p>
 
               {status.status === 'not_connected' && (
-                <button
-                  type="button"
-                  onClick={startOnboarding}
-                  disabled={acting}
-                  className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-                >
-                  {acting ? 'Starting…' : 'Connect Stripe account'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <StripeBrandedButton onClick={startOnboarding} disabled={acting}>
+                    {acting ? 'Starting…' : <>Connect with <StripeWordmark height={12} fill="white" /></>}
+                  </StripeBrandedButton>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+                  >
+                    Set up later
+                  </button>
+                </div>
               )}
 
               {(status.status === 'pending' || status.status === 'restricted') && (
@@ -183,23 +197,28 @@ export default function TalentStripeConnect() {
                       {status.requirementsDue.length > 3 ? '…' : ''}
                     </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={continueOnboarding}
-                    disabled={acting}
-                    className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-                  >
-                    {acting ? 'Loading…' : 'Continue onboarding'}
-                  </button>
+                  <StripeBrandedButton onClick={continueOnboarding} disabled={acting}>
+                    {acting ? 'Loading…' : <>Continue with <StripeWordmark height={12} fill="white" /></>}
+                  </StripeBrandedButton>
                 </div>
               )}
 
               {status.status === 'active' && (
                 <div className="space-y-3">
-                  <ul className="text-xs text-stone-600">
-                    <li>· Charges enabled: {status.chargesEnabled ? 'yes' : 'no'}</li>
-                    <li>· Payouts enabled: {status.payoutsEnabled ? 'yes' : 'no'}</li>
-                  </ul>
+                  <div className="rounded border border-emerald-200 bg-emerald-50 p-3">
+                    <div className="flex items-start gap-2 text-sm text-emerald-900">
+                      <svg className="mt-0.5 h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <div className="flex-1">
+                        <p className="font-medium">Stripe account connected</p>
+                        <ul className="mt-1 text-xs text-emerald-800">
+                          <li>· Charges enabled: {status.chargesEnabled ? 'yes' : 'no'}</li>
+                          <li>· Payouts enabled: {status.payoutsEnabled ? 'yes' : 'no'}</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -220,10 +239,15 @@ export default function TalentStripeConnect() {
                 </div>
               )}
 
-              <p className="border-t border-stone-100 pt-3 text-xs text-stone-500">
-                Rowly Studios takes 15% of every job. Payment processing fees are billed to clients.
-                Bank payout fees on your end are your responsibility.
-              </p>
+              <div className="flex items-center justify-between border-t border-stone-100 pt-3">
+                <p className="text-xs text-stone-500">
+                  Rowly Studios takes 15% of every job. Payment processing fees are billed to clients.
+                  Bank payout fees on your end are your responsibility.
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <PoweredByStripe />
+              </div>
             </div>
           )}
         </div>
