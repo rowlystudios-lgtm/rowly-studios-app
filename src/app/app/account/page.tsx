@@ -7,6 +7,7 @@ import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
 import { PasswordInput } from '@/components/PasswordInput'
 import { ShareCodeCard } from '@/components/ShareCodeCard'
 import { TaxDocumentsSection } from '@/components/TaxDocumentsSection'
+import ClientStripePaymentMethod from '@/components/payment-settings/ClientStripePaymentMethod'
 import { CITY_OPTIONS } from '@/lib/types'
 
 const CARD_BG = '#2E5099'
@@ -323,6 +324,11 @@ function ViewAccount({
           Collapsed by default so the account page stays focused. */}
       <div style={{ marginTop: 16 }}>
         <TaxDocumentsSection role="client" variant="dark" />
+      </div>
+
+      {/* Stripe — Phase A: save a card or ACH for invoice payments. */}
+      <div style={{ marginTop: 16 }}>
+        <ClientStripePaymentMethod />
       </div>
 
     </PageShell>

@@ -7,6 +7,7 @@ import { Avatar } from '@/components/Avatar'
 import { PasswordInput } from '@/components/PasswordInput'
 import { ShareCodeCard } from '@/components/ShareCodeCard'
 import { TaxDocumentsSection } from '@/components/TaxDocumentsSection'
+import TalentStripeConnect from '@/components/payment-settings/TalentStripeConnect'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DEPARTMENT_LABELS, type Department, type TalentProfile } from '@/lib/types'
 
@@ -254,6 +255,11 @@ export default function ProfilePage() {
             on first load but is there when talent need to upload W-9s etc. */}
         <div className="mt-4">
           <TaxDocumentsSection role="talent" variant="dark" />
+        </div>
+
+        {/* Stripe Connect — Phase A: connect a payout account so RS can pay you. */}
+        <div className="mt-4">
+          <TalentStripeConnect />
         </div>
 
       </div>
