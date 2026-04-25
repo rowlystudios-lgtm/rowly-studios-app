@@ -8,6 +8,7 @@ import {
   notifyFullyCrewed,
 } from '@/lib/notifications'
 import { createServiceClient } from '@/lib/supabase-service'
+import { acceptBooking, declineBooking } from '@/lib/stripe/gate'
 
 async function requireTalent(bookingId: string) {
   const supabase = createClient()
@@ -55,10 +56,36 @@ export async function acceptBookingOffer(formData: FormData) {
     .maybeSingle()
   if (!existing) return
 
+  // Phase B-Gate: route the legacy server action (still called by JobDetailSheet
+  // and the JobCard's onConfirm fallback) through the gate so any UI path
+  // respects the Stripe-readiness rule. Outcome is one of:
+  //   - status: 'confirmed'      → run all the existing side effects below
+  //   - status: 'pending_stripe' → grace period started; skip side effects
+  //                                that assume confirmed (calendar, notify,
+  //                                fully-crewed). Just revalidate.
+  //   - !ok                      → throw so callers see the failure
+  const gateResult = await acceptBooking(ctx.supabase, {
+    bookingId,
+    talentId: existing.talent_id ?? '',
+  })
+  if (!gateResult.ok) {
+    throw new Error(gateResult.message)
+  }
+  if (gateResult.status === 'pending_stripe') {
+    // Talent doesn't have Stripe yet — booking is in pending_stripe with an
+    // active grace window. Don't run the post-confirm side effects (those
+    // assume confirmed status). The talent will see the urgent dashboard
+    // banner + notification through other paths.
+    revalidatePath('/app')
+    return
+  }
+
+  // status: 'confirmed' — backfill the rate snapshot + reviewed timestamp
+  // that the legacy update used to set, so downstream consumers
+  // (notifyConfirmation, invoices) see the same shape they did before.
   await ctx.supabase
     .from('job_bookings')
     .update({
-      status: 'confirmed',
       confirmed_rate_cents: existing.offered_rate_cents,
       talent_reviewed_at: existing.talent_reviewed_at ?? new Date().toISOString(),
     })
@@ -176,10 +203,24 @@ export async function declineBookingOffer(formData: FormData) {
     .eq('id', bookingId)
     .maybeSingle()
 
+  // Phase B-Gate: route through the gate's declineBooking for ownership +
+  // state validation. The gate doesn't add Stripe enforcement on decline
+  // (talent can always say no) — this just keeps the path consistent with
+  // the new /api/bookings/[id]/decline endpoint.
+  const gateResult = await declineBooking(ctx.supabase, {
+    bookingId,
+    talentId: existing?.talent_id ?? '',
+    reason: reason ?? undefined,
+  })
+  if (!gateResult.ok) {
+    throw new Error(gateResult.message)
+  }
+
+  // Backfill the legacy fields the previous direct update used to set
+  // (the gate writes only status + updated_at).
   await ctx.supabase
     .from('job_bookings')
     .update({
-      status: 'declined',
       declined_reason: reason,
       talent_reviewed_at:
         existing?.talent_reviewed_at ?? new Date().toISOString(),
