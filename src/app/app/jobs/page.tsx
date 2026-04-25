@@ -18,6 +18,7 @@ import {
 } from '@/lib/jobs'
 import type { BookingStatus, JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
+import { checkClientCanSendRequests } from '@/lib/stripe/gate'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -280,6 +281,22 @@ function AdminJobsInner() {
     adminId: string
   ) {
     setActionError('')
+
+    // Phase B-Gate: SOFT warning — approve() only flips submitted → crewing
+    // (no bookings created here), so we don't block. But surface a heads-up
+    // so admin knows downstream dispatch (approveCrewRequest / add-talent)
+    // will be blocked until the client connects Stripe.
+    if (job.client_id) {
+      const gate = await checkClientCanSendRequests(supabase, job.client_id)
+      if (!gate.ok) {
+        setActionError(
+          `Heads up — client for "${job.title}" has not connected Stripe yet. ` +
+            `You can approve, but talent dispatch will be blocked until they do.`
+        )
+        // DO NOT return early — continue with the approval flow
+      }
+    }
+
     const snapshot = jobs
     setJobs((js) =>
       js.map((j) =>
@@ -323,6 +340,24 @@ function AdminJobsInner() {
 
   async function approveCrewRequest(jobId: string, bookingId: string) {
     setActionError('')
+
+    // Phase B-Gate: refuse to dispatch booking requests when the job's
+    // client doesn't have a Stripe payment method on file. The spec's
+    // 403 pattern doesn't apply here because this dispatch is a client-side
+    // Supabase write (not a route handler), so we surface via setActionError.
+    const gateJob = jobs.find((j) => j.id === jobId)
+    if (gateJob?.client_id) {
+      const gate = await checkClientCanSendRequests(supabase, gateJob.client_id)
+      if (!gate.ok) {
+        const jobLabel = gateJob.title ? ` for "${gateJob.title}"` : ''
+        const link = gate.actionUrl ? ` (${gate.actionUrl})` : ''
+        setActionError(
+          `Cannot dispatch — client${jobLabel} has not connected a Stripe payment method yet. ${gate.message}${link}`
+        )
+        return
+      }
+    }
+
     const snapshot = { jobs, bookings }
     // Optimistic: bump booking → admin_approved; if job was 'submitted' → 'crewing'.
     setBookings((prev) => {
