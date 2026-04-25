@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/call-sheet-reminder",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/release-expired-stripe-pending",
+      "schedule": "0 * * * *"
     }
   ]
 }
