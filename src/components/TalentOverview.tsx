@@ -20,6 +20,7 @@ import {
   markBookingViewed,
 } from '@/app/actions/bookings'
 import JobChatPanel from '@/components/JobChatPanel'
+import BookingActions from '@/components/booking/BookingActions'
 
 // Chat opens when the job is fully crewed and stays open until end-of-day
 // on the day AFTER the job's end (or start, for single-day shoots).
@@ -342,6 +343,7 @@ export function TalentOverview() {
                   errorMsg={cardError[b.id]}
                   ownDayRateCents={ownDayRateCents}
                   currentUserId={user?.id}
+                  onRefresh={load}
                   onViewDetails={() => {
                     setSheetError('')
                     setSheetBooking(b)
@@ -489,6 +491,8 @@ type JobCardProps = {
   ownDayRateCents?: number | null
   /** Current talent user's auth id; required for the embedded chat. */
   currentUserId?: string | null
+  /** Refetch hook used after the gate-aware BookingActions resolves. */
+  onRefresh?: () => void | Promise<void>
   onViewDetails?: () => void
   onConfirm?: () => void
   onDecline?: () => void
@@ -500,6 +504,7 @@ function JobCard({
   errorMsg,
   ownDayRateCents,
   currentUserId,
+  onRefresh,
   onViewDetails,
   onConfirm,
   onDecline,
@@ -836,47 +841,12 @@ function JobCard({
             Confirmed
           </span>
         ) : (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'nowrap',
+          <BookingActions
+            bookingId={booking.id}
+            onResolved={() => {
+              onRefresh?.()
             }}
-          >
-            <button
-              type="button"
-              onClick={onDecline}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: 'rgba(255,255,255,0.08)',
-                color: TEXT_MUTED,
-                border: '1px solid rgba(170,189,224,0.2)',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: 'pointer',
-              }}
-            >
-              Decline
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 10,
-                background: '#fff',
-                color: '#1A3C6B',
-                border: 'none',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              ✓ Accept
-            </button>
-          </div>
+          />
         )}
       </div>
     </article>
