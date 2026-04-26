@@ -94,9 +94,24 @@ export default function ClientStripePaymentMethod() {
       url.searchParams.delete('session_id');
       window.history.replaceState({}, '', url.toString());
       if (setupResult === 'success') {
-        // Stripe needs a beat to attach the payment method. Quick poll.
-        refresh();
-        setTimeout(refresh, 1500);
+        // Stripe needs a beat to attach the payment method to the customer.
+        // Call sync-default to read the new default from Stripe and persist
+        // it to our DB columns (which the invoice gate reads from), then
+        // refresh the local listing.
+        (async () => {
+          try {
+            await fetch('/api/stripe/customer/sync-default', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            });
+          } catch {
+            // Non-fatal: refresh() will still pull the listing from Stripe
+          } finally {
+            refresh();
+            setTimeout(refresh, 1500);
+          }
+        })();
       }
     }
     if (window.location.hash === '#payment-settings') {
