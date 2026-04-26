@@ -8,6 +8,7 @@ import {
   handleInvoiceVoided,
   handleAccountUpdated,
   handleTransferCreated,
+  handleCheckoutSessionCompleted,
 } from '@/lib/stripe/webhook-handlers';
 
 /**
@@ -118,6 +119,13 @@ export async function POST(req: NextRequest) {
           event.data.object as Stripe.Transfer,
         );
         break;
+      case 'checkout.session.completed':
+        result = await handleCheckoutSessionCompleted(
+          supabase,
+          event.data.object as Stripe.Checkout.Session,
+        );
+        break;
+
       default:
         result = { handled: false, note: `Event type ${event.type} not handled` };
     }

@@ -199,3 +199,67 @@ export async function handleTransferCreated(
 
   return { handled: true, note: `Talent payment ${ourPaymentId} marked paid` };
 }
+
+export async function handleCheckoutSessionCompleted(
+  supabase: SupabaseClient,
+  session: Stripe.Checkout.Session,
+): Promise<{ handled: boolean; note: string }> {
+  // Only handle payment-mode sessions tied to one of our invoices
+  if (session.mode !== 'payment') {
+    return { handled: false, note: `Skipped: mode=${session.mode}` };
+  }
+
+  const invoiceId = session.metadata?.rs_invoice_id;
+  if (!invoiceId) {
+    return { handled: false, note: 'No rs_invoice_id in metadata — not an RS invoice payment' };
+  }
+
+  // Idempotency
+  const { data: ourInvoice } = await supabase
+    .from('invoices')
+    .select('id, status, paid_at')
+    .eq('id', invoiceId)
+    .maybeSingle();
+
+  if (!ourInvoice) {
+    return { handled: false, note: `No matching invoices row for rs_invoice_id=${invoiceId}` };
+  }
+  if (ourInvoice.status === 'paid' && ourInvoice.paid_at) {
+    return { handled: true, note: 'Already marked paid (idempotent skip)' };
+  }
+
+  // Compute scheduled_release_at
+  const { data: holdSetting } = await supabase
+    .from('admin_settings')
+    .select('value')
+    .eq('key', 'stripe_talent_transfer_hold_days')
+    .single();
+  const holdDays = parseInt(holdSetting?.value ?? '5', 10);
+  const releaseAt = new Date(Date.now() + holdDays * 24 * 60 * 60 * 1000).toISOString();
+
+  // Mark invoice paid
+  await supabase
+    .from('invoices')
+    .update({
+      status: 'paid',
+      paid_at: new Date().toISOString(),
+      stripe_charged_amount_cents: session.amount_total ?? 0,
+      stripe_payment_intent_id:
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : session.payment_intent?.id ?? null,
+    })
+    .eq('id', invoiceId);
+
+  // Schedule talent_payments
+  await supabase
+    .from('talent_payments')
+    .update({
+      stripe_status: 'pending_release',
+      scheduled_release_at: releaseAt,
+    })
+    .eq('invoice_id', invoiceId)
+    .eq('stripe_status', 'scheduled');
+
+  return { handled: true, note: `Marked paid; talent transfers scheduled for ${releaseAt}` };
+}
