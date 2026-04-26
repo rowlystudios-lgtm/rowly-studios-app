@@ -9,6 +9,7 @@ import { CallSheetButtons } from './CallSheetButtons'
 import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 import JobChatPanel from '@/components/JobChatPanel'
 import SendInvoiceButton from '@/components/admin/SendInvoiceButton'
+import ReinstateBookingButton from '@/components/admin/ReinstateBookingButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -631,6 +632,19 @@ export default async function AdminJobDetailPage({
                       Reason: {b.declined_reason}
                     </p>
                   )}
+
+                  {!isTerminal &&
+                    ['cancelled', 'auto_released', 'declined'].includes(
+                      b.status
+                    ) && (
+                      <div className="mt-2">
+                        <ReinstateBookingButton
+                          bookingId={b.id}
+                          talentName={t?.full_name ?? t?.email ?? name}
+                          jobTitle={job.title}
+                        />
+                      </div>
+                    )}
 
                   {!isTerminal && (
                     <BookingAdminActions
