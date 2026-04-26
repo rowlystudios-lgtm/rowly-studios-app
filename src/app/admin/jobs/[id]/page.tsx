@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { JobCodePill } from '@/components/JobCodePill'
@@ -8,8 +10,31 @@ import { AdminBudgetRow } from './AdminBudgetRow'
 import { CallSheetButtons } from './CallSheetButtons'
 import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 import JobChatPanel from '@/components/JobChatPanel'
-import SendInvoiceButton from '@/components/admin/SendInvoiceButton'
 import ReinstateBookingButton from '@/components/admin/ReinstateBookingButton'
+
+/**
+ * Phase D Slice 1 — server action: POST to the new draft-generator endpoint
+ * and redirect to the preview page on success. On failure, bounce back to
+ * the job page with an error in the URL so admin can see what went wrong.
+ */
+async function generateInvoice(formData: FormData) {
+  'use server'
+  const jobId = formData.get('jobId') as string
+  const h = headers()
+  const proto = h.get('x-forwarded-proto') ?? 'https'
+  const host = h.get('host')
+  const res = await fetch(
+    `${proto}://${host}/api/admin/jobs/${jobId}/generate-invoice`,
+    { method: 'POST', headers: { cookie: h.get('cookie') ?? '' } },
+  )
+  const data = await res.json()
+  if (data.ok) {
+    redirect(`/admin/invoice-drafts/${data.invoiceId}`)
+  }
+  redirect(
+    `/admin/jobs/${jobId}?invoice_error=${encodeURIComponent(data.message ?? 'Failed')}`,
+  )
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -793,7 +818,16 @@ export default async function AdminJobDetailPage({
             <div className="flex items-center justify-between gap-3">
               <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
               {confirmedTalentCount > 0 ? (
-                <SendInvoiceButton jobId={job.id} />
+                <form action={generateInvoice}>
+                  <input type="hidden" name="jobId" value={job.id} />
+                  <button
+                    type="submit"
+                    style={{ backgroundColor: '#635BFF' }}
+                    className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white shadow-sm hover:brightness-110"
+                  >
+                    Generate invoice
+                  </button>
+                </form>
               ) : (
                 <span style={{ fontSize: 12, color: '#7A90AA', fontStyle: 'italic' }}>
                   Confirm at least one talent first
