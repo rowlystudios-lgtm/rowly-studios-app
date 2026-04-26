@@ -2,13 +2,13 @@ import Link from 'next/link'
 import { requireAdmin, centsToUsd, formatDate } from '@/lib/admin-auth'
 import { StatusBadge } from '@/components/StatusBadge'
 import { JobCodePill } from '@/components/JobCodePill'
-import { generateInvoice } from '../actions'
 import { StatusActionButtons } from './StatusActionButtons'
 import { BookingAdminActions } from './BookingAdminActions'
 import { AdminBudgetRow } from './AdminBudgetRow'
 import { CallSheetButtons } from './CallSheetButtons'
 import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 import JobChatPanel from '@/components/JobChatPanel'
+import SendInvoiceButton from '@/components/admin/SendInvoiceButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -772,32 +772,21 @@ export default async function AdminJobDetailPage({
             </p>
           </Link>
         ) : (
-          <form action={generateInvoice}>
-            <input type="hidden" name="jobId" value={job.id} />
-            <div
-              className="rounded-xl bg-[#1A2E4A] border border-white/5"
-              style={{ padding: 16 }}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-[#F0A500] hover:bg-[#F5B733] text-[#0F1B2E] transition-colors"
-                  style={{
-                    padding: '8px 14px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Generate invoice
-                </button>
-              </div>
+          <div
+            className="rounded-xl bg-[#1A2E4A] border border-white/5"
+            style={{ padding: 16 }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
+              {confirmedTalentCount > 0 ? (
+                <SendInvoiceButton jobId={job.id} />
+              ) : (
+                <span style={{ fontSize: 12, color: '#7A90AA', fontStyle: 'italic' }}>
+                  Confirm at least one talent first
+                </span>
+              )}
             </div>
-          </form>
+          </div>
         )}
       </section>
 
