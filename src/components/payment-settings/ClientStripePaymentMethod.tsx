@@ -104,7 +104,7 @@ export default function ClientStripePaymentMethod() {
             <StripeWordmark height={14} fill="#635BFF" />
           </div>
           <p className="mt-0.5 text-sm text-stone-500">
-            Add a Stripe payment method for invoicing. Optional until your first booking completes.
+            Add a payment method to settle invoices. Required before your first booking is invoiced.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -130,9 +130,9 @@ export default function ClientStripePaymentMethod() {
           {!loading && data && (
             <div className="space-y-4">
               <div className="rounded border border-stone-200 bg-stone-50 p-3 text-xs text-stone-600">
-                Rowly Studios charges a 15% service fee on every job, plus the payment
-                processing fee billed to you at invoicing. Bank transfer (ACH) is roughly
-                $5; credit cards add 2.9% + $0.30. We recommend adding a bank account.
+                Required before your first invoice — no payments are taken until then.
+                We recommend bank transfer (ACH): a low 0.8% processing fee, capped at
+                $5 per invoice. Credit cards work at the standard 2.9% + $0.30.
               </div>
 
               {data.bankAccounts.length === 0 && data.cards.length === 0 && (

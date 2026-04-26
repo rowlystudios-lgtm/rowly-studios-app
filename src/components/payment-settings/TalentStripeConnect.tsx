@@ -241,8 +241,8 @@ export default function TalentStripeConnect() {
 
               <div className="flex items-center justify-between border-t border-stone-100 pt-3">
                 <p className="text-xs text-stone-500">
-                  Rowly Studios takes 15% of every job. Payment processing fees are billed to clients.
-                  Bank payout fees on your end are your responsibility.
+                  Bank payout fees on your end are your responsibility (Stripe Express
+                  handles transfers to your bank account).
                 </p>
               </div>
               <div className="flex justify-end">
