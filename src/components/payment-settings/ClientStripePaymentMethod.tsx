@@ -31,14 +31,13 @@ type ListPayload = {
  *
  * Client's payment-methods panel, mounted on /app/account#payment-settings.
  *
- * "Add payment method" REDIRECTS to Stripe's hosted Checkout (in setup mode)
- * rather than rendering the form inline. The user enters details on
- * checkout.stripe.com — visible URL bar with Stripe's domain provides the
- * trust signal that an embedded form can't match.
- *
- * After the user completes Checkout, Stripe redirects back to /app/account
- * with ?stripe_setup=success (or ?stripe_setup=cancelled). This component
- * reads those params and refreshes the methods list / surfaces a banner.
+ * v2 changes (vs initial Checkout migration):
+ *   - bfcache fix: the "Redirecting to Stripe…" state now resets on
+ *     `pageshow` events when the page is restored from the back/forward
+ *     cache. Without this, hitting browser-back from Stripe Checkout
+ *     left the spinner stuck on forever.
+ *   - hard-cancel timeout: if the redirect fetch takes >12s, abort and
+ *     show an error so user isn't stuck looking at a spinner.
  */
 export default function ClientStripePaymentMethod() {
   const [data, setData] = useState<ListPayload | null>(null);
@@ -65,24 +64,37 @@ export default function ClientStripePaymentMethod() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // On mount: open the panel if either the hash points here OR the URL
-  // contains a stripe_setup return param. Surface a return banner.
+  // bfcache fix: when the page is restored from the back/forward cache
+  // (e.g., user hit browser-back from Stripe Checkout), reset the
+  // redirecting state so the spinner button doesn't show forever.
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        // Page was restored from bfcache. Reset all transient UI state.
+        setRedirecting(false);
+        setError(null);
+        // Re-fetch payment methods in case something changed mid-flow
+        refresh();
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [refresh]);
+
+  // Process the URL params on mount: open panel + show return banner
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const setupResult = params.get('stripe_setup');
     if (setupResult === 'success' || setupResult === 'cancelled') {
       setReturnBanner(setupResult);
       setOpen(true);
-      // Strip the params from the URL without reload, so refreshing
-      // doesn't re-trigger the banner.
+      // Strip params so refresh doesn't re-trigger the banner
       const url = new URL(window.location.href);
       url.searchParams.delete('stripe_setup');
       url.searchParams.delete('session_id');
       window.history.replaceState({}, '', url.toString());
-      // Refresh payment methods if successful
       if (setupResult === 'success') {
-        // Stripe needs a beat to attach the payment method to the customer.
-        // Quick polling: try immediately, then after 1.5s as fallback.
+        // Stripe needs a beat to attach the payment method. Quick poll.
         refresh();
         setTimeout(refresh, 1500);
       }
@@ -100,21 +112,34 @@ export default function ClientStripePaymentMethod() {
   const startCheckout = async () => {
     setRedirecting(true);
     setError(null);
+
+    // Hard timeout: if the redirect fetch hangs past 12 seconds, abort
+    // and show an error so the user isn't stuck staring at a spinner.
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
+
     try {
       const res = await fetch('/api/stripe/customer/setup-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
+        signal: controller.signal,
       });
       const payload = await res.json();
       if (!res.ok || !payload.url) {
         throw new Error(payload.error ?? 'Failed to start Stripe Checkout');
       }
-      // Top-level navigation, NOT window.open — this is a redirect not a popup.
+      // Top-level navigation
       window.location.href = payload.url;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start Stripe Checkout');
+      const msg =
+        e instanceof DOMException && e.name === 'AbortError'
+          ? 'Took too long to reach Stripe. Click again, or refresh this page.'
+          : e instanceof Error ? e.message : 'Failed to start Stripe Checkout';
+      setError(msg);
       setRedirecting(false);
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   };
 
@@ -183,7 +208,6 @@ export default function ClientStripePaymentMethod() {
 
       {open && (
         <div className="border-t border-stone-200 px-5 py-4">
-          {/* Return banner: success or cancelled from Stripe Checkout */}
           {returnBanner === 'success' && (
             <div className="mb-4 flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm">
               <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
@@ -206,7 +230,20 @@ export default function ClientStripePaymentMethod() {
           )}
 
           {loading && <p className="text-sm text-stone-500">Loading...</p>}
-          {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
+          {error && (
+            <div className="mb-3 flex items-start justify-between gap-2 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <span>{error}</span>
+              {redirecting && (
+                <button
+                  type="button"
+                  onClick={() => { setRedirecting(false); setError(null); }}
+                  className="flex-shrink-0 text-xs font-medium underline hover:no-underline"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
 
           {!loading && data && (
             <div className="space-y-4">
@@ -289,7 +326,16 @@ export default function ClientStripePaymentMethod() {
                     </>
                   )}
                 </button>
-                {total === 0 && (
+                {redirecting && (
+                  <button
+                    type="button"
+                    onClick={() => { setRedirecting(false); setError(null); }}
+                    className="rounded-md border border-stone-300 bg-white px-4 py-2.5 text-sm text-stone-700 hover:bg-stone-50"
+                  >
+                    Cancel
+                  </button>
+                )}
+                {!redirecting && total === 0 && (
                   <button
                     type="button"
                     onClick={() => setOpen(false)}
