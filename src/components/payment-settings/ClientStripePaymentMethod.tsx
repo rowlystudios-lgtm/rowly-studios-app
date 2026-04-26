@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import StripeAddPaymentMethodModal from './StripeAddPaymentMethodModal';
 import { StripeWordmark, PoweredByStripe } from './StripeBranding';
 
 type BankAccount = {
@@ -27,12 +26,28 @@ type ListPayload = {
   defaultPaymentMethodId: string | null;
 };
 
+/**
+ * ClientStripePaymentMethod
+ *
+ * Client's payment-methods panel, mounted on /app/account#payment-settings.
+ *
+ * "Add payment method" REDIRECTS to Stripe's hosted Checkout (in setup mode)
+ * rather than rendering the form inline. The user enters details on
+ * checkout.stripe.com — visible URL bar with Stripe's domain provides the
+ * trust signal that an embedded form can't match.
+ *
+ * After the user completes Checkout, Stripe redirects back to /app/account
+ * with ?stripe_setup=success (or ?stripe_setup=cancelled). This component
+ * reads those params and refreshes the methods list / surfaces a banner.
+ */
 export default function ClientStripePaymentMethod() {
   const [data, setData] = useState<ListPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [returnBanner, setReturnBanner] =
+    useState<'success' | 'cancelled' | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -50,14 +65,58 @@ export default function ClientStripePaymentMethod() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // On mount: open the panel if either the hash points here OR the URL
+  // contains a stripe_setup return param. Surface a return banner.
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const setupResult = params.get('stripe_setup');
+    if (setupResult === 'success' || setupResult === 'cancelled') {
+      setReturnBanner(setupResult);
+      setOpen(true);
+      // Strip the params from the URL without reload, so refreshing
+      // doesn't re-trigger the banner.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('stripe_setup');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', url.toString());
+      // Refresh payment methods if successful
+      if (setupResult === 'success') {
+        // Stripe needs a beat to attach the payment method to the customer.
+        // Quick polling: try immediately, then after 1.5s as fallback.
+        refresh();
+        setTimeout(refresh, 1500);
+      }
+    }
     if (window.location.hash === '#payment-settings') {
       setOpen(true);
       setTimeout(() => {
-        document.getElementById('payment-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('payment-settings')?.scrollIntoView({
+          behavior: 'smooth', block: 'start',
+        });
       }, 100);
     }
-  }, []);
+  }, [refresh]);
+
+  const startCheckout = async () => {
+    setRedirecting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/stripe/customer/setup-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const payload = await res.json();
+      if (!res.ok || !payload.url) {
+        throw new Error(payload.error ?? 'Failed to start Stripe Checkout');
+      }
+      // Top-level navigation, NOT window.open — this is a redirect not a popup.
+      window.location.href = payload.url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start Stripe Checkout');
+      setRedirecting(false);
+    }
+  };
 
   const setDefault = async (paymentMethodId: string) => {
     setError(null);
@@ -124,6 +183,28 @@ export default function ClientStripePaymentMethod() {
 
       {open && (
         <div className="border-t border-stone-200 px-5 py-4">
+          {/* Return banner: success or cancelled from Stripe Checkout */}
+          {returnBanner === 'success' && (
+            <div className="mb-4 flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm">
+              <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <p className="text-emerald-900">
+                <strong>Payment method saved.</strong> You&rsquo;re ready to be invoiced for jobs.
+              </p>
+            </div>
+          )}
+          {returnBanner === 'cancelled' && (
+            <div className="mb-4 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+              <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-13a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" />
+              </svg>
+              <p className="text-amber-900">
+                Payment method setup was cancelled. Click <strong>Add payment method</strong> below to try again.
+              </p>
+            </div>
+          )}
+
           {loading && <p className="text-sm text-stone-500">Loading...</p>}
           {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
 
@@ -137,8 +218,8 @@ export default function ClientStripePaymentMethod() {
 
               {data.bankAccounts.length === 0 && data.cards.length === 0 && (
                 <p className="text-sm text-stone-600">
-                  No payment methods on file yet. You can add one whenever you’re ready —
-                  it’s required before your first booking is invoiced.
+                  No payment methods on file yet. Add one below — you&rsquo;ll be redirected to
+                  Stripe&rsquo;s secure checkout to enter your details.
                 </p>
               )}
 
@@ -189,10 +270,24 @@ export default function ClientStripePaymentMethod() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(true)}
-                  className="flex-1 rounded-md border border-dashed border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+                  onClick={startCheckout}
+                  disabled={redirecting}
+                  style={{ backgroundColor: '#635BFF' }}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:brightness-110 disabled:opacity-50"
                 >
-                  + Add payment method
+                  {redirecting ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+                        <path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                      </svg>
+                      Redirecting to Stripe…
+                    </>
+                  ) : (
+                    <>
+                      Add payment method via <StripeWordmark height={12} fill="white" />
+                    </>
+                  )}
                 </button>
                 {total === 0 && (
                   <button
@@ -205,22 +300,22 @@ export default function ClientStripePaymentMethod() {
                 )}
               </div>
 
+              <div className="flex items-start gap-2 rounded border border-stone-100 bg-stone-50 px-3 py-2 text-xs text-stone-600">
+                <svg className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-stone-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                <span>
+                  You&rsquo;ll be redirected to Stripe&rsquo;s secure checkout (checkout.stripe.com)
+                  to enter your details. Your card or bank info never touches Rowly Studios servers.
+                </span>
+              </div>
+
               <div className="flex justify-end border-t border-stone-100 pt-3">
                 <PoweredByStripe />
               </div>
             </div>
           )}
         </div>
-      )}
-
-      {showAddModal && (
-        <StripeAddPaymentMethodModal
-          onClose={() => setShowAddModal(false)}
-          onSuccess={async () => {
-            setShowAddModal(false);
-            await refresh();
-          }}
-        />
       )}
     </section>
   );
