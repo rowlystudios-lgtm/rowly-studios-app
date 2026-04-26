@@ -34,13 +34,50 @@ export async function POST(req: NextRequest) {
         ? body.clientId
         : profile.id;
 
-    // Get or create the Stripe Customer for this client
-    const customerResult = await findOrCreateCustomer(supabase, targetClientId);
-    if (!customerResult.ok) {
+    // Look up the target client's profile + client_profile. When admin
+    // impersonates, target may differ from caller — always query by
+    // targetClientId, not profile.id.
+    const [targetUserRes, targetClientRes] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', targetClientId)
+        .single(),
+      supabase
+        .from('client_profiles')
+        .select('stripe_customer_id, company_name, billing_email')
+        .eq('id', targetClientId)
+        .single(),
+    ]);
+
+    if (targetUserRes.error || targetClientRes.error) {
       return NextResponse.json(
-        { error: customerResult.message },
-        { status: 400 },
+        { error: 'Client profile not found' },
+        { status: 404 },
       );
+    }
+
+    const targetUser = targetUserRes.data;
+    const targetClient = targetClientRes.data;
+
+    // Mirror setup-intent/route.ts: single-object signature, returns
+    // Stripe.Customer directly (no { ok, message } wrapper).
+    const customer = await findOrCreateCustomer({
+      existingCustomerId: targetClient.stripe_customer_id,
+      email: targetClient.billing_email ?? targetUser.email,
+      name: targetUser.full_name ?? targetUser.email,
+      companyName: targetClient.company_name,
+      clientProfileId: targetClientId,
+    });
+
+    if (!targetClient.stripe_customer_id) {
+      await supabase
+        .from('client_profiles')
+        .update({
+          stripe_customer_id: customer.id,
+          stripe_last_synced_at: new Date().toISOString(),
+        })
+        .eq('id', targetClientId);
     }
 
     // Build the return URLs. Use the request origin so this works
@@ -51,7 +88,7 @@ export async function POST(req: NextRequest) {
     // Create the Checkout Session in 'setup' mode
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
-      customer: customerResult.customerId,
+      customer: customer.id,
 
       // Both card AND bank account. ACH gets Financial Connections (bank
       // login) automatically — no routing/account number typing required.
@@ -59,11 +96,13 @@ export async function POST(req: NextRequest) {
 
       payment_method_options: {
         us_bank_account: {
-          // 'instant_or_skip' = Financial Connections instant verification,
-          // falling back to micro-deposits if the bank isn't supported.
-          // 'instant' = Financial Connections only (rejects unsupported banks).
-          // 'instant_or_skip' is the most user-friendly default.
-          verification_method: 'instant_or_skip',
+          // 'automatic' = Stripe picks the best path: Financial Connections
+          // instant verification when the bank is supported, falling back
+          // to micro-deposits otherwise. (Patch originally specified
+          // 'instant_or_skip' which is a Financial Connections SDK concept,
+          // not a valid value for this API field — stripe@17.7.0 types
+          // accept only 'automatic' | 'instant' | 'microdeposits'.)
+          verification_method: 'automatic',
           financial_connections: {
             permissions: ['payment_method'],
           },
