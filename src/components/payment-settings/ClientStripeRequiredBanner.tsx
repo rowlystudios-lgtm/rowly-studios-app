@@ -18,10 +18,13 @@ type CheckResult = { ok: true } | { ok: false; reason: string; message: string; 
  * has selected their team but hasn't connected a Stripe payment method.
  * Hits /api/jobs/[id]/send-requests as a pre-flight check; if blocked,
  * renders an actionable banner. Hides itself when the client is ready.
+ *
+ * NOTE: Default href is /app/account#payment-settings — clients in this
+ * app use /app/account, not /app/profile (which is the talent profile).
  */
 export default function ClientStripeRequiredBanner({
   jobId,
-  paymentSettingsHref = '/app/profile#payment-settings',
+  paymentSettingsHref = '/app/account#payment-settings',
 }: Props) {
   const [result, setResult] = useState<CheckResult | null>(null);
   const [loading, setLoading] = useState(true);

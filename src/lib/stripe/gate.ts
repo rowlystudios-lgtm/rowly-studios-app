@@ -184,6 +184,6 @@ export async function checkClientCanSendRequests(
     ok: false,
     reason: 'no_payment_method',
     message: 'Connect a payment method on Stripe before sending talent requests.',
-    actionUrl: '/app/profile#payment-settings',
+    actionUrl: '/app/account#payment-settings',
   };
 }
