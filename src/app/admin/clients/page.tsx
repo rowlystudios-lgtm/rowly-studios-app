@@ -472,24 +472,6 @@ export default async function AdminClientsPage({
                       {r.uninvoicedJobCount} job
                       {r.uninvoicedJobCount === 1 ? '' : 's'})
                     </span>
-                    <Link
-                      href={`/admin/finance/new?client=${r.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        padding: '6px 10px',
-                        borderRadius: 7,
-                        background: '#F0A500',
-                        color: '#0F1B2E',
-                        textDecoration: 'none',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      + Invoice now
-                    </Link>
                   </div>
                 )}
                 {filter === 'completed' &&

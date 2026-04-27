@@ -157,10 +157,6 @@ export async function FinancePageServer({
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
         <h1 className="text-white" style={{ fontSize: 20, fontWeight: 600 }}>Finance</h1>
-        <Link href="/admin/finance/new"
-          style={{ fontSize: 12, fontWeight: 600, color: '#F0A500', textDecoration: 'none' }}>
-          + New invoice
-        </Link>
       </div>
 
       {/* Period selector — client component */}

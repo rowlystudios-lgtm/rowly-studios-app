@@ -379,21 +379,6 @@ export default async function AdminClientDetailPage({
         >
           + New job for this client
         </Link>
-        <Link
-          href={`/admin/finance/new?client=${profile.id}`}
-          className="rounded-xl"
-          style={{
-            padding: '10px 16px',
-            fontSize: 14,
-            fontWeight: 500,
-            background: '#253D5E',
-            color: '#AABDE0',
-            border: '1px solid rgba(255,255,255,0.1)',
-            textDecoration: 'none',
-          }}
-        >
-          + Create invoice
-        </Link>
       </section>
 
       {/* Job history */}
@@ -570,18 +555,6 @@ export default async function AdminClientDetailPage({
           >
             Invoices
           </p>
-          <Link
-            href={`/admin/finance/new?client=${profile.id}`}
-            className="text-amber-400 hover:text-amber-300"
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              textDecoration: 'none',
-            }}
-          >
-            + New invoice
-          </Link>
         </div>
 
         {invoices.length === 0 ? (

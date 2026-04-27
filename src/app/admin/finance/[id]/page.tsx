@@ -636,22 +636,6 @@ export default async function AdminInvoiceDetailPage({
                   ✓ Confirm and unlock send
                 </button>
               </form>
-              <Link
-                href={`/admin/finance/${invoice.id}/edit`}
-                style={{
-                  padding: '12px 16px',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  letterSpacing: '0.02em',
-                  background: 'rgba(255,255,255,0.06)',
-                  color: '#AABDE0',
-                  border: '1px solid rgba(170,189,224,0.2)',
-                  borderRadius: 10,
-                  textDecoration: 'none',
-                }}
-              >
-                Edit invoice
-              </Link>
             </div>
           </div>
         )}
@@ -668,24 +652,6 @@ export default async function AdminInvoiceDetailPage({
             ) : null}
             <div className="flex gap-2 flex-wrap">
               <InvoicePreviewButton invoice={previewInvoice} />
-              {isVerified && (
-                <Link
-                  href={`/admin/finance/${invoice.id}/edit`}
-                  style={{
-                    padding: '9px 14px',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    letterSpacing: '0.04em',
-                    background: 'rgba(255,255,255,0.06)',
-                    color: '#AABDE0',
-                    border: '1px solid rgba(170,189,224,0.2)',
-                    borderRadius: 10,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Edit
-                </Link>
-              )}
               <DeleteDraftButton invoiceId={invoice.id} />
             </div>
             {isVerified && (

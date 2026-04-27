@@ -243,8 +243,8 @@ export async function generateInvoiceDraft(
 
   try {
     // 9. Create Checkout Session
-    const successUrl = `${params.baseUrl}/admin/invoice-drafts/${invoiceId}?paid=1`;
-    const cancelUrl = `${params.baseUrl}/admin/invoice-drafts/${invoiceId}?cancelled=1`;
+    const successUrl = `${params.baseUrl}/app/jobs?paid_invoice=${invoiceId}`;
+    const cancelUrl = `${params.baseUrl}/app/jobs?cancelled_invoice=${invoiceId}`;
     const description = `Invoice ${invoiceNumber} — ${job.title}`;
 
     const { url: paymentUrl, sessionId } = await createInvoiceCheckoutSession({
@@ -360,7 +360,7 @@ export async function generateInvoiceDraft(
       invoiceNumber,
       checkoutSessionId: sessionId,
       paymentUrl,
-      previewUrl: `${params.baseUrl}/admin/invoice-drafts/${invoiceId}`,
+      previewUrl: `${params.baseUrl}/app/jobs?invoice=${invoiceId}`,
       totalCents,
     };
   } catch (err) {
