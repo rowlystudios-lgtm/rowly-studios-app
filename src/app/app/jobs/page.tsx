@@ -19,7 +19,6 @@ import {
 import type { BookingStatus, JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 import { checkClientCanSendRequests } from '@/lib/stripe/gate'
-import JobInvoiceCard from '@/components/admin/JobInvoiceCard'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -1008,34 +1007,22 @@ function CompletedCard({
         padding: '12px 14px',
         marginBottom: 8,
         display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 10,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 10,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: TEXT_PRIMARY }}>
-            {job.title}
-          </p>
-          <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
-            {clientName(job.profiles)}
-            {summariseShootDays(job) && ` · ${summariseShootDays(job).split(' · Call ')[0]}`}
-            {confirmedCount > 0 && ` · ${confirmedCount} talent`}
-          </p>
-        </div>
-        <JobStatusBadge status={job.status} small />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: TEXT_PRIMARY }}>
+          {job.title}
+        </p>
+        <p style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>
+          {clientName(job.profiles)}
+          {summariseShootDays(job) && ` · ${summariseShootDays(job).split(' · Call ')[0]}`}
+          {confirmedCount > 0 && ` · ${confirmedCount} talent`}
+        </p>
       </div>
-      {/* Step 3: inline invoice preview. Page-level <AdminGuard> already
-          gates this surface to admins; component does its own server-side
-          requireAuth(['admin']) belt-and-braces on the API. */}
-      <JobInvoiceCard jobId={job.id} />
+      <JobStatusBadge status={job.status} small />
     </div>
   )
 }

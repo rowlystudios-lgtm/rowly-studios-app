@@ -9,6 +9,7 @@ import { CallSheetButtons } from './CallSheetButtons'
 import { AddToCalendarButton } from '@/components/AddToCalendarButton'
 import JobChatPanel from '@/components/JobChatPanel'
 import ReinstateBookingButton from '@/components/admin/ReinstateBookingButton'
+import JobInvoiceCard from '@/components/admin/JobInvoiceCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -748,60 +749,9 @@ export default async function AdminJobDetailPage({
         </section>
       )}
 
-      {/* ─── Invoice ─── */}
+      {/* ─── Invoice (component renders its own "Invoice" eyebrow) ─── */}
       <section className="mt-4">
-        <p
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: '#7A90AA',
-            marginBottom: 8,
-          }}
-        >
-          Invoice
-        </p>
-        {invoice ? (
-          <Link
-            href={`/app/jobs?invoice=${invoice.id}`}
-            className="block rounded-xl bg-[#1A2E4A] border border-white/5 hover:border-white/10"
-            style={{ padding: 16, textDecoration: 'none' }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p className="text-white" style={{ fontSize: 14, fontWeight: 700 }}>
-                  {invoice.invoice_number}
-                </p>
-                <p style={{ fontSize: 12, color: '#AABDE0', marginTop: 2 }}>
-                  {centsToUsd(invoice.total_cents)}
-                  {invoice.due_date && ` · due ${formatDate(invoice.due_date)}`}
-                </p>
-              </div>
-              <StatusBadge status={invoice.status} size="sm" />
-            </div>
-            <p
-              className="mt-2 text-amber-400"
-              style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em' }}
-            >
-              View invoice →
-            </p>
-          </Link>
-        ) : (
-          <div
-            className="rounded-xl bg-[#1A2E4A] border border-white/5"
-            style={{ padding: 16 }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <p style={{ fontSize: 13, color: '#AABDE0' }}>No invoice yet</p>
-              {confirmedTalentCount === 0 && (
-                <span style={{ fontSize: 12, color: '#7A90AA', fontStyle: 'italic' }}>
-                  Confirm at least one talent first
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+        <JobInvoiceCard jobId={job.id} />
       </section>
 
       {/* ─── Job chat ─── */}
