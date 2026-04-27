@@ -19,6 +19,7 @@ import {
 import type { BookingStatus, JobStatus } from '@/lib/job-status'
 import { DEPARTMENT_LABELS, type Department } from '@/lib/types'
 import { checkClientCanSendRequests } from '@/lib/stripe/gate'
+import JobInvoiceBadge from '@/components/admin/JobInvoiceBadge'
 
 const CARD_BG = '#2E5099'
 const CARD_BORDER = 'rgba(170,189,224,0.15)'
@@ -1022,7 +1023,12 @@ function CompletedCard({
           {confirmedCount > 0 && ` · ${confirmedCount} talent`}
         </p>
       </div>
-      <JobStatusBadge status={job.status} small />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+        <JobStatusBadge status={job.status} small />
+        {/* Phase D: invoice state pill — completed jobs are by definition
+            ready for invoicing, so always pass bookingsCompleted=true. */}
+        <JobInvoiceBadge jobId={job.id} bookingsCompleted={true} />
+      </div>
     </div>
   )
 }
