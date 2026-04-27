@@ -272,8 +272,11 @@ export default async function AdminJobDetailPage({
     : null
 
   const isTerminal = job.status === 'wrapped' || job.status === 'cancelled'
+  // 'confirmed' = booking locked in, talent committed (pre-shoot)
+  // 'completed' = same talent, but the shoot is done — still a billable seat.
+  // Both states gate the invoice generator AND the call-sheet send.
   const confirmedTalentCount = bookings.filter(
-    (b) => b.status === 'confirmed'
+    (b) => b.status === 'confirmed' || b.status === 'completed'
   ).length
   const billingEmail =
     clientProfile?.billing_email || clientRow?.email || null
@@ -787,7 +790,7 @@ export default async function AdminJobDetailPage({
         </p>
         {invoice ? (
           <Link
-            href={`/admin/finance/${invoice.id}`}
+            href={`/admin/invoice-drafts/${invoice.id}`}
             className="block rounded-xl bg-[#1A2E4A] border border-white/5 hover:border-white/10"
             style={{ padding: 16, textDecoration: 'none' }}
           >
