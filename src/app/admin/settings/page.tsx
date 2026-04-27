@@ -8,6 +8,7 @@ import { saveNotionSettings } from './actions'
 import { SyncButton, SyncAllButton } from './SyncButtons'
 import { CalendarCopyField } from './CalendarCopyField'
 import { NotionTokenInput } from './NotionTokenInput'
+import GmailConnectionPanel from '@/components/admin/GmailConnectionPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -299,6 +300,11 @@ export default async function AdminSettingsPage() {
             href={driveSheetUrl(settings.drive_tax_tracker_id)}
           />
         </div>
+      </section>
+
+      {/* ─── Gmail (Phase C — invoice draft delivery) ─── */}
+      <section className="mt-4">
+        <GmailConnectionPanel />
       </section>
 
       {/* ─── Notion ─── */}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type InvoiceData = {
   id: string;
@@ -43,6 +43,18 @@ export default function JobInvoiceCard({ jobId }: Props) {
   const [invoice, setInvoice] = useState<InvoiceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(true);
+
+  // Stable refetch callable from child actions (e.g., SendToDraftButton)
+  // after a successful create. No cancellation tracking — invoked on user
+  // action, not mount.
+  const refetchInvoice = useCallback(() => {
+    fetch(`/api/admin/jobs/${jobId}/invoice`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) setInvoice(data.invoice);
+      })
+      .catch(() => {});
+  }, [jobId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,18 +184,68 @@ export default function JobInvoiceCard({ jobId }: Props) {
               </svg>
             </a>
           ) : (
-            <button
-              type="button"
-              disabled
-              title="Gmail integration coming next — will create a draft in rowlystudios@gmail.com"
-              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/40"
-            >
-              Send to Draft
-              <span className="text-[10px] text-white/30">(soon)</span>
-            </button>
+            <SendToDraftButton jobId={jobId} onCreated={refetchInvoice} />
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * SendToDraftButton — POSTs to the Phase C send-invoice-draft endpoint,
+ * triggers the parent's refetch on success so the gmail_draft_id field
+ * lands and this branch flips to the "Open in Gmail" link.
+ *
+ * Errors surface inline below the button. Special-cases the
+ * 'gmail_not_connected' reason with a plain-language hint pointing the
+ * admin at the profile-page connect surface.
+ */
+function SendToDraftButton({
+  jobId,
+  onCreated,
+}: {
+  jobId: string;
+  onCreated: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/jobs/${jobId}/send-invoice-draft`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        if (data.reason === 'gmail_not_connected') {
+          setError('Connect Gmail first (admin profile)');
+        } else {
+          setError(data.message ?? 'Failed to create draft');
+        }
+        return;
+      }
+      onCreated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create draft');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={send}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-stone-900 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy ? 'Creating…' : 'Send to Draft'}
+      </button>
+      {error && <div className="text-[10px] text-red-300">{error}</div>}
     </div>
   );
 }
