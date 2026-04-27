@@ -360,7 +360,7 @@ export function ClientOverview() {
          job_bookings (
            id, status, confirmed_rate_cents, offered_rate_cents,
            response_deadline_at, is_short_shoot,
-           profiles (
+           profiles!job_bookings_talent_id_fkey (
              id, first_name, last_name, avatar_url,
              talent_profiles (department, primary_role, rate_floor_cents)
            )
