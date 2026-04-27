@@ -171,28 +171,17 @@ export default function JobInvoiceCard({ jobId }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
               </svg>
             </a>
-          ) : null}
-
-          {invoice.stripe_payment_link_url ? (
-            <a
-              href={invoice.stripe_payment_link_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ backgroundColor: '#635BFF' }}
-              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white hover:brightness-110"
+          ) : (
+            <button
+              type="button"
+              disabled
+              title="Gmail integration coming next — will create a draft in rowlystudios@gmail.com"
+              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/40"
             >
-              Open Stripe Checkout
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2.5}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-            </a>
-          ) : null}
+              Send to Draft
+              <span className="text-[10px] text-white/30">(soon)</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
