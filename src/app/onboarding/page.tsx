@@ -44,6 +44,14 @@ const ALLOWED_DEPARTMENTS = [
   'production', 'lighting', 'post_production', 'sound', 'other',
 ] as const
 
+const CITIES = [
+  'Los Angeles',
+  'New York',
+  'San Francisco',
+  'Austin',
+  'Atlanta',
+] as const
+
 // Bio char limit — matches the spec.
 const BIO_MAX = 300
 const TOTAL_STEPS = 3
@@ -57,7 +65,7 @@ export default function OnboardingPage() {
   const [fullName, setFullName] = useState('')
   const [countryCode, setCountryCode] = useState<string>('+1')
   const [phoneNumber, setPhoneNumber] = useState('')
-  const [city, setCity] = useState('Los Angeles')
+  const [city, setCity] = useState<string>('')
   const [department, setDepartment] = useState<DeptValue>('')
   const [primaryRole, setPrimaryRole] = useState('')
   const [bio, setBio] = useState('')
@@ -83,7 +91,7 @@ export default function OnboardingPage() {
   }, [loading, user, profile, router])
 
   const firstName = fullName.trim().split(/\s+/)[0] ?? ''
-  const canNextStep1 = fullName.trim().length > 0
+  const canNextStep1 = fullName.trim().length > 0 && city !== ''
   const canNextStep2 = department !== ''
 
   async function save(markOnboarded: boolean) {
@@ -100,6 +108,12 @@ export default function OnboardingPage() {
 
     if (dbDepartment && !ALLOWED_DEPARTMENTS.includes(dbDepartment as any)) {
       setError('Please go back and select a valid department.')
+      setSaving(false)
+      return
+    }
+
+    if (!city || !CITIES.includes(city as any)) {
+      setError('Please select your city.')
       setSaving(false)
       return
     }
@@ -146,7 +160,7 @@ export default function OnboardingPage() {
       first_name: firstNamePart,
       last_name: lastNamePart,
       phone: fullPhone,
-      city: city.trim() || null,
+      city: city,
     }
 
     const profileUpdate = await supabase
@@ -213,7 +227,7 @@ export default function OnboardingPage() {
       first_name: firstNamePart,
       last_name: lastNamePart,
       phone: fullPhone,
-      city: city.trim() || null,
+      city: city,
     })
 
     router.replace('/app/jobs')
@@ -356,15 +370,20 @@ export default function OnboardingPage() {
                   />
                 </div>
               </Field>
-              <Field label="City">
-                <input
-                  type="text"
+              <Field label="City" required>
+                <select
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  placeholder="Los Angeles"
-                  className="rs-input"
-                  autoComplete="address-level2"
-                />
+                  className="rs-input w-full"
+                  required
+                >
+                  <option value="">Select your city</option>
+                  {CITIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
           </section>
