@@ -21,6 +21,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Stripe webhook must run without middleware touching cookies or
+  // calling getUser. Stripe POSTs carry no auth cookies and the handler
+  // verifies the signed raw body itself. Any cookie-refresh here is
+  // wasted work at best and a Set-Cookie race at worst.
+  if (request.nextUrl.pathname === '/api/stripe/webhook') {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   })
