@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const proto = h.get('x-forwarded-proto') ?? 'https';
   const host = h.get('host');
   const baseUrl = `${proto}://${host}`;
-  const profileUrl = `${baseUrl}/admin/profile`;
+  const profileUrl = `${baseUrl}/admin/settings`;
 
   // Pull cookies set by /start
   const cookieStore = await cookies();
