@@ -55,13 +55,13 @@ const CITIES = [
 
 // Bio char limit — matches the spec.
 const BIO_MAX = 300
-const TOTAL_STEPS = 3
+const TOTAL_STEPS = 4
 
 export default function OnboardingPage() {
   const router = useRouter()
   const { user, profile, loading, supabase, updateProfile } = useAuth()
 
-  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
 
   const [fullName, setFullName] = useState('')
   const [countryCode, setCountryCode] = useState<string>('+1')
@@ -108,7 +108,10 @@ export default function OnboardingPage() {
   const canNextStep1 = fullName.trim().length > 0 && city !== ''
   const canNextStep2 = department !== ''
 
-  async function save(markOnboarded: boolean) {
+  async function save(
+    markOnboarded: boolean,
+    redirectTo: 'app' | 'stripe' = 'app'
+  ) {
     if (!user?.id || saving) return
     setSaving(true)
     setError('')
@@ -248,17 +251,21 @@ export default function OnboardingPage() {
       city: city,
     })
 
-    router.replace('/app/jobs')
+    if (redirectTo === 'stripe') {
+      window.location.href = '/api/stripe/connect/onboarding'
+    } else {
+      router.replace('/app/jobs')
+    }
   }
 
   function goNext() {
     if (step === 1 && !canNextStep1) return
     if (step === 2 && !canNextStep2) return
-    if (step < TOTAL_STEPS) setStep((s) => (s + 1) as 1 | 2 | 3)
+    if (step < TOTAL_STEPS) setStep((s) => (s + 1) as 1 | 2 | 3 | 4)
   }
 
   function goBack() {
-    if (step > 1) setStep((s) => (s - 1) as 1 | 2 | 3)
+    if (step > 1) setStep((s) => (s - 1) as 1 | 2 | 3 | 4)
   }
 
   if (loading || !user) {
@@ -288,11 +295,19 @@ export default function OnboardingPage() {
       }}
     >
       <div className="max-w-md mx-auto px-5 pt-8 pb-12 relative">
-        {/* Skip button — top-right on steps 2 and 3 only */}
+        {/* Skip button — top-right on steps 2-4. On steps 2-3 it
+            advances to step 4 (Stripe setup); on step 4 it completes
+            onboarding without connecting Stripe. */}
         {step > 1 && (
           <button
             type="button"
-            onClick={() => save(true)}
+            onClick={() => {
+              if (step === 4) {
+                save(true)
+              } else {
+                setStep(4)
+              }
+            }}
             disabled={saving}
             className="absolute top-8 right-5 text-[11px] uppercase tracking-wider underline disabled:opacity-50"
             style={{ color: LINK_COLOR }}
@@ -314,7 +329,7 @@ export default function OnboardingPage() {
           Step {step} of {TOTAL_STEPS}
         </p>
         <div className="flex justify-center gap-2 mt-2 mb-8" aria-hidden>
-          {[1, 2, 3].map((n) => {
+          {[1, 2, 3, 4].map((n) => {
             const active = n === step
             return (
               <span
@@ -586,6 +601,71 @@ export default function OnboardingPage() {
           </section>
         )}
 
+        {step === 4 && (
+          <section>
+            <div className="flex justify-center items-center gap-2 mb-6">
+              <span
+                style={{
+                  fontSize: 32,
+                  fontWeight: 800,
+                  color: '#635BFF',
+                  letterSpacing: '-0.5px',
+                  fontFamily: 'system-ui, sans-serif',
+                }}
+              >
+                ⚡ stripe
+              </span>
+            </div>
+
+            <h1
+              className="text-[22px] font-semibold text-center mb-2"
+              style={{ color: TEXT_PRIMARY }}
+            >
+              Get paid, effortlessly.
+            </h1>
+            <p
+              className="text-[13px] text-center leading-relaxed mb-6"
+              style={{ color: TEXT_MUTED }}
+            >
+              We use Stripe — the secure, industry-standard payment platform —
+              to make sure you get paid on time, every time. Setting up takes
+              just a few minutes and keeps your earnings protected.
+            </p>
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => save(true, 'stripe')}
+                disabled={saving}
+                className="w-full rs-btn disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Connect Stripe now →'}
+              </button>
+              <button
+                type="button"
+                onClick={() => save(true)}
+                disabled={saving}
+                className="w-full rs-btn rs-btn-ghost disabled:opacity-50"
+                style={{
+                  color: TEXT_MUTED,
+                  borderColor: 'rgba(170,189,224,0.3)',
+                }}
+              >
+                {saving ? 'Saving…' : "I'll do this later"}
+              </button>
+            </div>
+
+            <p
+              className="text-[11px] text-center leading-relaxed mt-5"
+              style={{ color: TEXT_MUTED }}
+            >
+              You can connect Stripe any time from your profile settings. Note:
+              you&apos;ll need an active Stripe account to accept your first
+              booking.
+            </p>
+          </section>
+        )}
+
         {error && (
           <p
             className="text-[12px] rounded-rs p-3 mt-4"
@@ -615,7 +695,11 @@ export default function OnboardingPage() {
             <div className="flex-1" />
           )}
 
-          {step < TOTAL_STEPS ? (
+          {step === 4 ? (
+            // Step 4 has its own action buttons inside the card —
+            // no right-side Next/Finish here. Back (left) still works.
+            <div className="flex-1" />
+          ) : (
             <button
               type="button"
               onClick={goNext}
@@ -623,15 +707,6 @@ export default function OnboardingPage() {
               className="flex-1 rs-btn disabled:opacity-50"
             >
               Next
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => save(true)}
-              disabled={saving}
-              className="flex-1 rs-btn disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Finish setup'}
             </button>
           )}
         </div>
