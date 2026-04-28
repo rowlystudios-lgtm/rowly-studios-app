@@ -81,6 +81,7 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true)
   const [savingDate, setSavingDate] = useState<string | null>(null)
   const [error, setError] = useState<string>('')
+  const [globallyUnavailable, setGloballyUnavailable] = useState(false)
 
   const monthStart = useMemo(
     () => new Date(viewDate.getFullYear(), viewDate.getMonth(), 1),
@@ -94,6 +95,24 @@ export default function CalendarPage() {
     const t = new Date()
     return new Date(t.getFullYear(), t.getMonth(), t.getDate())
   }, [])
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    supabase
+      .from('profiles')
+      .select('available')
+      .eq('id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        const row = data as { available: boolean | null } | null
+        setGloballyUnavailable(row?.available === false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [userId, supabase])
 
   useEffect(() => {
     if (!userId) return
@@ -237,9 +256,27 @@ export default function CalendarPage() {
     >
       <div className="max-w-md mx-auto px-5 pt-6 pb-10">
         <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Calendar</h1>
-        <p style={{ fontSize: 12, color: TEXT_MUTED, marginBottom: 18 }}>
-          Tap a day to mark yourself unavailable.
-        </p>
+        {globallyUnavailable ? (
+          <p
+            style={{
+              background: 'rgba(212,149,10,0.15)',
+              border: '1px solid rgba(212,149,10,0.35)',
+              borderRadius: 12,
+              padding: '12px 14px',
+              marginBottom: 18,
+              color: TEXT,
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>Availability paused</strong> — all dates blocked. Turn on
+            availability in your profile to accept bookings.
+          </p>
+        ) : (
+          <p style={{ fontSize: 12, color: TEXT_MUTED, marginBottom: 18 }}>
+            Tap a day to mark yourself unavailable.
+          </p>
+        )}
 
         <div
           style={{
@@ -303,13 +340,24 @@ export default function CalendarPage() {
             }
             const dateStr = ymd(cell.date)
             const state: DayState = statuses[dateStr] ?? 'available'
-            const style = STATE_STYLE[state]
             const isToday = isSameDay(cell.date, today)
             const inPast = cell.date < today && !isToday
             const saving = savingDate === dateStr
             const systemLocked = state === 'booked' || state === 'requested'
 
-            const title = systemLocked
+            // When availability is paused, every cell renders as muted
+            // and is non-interactive — the global flag overrides per-date
+            // state but doesn't mutate it (toggling back on restores it).
+            const effectiveState: DayState = globallyUnavailable
+              ? 'unavailable'
+              : state
+            const effectiveStyle = STATE_STYLE[effectiveState]
+            const effectiveDisabled =
+              loading || saving || systemLocked || globallyUnavailable
+
+            const title = globallyUnavailable
+              ? 'Availability paused — turn on availability in your profile'
+              : systemLocked
               ? state === 'booked'
                 ? 'Confirmed booking — this date is locked'
                 : 'Pending job offer — accept or decline this offer first'
@@ -323,33 +371,43 @@ export default function CalendarPage() {
                 type="button"
                 title={title}
                 onClick={() => toggleDay(cell.date!)}
-                disabled={loading || saving || systemLocked}
+                disabled={effectiveDisabled}
                 style={{
                   aspectRatio: '1 / 1',
                   borderRadius: 8,
                   border: 'none',
                   outline: isToday ? '2px solid #1A3C6B' : 'none',
                   outlineOffset: isToday ? -2 : 0,
-                  background: style.bg,
-                  color: style.color,
+                  background: effectiveStyle.bg,
+                  color: effectiveStyle.color,
                   fontSize: 13,
                   fontWeight: 600,
-                  cursor: systemLocked ? 'default' : saving ? 'wait' : 'pointer',
+                  cursor: globallyUnavailable
+                    ? 'not-allowed'
+                    : systemLocked
+                    ? 'default'
+                    : saving
+                    ? 'wait'
+                    : 'pointer',
                   opacity: inPast ? 0.4 : 1,
                   transition: 'background 120ms ease, opacity 120ms ease',
                   boxShadow:
-                    state === 'available' && style.borderColor
-                      ? `inset 0 0 0 1px ${style.borderColor}`
+                    effectiveState === 'available' && effectiveStyle.borderColor
+                      ? `inset 0 0 0 1px ${effectiveStyle.borderColor}`
                       : undefined,
                 }}
                 onMouseEnter={(e) => {
-                  if (state === 'available' && !saving) {
+                  if (
+                    !globallyUnavailable &&
+                    state === 'available' &&
+                    !saving
+                  ) {
                     ;(e.currentTarget as HTMLButtonElement).style.background =
                       AVAILABLE_HOVER_BG
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (state === 'available') {
+                  if (!globallyUnavailable && state === 'available') {
                     ;(e.currentTarget as HTMLButtonElement).style.background =
                       STATE_STYLE.available.bg
                   }
@@ -391,9 +449,11 @@ export default function CalendarPage() {
             <LegendItem label="On hold" swatchStyle={STATE_STYLE.requested} />
             <LegendItem label="Booked" swatchStyle={STATE_STYLE.booked} />
           </div>
-          <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.5 }}>
-            Tap any available day to mark unavailable. Tap again to clear.
-          </p>
+          {!globallyUnavailable && (
+            <p style={{ fontSize: 11, color: TEXT_MUTED, lineHeight: 1.5 }}>
+              Tap any available day to mark unavailable. Tap again to clear.
+            </p>
+          )}
           {Object.values(statuses).includes('booked') && (
             <p
               style={{

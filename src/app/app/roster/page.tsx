@@ -1215,6 +1215,8 @@ function TalentCard({
         border: `1px solid ${CARD_BORDER}`,
         borderRadius: 14,
         overflow: 'hidden',
+        opacity: talent.available ? 1 : 0.5,
+        transition: 'opacity 150ms ease',
       }}
     >
       <div
@@ -1256,6 +1258,25 @@ function TalentCard({
           {/* Rate moved below into the dedicated day-rate badge + custom
               rate input row, so this slot now carries no rate copy. */}
         </div>
+        {!talent.available && (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: 'rgba(170,189,224,0.15)',
+              color: TEXT_MUTED,
+              border: '1px solid rgba(170,189,224,0.25)',
+              whiteSpace: 'nowrap',
+              marginRight: 8,
+            }}
+          >
+            Unavailable
+          </span>
+        )}
         <span
           aria-hidden
           title={talent.available ? 'Available' : 'Unavailable'}
