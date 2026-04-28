@@ -375,12 +375,19 @@ export default function OnboardingPage() {
                   required
                 />
               </Field>
-              <Field label="Phone">
-                <div className="flex gap-2">
+              <div className="space-y-1">
+                <label
+                  className="block text-[11px] font-semibold mb-1.5"
+                  style={{ color: TEXT_MUTED }}
+                >
+                  Phone
+                </label>
+                <div className="flex gap-2 w-full">
                   <select
                     value={countryCode}
                     onChange={(e) => setCountryCode(e.target.value)}
-                    className="rs-input w-28 flex-shrink-0"
+                    className="rs-input flex-shrink-0"
+                    style={{ width: '100px' }}
                   >
                     <option value="+1">🇺🇸 +1</option>
                     <option value="+44">🇬🇧 +44</option>
@@ -398,11 +405,11 @@ export default function OnboardingPage() {
                     onChange={(e) =>
                       setPhoneNumber(e.target.value.replace(/\D/g, ''))
                     }
-                    className="rs-input flex-1"
                     autoComplete="tel-national"
+                    className="rs-input flex-1 min-w-0"
                   />
                 </div>
-              </Field>
+              </div>
               <Field label="City" required>
                 <select
                   value={city}
