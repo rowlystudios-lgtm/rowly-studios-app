@@ -39,6 +39,11 @@ const DEPARTMENT_OPTIONS: { value: Exclude<DeptValue, ''>; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
+const ALLOWED_DEPARTMENTS = [
+  'photography', 'video', 'styling', 'glam', 'art_direction',
+  'production', 'lighting', 'post_production', 'sound', 'other',
+] as const
+
 // Bio char limit — matches the spec.
 const BIO_MAX = 300
 const TOTAL_STEPS = 3
@@ -90,10 +95,13 @@ export default function OnboardingPage() {
     const firstNamePart = nameParts[0] ?? null
     const lastNamePart = nameParts.slice(1).join(' ') || null
 
-    // Department: the spec's `post_production` maps to the canonical
-    // `post` value used throughout the rest of the app and DB.
-    const dbDepartment =
-      department === 'post_production' ? 'post' : department || null
+    const dbDepartment = department || null
+
+    if (dbDepartment && !ALLOWED_DEPARTMENTS.includes(dbDepartment as any)) {
+      setError('Please go back and select a valid department.')
+      setSaving(false)
+      return
+    }
 
     const dayRateNum = dayRate.trim() ? parseFloat(dayRate) : null
     const rateFloorNum = rateFloor.trim() ? parseFloat(rateFloor) : null
@@ -133,7 +141,15 @@ export default function OnboardingPage() {
 
     if (profileUpdate.error) {
       setSaving(false)
-      setError(profileUpdate.error.message)
+      const msg0 = profileUpdate.error.message
+      console.error('Onboarding profile error:', msg0)
+      if (msg0.includes('department_check')) {
+        setError('Please go back and select your department.')
+      } else if (msg0.includes('day_rate') || msg0.includes('rate_floor')) {
+        setError('Please check your rates — minimum day rate is $300.')
+      } else {
+        setError('Something went wrong. Please try again or contact support.')
+      }
       return
     }
 
@@ -153,7 +169,15 @@ export default function OnboardingPage() {
 
     if (talentUpsert.error) {
       setSaving(false)
-      setError(talentUpsert.error.message)
+      const msg1 = talentUpsert.error.message
+      console.error('Onboarding talent error:', msg1)
+      if (msg1.includes('department_check')) {
+        setError('Please go back and select your department.')
+      } else if (msg1.includes('day_rate') || msg1.includes('rate_floor')) {
+        setError('Please check your rates — minimum day rate is $300.')
+      } else {
+        setError('Something went wrong. Please try again or contact support.')
+      }
       return
     }
 
