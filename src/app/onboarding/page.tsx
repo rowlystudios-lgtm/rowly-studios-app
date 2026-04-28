@@ -55,7 +55,8 @@ export default function OnboardingPage() {
   const [step, setStep] = useState<1 | 2 | 3>(1)
 
   const [fullName, setFullName] = useState('')
-  const [phone, setPhone] = useState('')
+  const [countryCode, setCountryCode] = useState<string>('+1')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [city, setCity] = useState('Los Angeles')
   const [department, setDepartment] = useState<DeptValue>('')
   const [primaryRole, setPrimaryRole] = useState('')
@@ -103,6 +104,20 @@ export default function OnboardingPage() {
       return
     }
 
+    const phoneDigits = phoneNumber.replace(/\D/g, '')
+    const isValidLength =
+      countryCode === '+1'
+        ? phoneDigits.length === 10
+        : phoneDigits.length >= 7 && phoneDigits.length <= 12
+
+    if (phoneNumber && !isValidLength) {
+      setError('Please enter a valid phone number for the selected country code.')
+      setSaving(false)
+      return
+    }
+
+    const fullPhone = phoneNumber ? `${countryCode}${phoneDigits}` : null
+
     const dayRateNum = dayRate.trim() ? parseFloat(dayRate) : null
     const rateFloorNum = rateFloor.trim() ? parseFloat(rateFloor) : null
 
@@ -130,7 +145,7 @@ export default function OnboardingPage() {
       full_name: trimmedFullName || null,
       first_name: firstNamePart,
       last_name: lastNamePart,
-      phone: phone.trim() || null,
+      phone: fullPhone,
       city: city.trim() || null,
     }
 
@@ -197,7 +212,7 @@ export default function OnboardingPage() {
       full_name: trimmedFullName || null,
       first_name: firstNamePart,
       last_name: lastNamePart,
-      phone: phone.trim() || null,
+      phone: fullPhone,
       city: city.trim() || null,
     })
 
@@ -314,14 +329,32 @@ export default function OnboardingPage() {
                 />
               </Field>
               <Field label="Phone">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="(310) 555-0100"
-                  className="rs-input"
-                  autoComplete="tel"
-                />
+                <div className="flex gap-2">
+                  <select
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className="rs-input w-28 flex-shrink-0"
+                  >
+                    <option value="+1">🇺🇸 +1</option>
+                    <option value="+44">🇬🇧 +44</option>
+                    <option value="+61">🇦🇺 +61</option>
+                    <option value="+33">🇫🇷 +33</option>
+                    <option value="+49">🇩🇪 +49</option>
+                    <option value="+52">🇲🇽 +52</option>
+                  </select>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="3105550100"
+                    value={phoneNumber}
+                    onChange={(e) =>
+                      setPhoneNumber(e.target.value.replace(/\D/g, ''))
+                    }
+                    className="rs-input flex-1"
+                    autoComplete="tel-national"
+                  />
+                </div>
               </Field>
               <Field label="City">
                 <input
