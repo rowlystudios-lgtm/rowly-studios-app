@@ -74,6 +74,7 @@ export default function OnboardingPage() {
   const [fullName, setFullName] = useState('')
   const [countryCode, setCountryCode] = useState<string>('+1')
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneError, setPhoneError] = useState('')
   const [city, setCity] = useState<string>('')
   const [department, setDepartment] = useState<DeptValue>('')
   const [primaryRole, setPrimaryRole] = useState('')
@@ -413,13 +414,38 @@ export default function OnboardingPage() {
                     pattern="[0-9]*"
                     placeholder="3105550100"
                     value={phoneNumber}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setPhoneNumber(e.target.value.replace(/\D/g, ''))
-                    }
+                      if (phoneError) setPhoneError('')
+                    }}
+                    onBlur={() => {
+                      if (!phoneNumber) {
+                        setPhoneError('')
+                        return
+                      }
+                      const digits = phoneNumber.replace(/\D/g, '')
+                      const valid =
+                        countryCode === '+1'
+                          ? digits.length === 10
+                          : digits.length >= 7 && digits.length <= 12
+                      setPhoneError(
+                        valid
+                          ? ''
+                          : 'Phone number format is incorrect for the selected country code.'
+                      )
+                    }}
                     autoComplete="tel-national"
                     className="rs-input flex-1 min-w-0"
                   />
                 </div>
+                {phoneError && (
+                  <p
+                    className="text-[11px] mt-1"
+                    style={{ color: '#f87171' }}
+                  >
+                    {phoneError}
+                  </p>
+                )}
               </div>
               <Field label="City" required>
                 <select
