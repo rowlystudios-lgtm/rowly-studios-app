@@ -168,6 +168,11 @@ export default function OnboardingPage() {
     }
     setRateError('')
 
+    const trimmedShowreel = showreelUrl.trim()
+    const fullShowreelUrl = trimmedShowreel
+      ? `https://${trimmedShowreel.replace(/^https?:\/\//i, '')}`
+      : null
+
     const profilePatch: Record<string, unknown> = {
       full_name: trimmedFullName || null,
       first_name: firstNamePart,
@@ -203,7 +208,7 @@ export default function OnboardingPage() {
         bio: bio.trim() || null,
         day_rate_cents: dayRateCents,
         rate_floor_cents: rateFloorCents,
-        showreel_url: showreelUrl.trim() || null,
+        showreel_url: fullShowreelUrl,
         equipment: equipment.trim() || null,
       },
       { onConflict: 'id' }
@@ -548,14 +553,25 @@ export default function OnboardingPage() {
                 </p>
               )}
               <Field label="Showreel URL">
-                <input
-                  type="url"
-                  value={showreelUrl}
-                  onChange={(e) => setShowreelUrl(e.target.value)}
-                  placeholder="https://vimeo.com/your-reel"
-                  className="rs-input"
-                  autoComplete="url"
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm select-none pointer-events-none">
+                    https://
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="vimeo.com/123456789"
+                    value={showreelUrl}
+                    onChange={(e) =>
+                      setShowreelUrl(e.target.value.replace(/^https?:\/\//i, ''))
+                    }
+                    className="rs-input w-full pl-[72px]"
+                  />
+                </div>
+                <p className="text-xs text-white/50 leading-relaxed mt-2">
+                  For best results, upload a{' '}
+                  <strong className="text-white/70">4×5 vertical edit</strong> of
+                  your reel — this format displays optimally across the platform.
+                </p>
               </Field>
               <Field label="Equipment">
                 <textarea
