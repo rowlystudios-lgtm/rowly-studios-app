@@ -105,7 +105,14 @@ export default function OnboardingPage() {
   }, [dayRate, rateFloorCents])
 
   const firstName = fullName.trim().split(/\s+/)[0] ?? ''
-  const canNextStep1 = fullName.trim().length > 0 && city !== ''
+  const phoneDigits = phoneNumber.replace(/\D/g, '')
+  const phoneValid =
+    !phoneNumber ||
+    (countryCode === '+1'
+      ? phoneDigits.length === 10
+      : phoneDigits.length >= 7 && phoneDigits.length <= 12)
+  const canNextStep1 =
+    fullName.trim().length > 0 && city !== '' && phoneValid
   const canNextStep2 = department !== ''
 
   async function save(
@@ -131,18 +138,6 @@ export default function OnboardingPage() {
 
     if (!city || !CITIES.includes(city as any)) {
       setError('Please select your city.')
-      setSaving(false)
-      return
-    }
-
-    const phoneDigits = phoneNumber.replace(/\D/g, '')
-    const isValidLength =
-      countryCode === '+1'
-        ? phoneDigits.length === 10
-        : phoneDigits.length >= 7 && phoneDigits.length <= 12
-
-    if (phoneNumber && !isValidLength) {
-      setError('Please enter a valid phone number for the selected country code.')
       setSaving(false)
       return
     }
