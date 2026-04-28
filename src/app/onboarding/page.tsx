@@ -27,22 +27,21 @@ type DeptValue =
   | 'sound'
   | 'other'
 
-const DEPARTMENT_OPTIONS: { value: Exclude<DeptValue, ''>; label: string }[] = [
-  { value: 'photography', label: 'Photography' },
-  { value: 'video', label: 'Video' },
-  { value: 'styling', label: 'Styling' },
-  { value: 'glam', label: 'Glam (Hair & Makeup)' },
-  { value: 'art_direction', label: 'Art Direction' },
-  { value: 'production', label: 'Production' },
-  { value: 'lighting', label: 'Lighting' },
-  { value: 'post_production', label: 'Post Production' },
-  { value: 'sound', label: 'Sound' },
-  { value: 'other', label: 'Other' },
-]
-
 const ALLOWED_DEPARTMENTS = [
   'photography', 'video', 'styling', 'glam', 'art_direction',
   'production', 'lighting', 'post_production', 'sound', 'other',
+] as const
+
+const PRODUCTION_DEPARTMENTS = [
+  { value: 'photography', label: 'Photography' },
+  { value: 'video', label: 'Video' },
+  { value: 'styling', label: 'Styling' },
+  { value: 'glam', label: 'Glam' },
+  { value: 'art_direction', label: 'Art Direction' },
+  { value: 'production', label: 'Production' },
+  { value: 'lighting', label: 'Lighting' },
+  { value: 'sound', label: 'Sound' },
+  { value: 'other', label: 'Other' },
 ] as const
 
 const POST_PRODUCTION_ROLES = [
@@ -77,6 +76,9 @@ export default function OnboardingPage() {
   const [phoneError, setPhoneError] = useState('')
   const [city, setCity] = useState<string>('')
   const [department, setDepartment] = useState<DeptValue>('')
+  const [deptCategory, setDeptCategory] = useState<
+    'production' | 'post_production' | ''
+  >('')
   const [primaryRole, setPrimaryRole] = useState('')
   const [bio, setBio] = useState('')
   const [dayRate, setDayRate] = useState('')
@@ -495,62 +497,80 @@ export default function OnboardingPage() {
                   Department
                   <span style={{ color: '#fca5a5', marginLeft: 4 }}>*</span>
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {DEPARTMENT_OPTIONS.map((opt) => (
+
+                {/* Top-level toggle */}
+                <div
+                  className="flex rounded-full p-1 gap-1"
+                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                >
+                  {[
+                    { value: 'production', label: 'Production' },
+                    { value: 'post_production', label: 'Post Production' },
+                  ].map((cat) => (
                     <button
-                      key={opt.value}
+                      key={cat.value}
                       type="button"
                       onClick={() => {
-                        setDepartment(opt.value)
-                        if (opt.value !== 'post_production') setPrimaryRole('')
+                        setDeptCategory(
+                          cat.value as 'production' | 'post_production'
+                        )
+                        setDepartment('')
+                        setPrimaryRole('')
                       }}
                       className={[
-                        'px-3 py-1.5 rounded-full text-[13px] font-medium transition-colors',
-                        department === opt.value
+                        'flex-1 py-2 rounded-full text-[13px] font-medium transition-colors',
+                        deptCategory === cat.value
                           ? 'bg-[#2a72e8] text-white'
-                          : 'bg-white/10 text-white/70 hover:bg-white/20',
+                          : 'text-white/60 hover:text-white/80',
                       ].join(' ')}
                     >
-                      {opt.label}
+                      {cat.label}
                     </button>
                   ))}
                 </div>
-              </div>
-              {department === 'post_production' && (
-                <div className="space-y-1">
-                  <label
-                    className="block text-[11px] font-semibold mb-1.5"
-                    style={{ color: TEXT_MUTED }}
-                  >
-                    Post Production Role
-                    <span style={{ color: '#fca5a5', marginLeft: 4 }}>*</span>
-                  </label>
-                  <select
-                    value={primaryRole}
-                    onChange={(e) => setPrimaryRole(e.target.value)}
-                    className="rs-input w-full"
-                    required
-                  >
-                    <option value="">Select your role</option>
-                    {POST_PRODUCTION_ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
+
+                {/* Sub-departments for Production */}
+                {deptCategory === 'production' && (
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {PRODUCTION_DEPARTMENTS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setDepartment(opt.value)}
+                        className={[
+                          'px-3 py-1.5 rounded-full text-[13px] font-medium transition-colors',
+                          department === opt.value
+                            ? 'bg-[#2a72e8] text-white'
+                            : 'bg-white/10 text-white/70 hover:bg-white/20',
+                        ].join(' ')}
+                      >
+                        {opt.label}
+                      </button>
                     ))}
-                  </select>
-                </div>
-              )}
-              {department !== 'post_production' && (
-                <Field label="Primary role">
-                  <input
-                    type="text"
-                    value={primaryRole}
-                    onChange={(e) => setPrimaryRole(e.target.value)}
-                    placeholder="Director of Photography"
-                    className="rs-input"
-                  />
-                </Field>
-              )}
+                  </div>
+                )}
+
+                {/* Post Production role dropdown */}
+                {deptCategory === 'post_production' && (
+                  <div className="pt-2">
+                    <select
+                      value={primaryRole}
+                      onChange={(e) => {
+                        setPrimaryRole(e.target.value)
+                        setDepartment('post_production')
+                      }}
+                      className="rs-input w-full"
+                    >
+                      <option value="">Select your role</option>
+                      {POST_PRODUCTION_ROLES.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
               <Field label="Bio">
                 <textarea
                   value={bio}
