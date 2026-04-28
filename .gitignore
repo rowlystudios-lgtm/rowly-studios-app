@@ -14,3 +14,27 @@ tsconfig.tsbuildinfo
 
 # Local-only one-off scripts (do not commit)
 gen-admin-link.mjs
+
+# Prior-fix bundles (out-of-tree experiments — stub-era artifacts)
+rs-app-stripe/
+rs-app-stripe 2/
+rs-finance-killpath/
+rs-fix-ambiguous-joins/
+rs-fix-talent-join/
+rs-phase-c-gmail/
+rs-phase-c-gmail.zip
+rs-phase-d-jobs-nav/
+rs-phase-d-jobs-nav-v2/
+rs-step-3-inline-preview/
+rs-step-3-inline-preview.zip
+rs-stripe-branding/
+rs-stripe-c1/
+rs-stripe-checkout/
+rs-stripe-checkout-fix/
+rs-stripe-client-path-fix/
+rs-stripe-gate/
+rs-stripe-lazy-fix/
+rs-stripe-phase-d-slice1/
+rs-stripe-profile-path-fix/
+rs-stripe-reinstate-ui/
+rs-stripe-sync-default/
