@@ -12,6 +12,7 @@ import {
   TEXT_MUTED,
   LINK_COLOR,
 } from '@/components/PageShell'
+import RateFloorSlider from '@/components/ui/RateFloorSlider'
 
 type DeptValue =
   | ''
@@ -70,7 +71,7 @@ export default function OnboardingPage() {
   const [primaryRole, setPrimaryRole] = useState('')
   const [bio, setBio] = useState('')
   const [dayRate, setDayRate] = useState('')
-  const [rateFloor, setRateFloor] = useState('')
+  const [rateFloorCents, setRateFloorCents] = useState<number>(45000)
   const [showreelUrl, setShowreelUrl] = useState('')
   const [equipment, setEquipment] = useState('')
 
@@ -89,6 +90,19 @@ export default function OnboardingPage() {
       router.replace('/app/jobs')
     }
   }, [loading, user, profile, router])
+
+  // Auto-clamp the rate floor down when the user enters a day rate
+  // lower than the current floor — prevents the cross-field error and
+  // keeps the slider's effective ceiling tied to day rate.
+  useEffect(() => {
+    if (!dayRate.trim()) return
+    const dayNum = parseFloat(dayRate)
+    if (!Number.isFinite(dayNum)) return
+    const dayCents = Math.round(dayNum * 100)
+    if (dayCents >= 30000 && rateFloorCents > dayCents) {
+      setRateFloorCents(dayCents)
+    }
+  }, [dayRate, rateFloorCents])
 
   const firstName = fullName.trim().split(/\s+/)[0] ?? ''
   const canNextStep1 = fullName.trim().length > 0 && city !== ''
@@ -133,27 +147,26 @@ export default function OnboardingPage() {
     const fullPhone = phoneNumber ? `${countryCode}${phoneDigits}` : null
 
     const dayRateNum = dayRate.trim() ? parseFloat(dayRate) : null
-    const rateFloorNum = rateFloor.trim() ? parseFloat(rateFloor) : null
 
     if (dayRateNum !== null && (Number.isNaN(dayRateNum) || dayRateNum < 300)) {
       setRateError('Day rate must be at least $300.')
       setSaving(false)
       return
     }
-    if (rateFloorNum !== null && (Number.isNaN(rateFloorNum) || rateFloorNum < 300)) {
-      setRateError('Rate floor must be at least $300.')
+
+    const dayRateCents = dayRateNum !== null ? Math.round(dayRateNum * 100) : null
+
+    if (rateFloorCents < 30000 || rateFloorCents > 150000) {
+      setRateError('Rate floor must be between $300 and $1,500.')
       setSaving(false)
       return
     }
-    if (dayRateNum !== null && rateFloorNum !== null && rateFloorNum > dayRateNum) {
+    if (dayRateCents !== null && rateFloorCents > dayRateCents) {
       setRateError('Rate floor cannot be higher than your day rate.')
       setSaving(false)
       return
     }
     setRateError('')
-
-    const dayRateCents = dayRateNum !== null ? Math.round(dayRateNum * 100) : null
-    const rateFloorCents = rateFloorNum !== null ? Math.round(rateFloorNum * 100) : null
 
     const profilePatch: Record<string, unknown> = {
       full_name: trimmedFullName || null,
@@ -514,52 +527,13 @@ export default function OnboardingPage() {
                   />
                 </div>
               </Field>
-              <Field label="Rate floor">
-                <div style={{ position: 'relative' }}>
-                  <span
-                    aria-hidden
-                    style={{
-                      position: 'absolute',
-                      left: 12,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: 'rgba(73,98,117,0.6)',
-                      fontSize: 14,
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    $
-                  </span>
-                  <input
-                    type="number"
-                    min={300}
-                    step={25}
-                    inputMode="numeric"
-                    value={rateFloor}
-                    onChange={(e) => {
-                      setRateFloor(e.target.value)
-                      if (rateError) setRateError('')
-                    }}
-                    onBlur={(e) => {
-                      const v = e.target.value.trim()
-                      if (!v) return
-                      const n = parseFloat(v)
-                      if (Number.isFinite(n) && n < 300) setRateFloor('300')
-                    }}
-                    placeholder="300"
-                    className="rs-input"
-                    style={{ paddingLeft: 24 }}
-                  />
-                </div>
-                <p className="text-[11px] mt-1" style={{ color: 'rgba(73,98,117,0.7)' }}>
-                  The minimum rate you&apos;ll accept for a day&apos;s work. We
-                  won&apos;t offer you jobs below this. You can change it
-                  anytime.
-                </p>
-              </Field>
-              <p className="text-[10px]" style={{ color: TEXT_MUTED }}>
-                Minimum day rate $300 · Minimum rate floor $300
-              </p>
+              <RateFloorSlider
+                value={rateFloorCents}
+                onChange={(cents) => {
+                  setRateFloorCents(cents)
+                  if (rateError) setRateError('')
+                }}
+              />
               {rateError && (
                 <p
                   role="alert"
