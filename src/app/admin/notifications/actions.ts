@@ -111,6 +111,7 @@ export async function clearNotification(formData: FormData) {
     .eq('id', id)
     .is('cleared_at', null)
   revalidatePath('/admin/notifications')
+  revalidatePath('/admin')
 }
 
 /** Clear every clearable notification in one shot. */
