@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { Avatar } from '@/components/Avatar'
 import { PageShell, TEXT_MUTED, TEXT_PRIMARY } from '@/components/PageShell'
@@ -61,15 +61,13 @@ function getVimeoId(url: string): string | null {
 }
 
 export default function RosterDetailPage() {
-  const router = useRouter()
   const params = useParams<{ id: string }>()
-  const { supabase, user } = useAuth()
+  const { supabase } = useAuth()
   const id = params?.id
 
   const [row, setRow] = useState<Row | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [restricted, setRestricted] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -99,25 +97,6 @@ export default function RosterDetailPage() {
       cancelled = true
     }
   }, [id, supabase])
-
-  useEffect(() => {
-    const uid = user?.id
-    if (!uid) return
-    let cancelled = false
-    supabase
-      .from('client_profiles')
-      .select('account_restricted')
-      .eq('id', uid)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled) return
-        const row = data as { account_restricted: boolean | null } | null
-        setRestricted(Boolean(row?.account_restricted))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [user?.id, supabase])
 
   if (loading) {
     return (
@@ -269,32 +248,6 @@ export default function RosterDetailPage() {
         </a>
       )}
 
-      <button
-        type="button"
-        onClick={() =>
-          restricted ? null : router.push(`/app/post-job?talent=${row.id}`)
-        }
-        disabled={restricted}
-        title={
-          restricted
-            ? 'Account restricted — settle outstanding invoices to re-enable'
-            : undefined
-        }
-        style={{
-          width: '100%',
-          marginTop: 16,
-          padding: '14px 0',
-          borderRadius: 12,
-          background: restricted ? 'rgba(255,255,255,0.25)' : '#fff',
-          color: restricted ? 'rgba(255,255,255,0.55)' : '#1A3C6B',
-          border: 'none',
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: restricted ? 'not-allowed' : 'pointer',
-        }}
-      >
-        {restricted ? 'Request disabled — account restricted' : 'Request for a job →'}
-      </button>
     </PageShell>
   )
 }
