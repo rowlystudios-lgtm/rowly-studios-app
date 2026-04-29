@@ -110,6 +110,17 @@ export async function acceptBooking(
     return { ok: false, reason: 'invalid_state', message: updErr.message };
   }
 
+  // Notify talent — best-effort; failure doesn't block the gate.
+  await supabase.from('notifications').insert({
+    user_id: params.talentId,
+    type: 'stripe_setup_required',
+    title: '🎉 A client has requested you!',
+    body: 'Great news — complete your Stripe payment setup to officially accept this job and get paid.',
+    action_url: '/app/profile/payment-settings',
+    priority: 'high',
+    clearable: true,
+  });
+
   return {
     ok: true,
     status: 'pending_stripe',
