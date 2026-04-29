@@ -43,6 +43,7 @@ export default function ClientOnboardingPage() {
   const [step, setStep] = useState<1 | 2>(1)
 
   const [companyName, setCompanyName] = useState('')
+  const [companyPosition, setCompanyPosition] = useState('')
   const [industry, setIndustry] = useState<IndustryValue>('')
   const [website, setWebsite] = useState('')
   const [billingContact, setBillingContact] = useState('')
@@ -116,7 +117,11 @@ export default function ClientOnboardingPage() {
 
     if (profileUpdate.error) {
       setSaving(false)
-      setError(profileUpdate.error.message)
+      console.error(
+        'Client onboarding profile error:',
+        profileUpdate.error.message
+      )
+      setError('Something went wrong saving your details. Please try again.')
       return
     }
 
@@ -142,12 +147,18 @@ export default function ClientOnboardingPage() {
       }
     }
 
+    const trimmedWebsite = website.trim()
+    const fullWebsite = trimmedWebsite
+      ? `https://${trimmedWebsite.replace(/^https?:\/\//i, '')}`
+      : null
+
     // 3. Upsert client_profiles with company + billing + (optional) logo.
     const clientRow: Record<string, unknown> = {
       id: user.id,
       company_name: trimmedCompany,
+      company_position: companyPosition.trim() || null,
       industry: industry || null,
-      website: website.trim() || null,
+      website: fullWebsite,
       billing_email: billingEmail.trim() || null,
     }
     if (logoUrl) {
@@ -160,7 +171,13 @@ export default function ClientOnboardingPage() {
 
     if (clientUpsert.error) {
       setSaving(false)
-      setError(clientUpsert.error.message)
+      console.error(
+        'Client onboarding client error:',
+        clientUpsert.error.message
+      )
+      setError(
+        'Something went wrong saving your company details. Please try again.'
+      )
       return
     }
 
@@ -277,6 +294,16 @@ export default function ClientOnboardingPage() {
                   required
                 />
               </Field>
+              <Field label="Company position">
+                <input
+                  type="text"
+                  value={companyPosition}
+                  onChange={(e) => setCompanyPosition(e.target.value)}
+                  placeholder="Creative Director"
+                  className="rs-input"
+                  autoComplete="organization-title"
+                />
+              </Field>
               <Field label="Industry">
                 <select
                   value={industry}
@@ -292,14 +319,20 @@ export default function ClientOnboardingPage() {
                 </select>
               </Field>
               <Field label="Company website">
-                <input
-                  type="url"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://"
-                  className="rs-input"
-                  autoComplete="url"
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm select-none pointer-events-none">
+                    https://
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="yourcompany.com"
+                    value={website}
+                    onChange={(e) =>
+                      setWebsite(e.target.value.replace(/^https?:\/\//i, ''))
+                    }
+                    className="rs-input w-full pl-[72px]"
+                  />
+                </div>
               </Field>
             </div>
           </section>
