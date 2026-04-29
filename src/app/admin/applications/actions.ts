@@ -11,11 +11,12 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.rowlystudios.com
  * Non-blocking — silent failure is tolerable (user sees it either way).
  */
 export async function saveApplicationNotes(formData: FormData) {
-  const { supabase } = await requireAdmin()
+  await requireAdmin()
   const id = formData.get('id') as string
   const notes = (formData.get('notes') as string) ?? ''
   if (!id) return
-  await supabase
+  const service = createServiceClient()
+  await service
     .from('talent_applications')
     .update({ admin_notes: notes })
     .eq('id', id)

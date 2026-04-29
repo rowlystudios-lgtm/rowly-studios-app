@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   acceptApplication,
-  rejectApplication,
   saveApplicationNotes,
 } from './actions'
 
@@ -62,6 +62,7 @@ export function ApplicationCard({ app, reviewerName }: Props) {
   > | null>(null)
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
 
   const isTalent = app.type === 'talent'
   const typeColor = isTalent ? '#0FA3A3' : '#D48A00'
@@ -89,26 +90,17 @@ export function ApplicationCard({ app, reviewerName }: Props) {
     setSaveTimer(t)
   }
 
-  function handleAccept() {
-    if (!confirm(`Accept ${app.first_name ?? 'this applicant'}? This will invite them via email.`))
-      return
+  function handleSendInvite() {
     setError(null)
     const fd = new FormData()
     fd.set('id', app.id)
     startTransition(async () => {
       const res = await acceptApplication(fd)
-      if (!res?.ok) setError(res?.error ?? 'Failed')
-    })
-  }
-
-  function handleReject() {
-    if (!confirm(`Reject ${app.first_name ?? 'this applicant'}?`)) return
-    setError(null)
-    const fd = new FormData()
-    fd.set('id', app.id)
-    startTransition(async () => {
-      const res = await rejectApplication(fd)
-      if (!res?.ok) setError(res?.error ?? 'Failed')
+      if (!res?.ok) {
+        setError(res?.error ?? 'Failed')
+        return
+      }
+      router.refresh()
     })
   }
 
@@ -352,7 +344,7 @@ export function ApplicationCard({ app, reviewerName }: Props) {
           }}
         >
           <button
-            onClick={handleAccept}
+            onClick={handleSendInvite}
             disabled={pending}
             style={{
               flex: '1 1 auto',
@@ -370,28 +362,7 @@ export function ApplicationCard({ app, reviewerName }: Props) {
               opacity: pending ? 0.6 : 1,
             }}
           >
-            {pending ? 'Processing…' : 'Accept'}
-          </button>
-          <button
-            onClick={handleReject}
-            disabled={pending}
-            style={{
-              flex: '1 1 auto',
-              minWidth: 140,
-              padding: '10px 16px',
-              background: 'transparent',
-              border: '1px solid rgba(226,59,59,0.55)',
-              borderRadius: 6,
-              color: '#FF7A7A',
-              fontSize: 13,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              cursor: pending ? 'default' : 'pointer',
-              opacity: pending ? 0.6 : 1,
-            }}
-          >
-            Reject
+            {pending ? 'Processing…' : 'Send Invite'}
           </button>
         </div>
       ) : (
