@@ -69,13 +69,16 @@ export function ApplicationCard({ app, reviewerName }: Props) {
   const typeLabel = isTalent ? 'TALENT' : 'CLIENT'
 
   const status = app.status
-  const isActioned = status === 'approved' || status === 'rejected'
+  const isActioned =
+    status === 'approved' || status === 'rejected' || status === 'dismissed'
   const statusColor =
     status === 'approved'
       ? '#2D7A3A'
       : status === 'rejected'
         ? '#9A3333'
-        : '#C98A1A'
+        : status === 'dismissed'
+          ? '#6B7280'
+          : '#C98A1A'
   const statusLabel = status.toUpperCase()
 
   function onNotesChange(v: string) {

@@ -139,3 +139,31 @@ export async function rejectApplication(formData: FormData) {
   revalidatePath('/admin/applications')
   return { ok: true }
 }
+
+/**
+ * Dismiss flow — admin marks a pending application as dismissed
+ * straight from the dashboard widget without going through the
+ * applications page. Same shape as reject but uses status='dismissed'
+ * so the application drops out of pending lists without being a
+ * full rejection (admin can still find it under the Dismissed tab).
+ */
+export async function dismissApplication(formData: FormData) {
+  const { profile } = await requireAdmin()
+  const id = formData.get('id') as string
+  if (!id) return { ok: false, error: 'missing id' }
+
+  const service = createServiceClient()
+  const { error } = await service
+    .from('talent_applications')
+    .update({
+      status: 'dismissed',
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/admin/applications')
+  revalidatePath('/admin')
+  return { ok: true }
+}

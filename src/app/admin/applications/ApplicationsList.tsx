@@ -10,6 +10,7 @@ type Filter =
   | 'clients'
   | 'approved'
   | 'rejected'
+  | 'dismissed'
 
 const TABS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -18,6 +19,7 @@ const TABS: { key: Filter; label: string }[] = [
   { key: 'clients', label: 'Clients' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
+  { key: 'dismissed', label: 'Dismissed' },
 ]
 
 type Props = {
@@ -36,6 +38,8 @@ export function ApplicationsList({ applications, reviewerMap }: Props) {
       return applications.filter((a) => a.status === 'approved')
     if (filter === 'rejected')
       return applications.filter((a) => a.status === 'rejected')
+    if (filter === 'dismissed')
+      return applications.filter((a) => a.status === 'dismissed')
     if (filter === 'talent')
       return applications.filter((a) => a.type === 'talent')
     if (filter === 'clients')

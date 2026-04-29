@@ -3,6 +3,8 @@ import type { Metadata } from 'next'
 import { requireAdmin, centsToUsd } from '@/lib/admin-auth'
 import { DashboardRefreshButton } from '@/components/DashboardRefreshButton'
 import { ActivityFeedClient } from '@/components/ActivityFeedClient'
+import { ApplicationsWidgetClient } from '@/components/ApplicationsWidgetClient'
+import type { PendingApp } from '@/components/ApplicationsWidgetClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -137,6 +139,8 @@ export default async function AdminDashboardPage() {
     upcomingRes,
     // Activity feed — last 15 notifications from past 48hrs
     notificationsRes,
+    // Pending applications widget — up to 5 with details
+    pendingAppsDetailedRes,
   ] = await Promise.all([
     supabase
       .from('jobs')
@@ -185,6 +189,12 @@ export default async function AdminDashboardPage() {
       .is('cleared_at', null)
       .order('created_at', { ascending: false })
       .limit(15),
+    supabase
+      .from('talent_applications')
+      .select('id, first_name, last_name, email, department, type, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(5),
   ])
 
   const activeJobs = activeJobsRes.count ?? 0
@@ -200,6 +210,7 @@ export default async function AdminDashboardPage() {
 
   const upcoming = (upcomingRes.data ?? []) as unknown as UpcomingRow[]
   const notifications = (notificationsRes.data ?? []) as NotificationRow[]
+  const pendingAppsDetailed = (pendingAppsDetailedRes.data ?? []) as PendingApp[]
 
   // ─── Booking + invoice status per upcoming job ───
   const upcomingIds = upcoming.map((j) => j.id)
@@ -240,13 +251,9 @@ export default async function AdminDashboardPage() {
   }
 
   // ─── Action chips — only rendered when count > 0 ───
+  // Note: 'Pending applications' lives in <ApplicationsWidgetClient />
+  // below the action strip — not duplicated here as a chip.
   const actionChips: { label: string; count: number; href: string }[] = []
-  if (pendingApps > 0)
-    actionChips.push({
-      label: 'Pending applications',
-      count: pendingApps,
-      href: '/admin/applications',
-    })
   if (offersAwaiting > 0)
     actionChips.push({
       label: 'Offers awaiting response',
@@ -327,6 +334,9 @@ export default async function AdminDashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Pending applications widget — only renders when there are any */}
+      <ApplicationsWidgetClient applications={pendingAppsDetailed} />
 
       {/* Activity Feed — last 15 notifications from past 48hrs */}
       <section className="mt-6">
