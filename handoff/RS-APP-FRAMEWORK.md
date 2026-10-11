@@ -21,7 +21,7 @@ Phases 1–9 shipped (Apr–Jul 2026). Full booking → invoice → payment path
 ## 3 · Open decisions (Rowly)
 
 1. **Rate floor — resolved 11 Oct:** $300/day. Locked at DB level (`talent_rate_floor_min` on `rate_floor_cents`, matching the existing `talent_day_rate_min`) and sliders unified to $300–$1,500 / $25 steps.
-2. **Gmail drafts:** app unverified, `gmail.compose` is Restricted (test-user workaround, tokens can lapse). Pursue Google verification, or send invoices via Resend with a copy to rowlystudios@gmail.com.
+2. **Email — resolved 11 Oct:** everything moves to Amazon. SES sends the app's email (own verified domain + `rs-app` configuration set, separate from Yummy's; free tier is per AWS account); WorkMail hosts hello@rowlystudios.com (1 user). Resend stays until SES is verified and `src/lib/email.ts` is switched. Gmail drafts become a nice-to-have, never load-bearing.
 3. **Safeguard runtime — resolved 11 Oct:** the referenced guide maps to Claude Managed Agents; adopted as the runtime for the §5 pipelines.
 
 ## 4 · Pre-mortem (ranked) and counters
@@ -100,7 +100,8 @@ Tripwire: if W5–6 produce no completed bookings even from own productions, sto
 
 1. Rotate ALL Stripe keys (secret exposed in an April chat) → live mode: live keys in Vercel, live Connect onboarding, subscribe `checkout.session.completed` webhook.
 2. Auto-invoice generation on job completion (planned Step 4, unbuilt).
-3. Verify rowlystudios.com in Resend; finish hello@ forwarding; move load-bearing email off unverified Gmail.
-4. Error monitoring + weekly money-path smoke test.
-5. Align rate floor to the decided value.
-6. Legal pack drafted and surfaced in-product: booking terms, cancellation tiers, talent agreement (FROST review).
+3. Email on Amazon: SES domain + `rs-app` configuration set, WorkMail hello@, DNS at GoDaddy; switch the sender lib; retire the unverified Gmail path from anything load-bearing.
+4. Error monitoring + weekly money-path smoke test. ✅ shipped 11 Oct (`/api/cron/daily-ops`).
+5. Align rate floor to the decided value. ✅ $300, shipped 11 Oct.
+6. Legal pack drafted and surfaced in-product: booking terms, cancellation tiers, talent agreement, privacy policy (FROST review) — before real client money.
+7. App Store readiness (after TestFlight): in-app account deletion (Guideline 5.1.1), native touches so the wrapper clears Guideline 4.2 (push, native share for the promo kit, biometric unlock), privacy + support URLs. Clients and talent use the PWA today — TestFlight is Rowly's own iOS view.

@@ -67,15 +67,60 @@ SECURITY (found in this round's audit, fixed):
   - /admin is blocked inside the iOS wrapper (RSAppiOS user agent) — the
     admin overview is website-only, per the operating rule.
 ADDED — ios-wrapper/: Expo WebView app over app.rowlystudios.com
-  (bundle com.rowlystudios.rsapp, Expo owner rowlyinla, Apple team
-  QQ2URK7777, ITSAppUsesNonExemptEncryption=false). Built + submitted to
-  TestFlight via the secure terminal block.
+  (bundle com.rowlystudios.rsapp, slug rs-app, Expo owner rowlyinla, Apple
+  team QQ2URK7777, ITSAppUsesNonExemptEncryption=false). NOT YET BUILT —
+  see corrections below.
 
-REMAINING — Rowly's secure terminal block (keys never in chat):
-  #1 Stripe: roll the exposed test secret key now; subscribe the
-     checkout.session.completed webhook; live-mode flip when ready
-     (note: flipping live resets Connect onboarding + saved payment
-     methods to live mode — redo those before a live test booking).
-  #3 Resend: verify rowlystudios.com sending domain; finish hello@
-     forwarding in GoDaddy.
-  EAS: eas build --platform ios --auto-submit from ios-wrapper/.
+SESSION ERRORS & CORRECTIONS (11 Oct, logged so they aren't repeated):
+  - First terminal block assumed the repo at ~/Desktop/rowly-studios-app;
+    that path did not exist on the Mac. Fixed: the block now locates the
+    repo anywhere under ~ or clones it fresh to ~/Desktop.
+  - The first EAS run executed inside the LUMADOODLE folder and resolved
+    @rowlyinla/BABY-LIGHT (com.rowlystudios.lumadoodle). No RS App build
+    was produced; the Lumadoodle profile it generated is harmless. Fixed:
+    /tmp/rs-testflight.sh hard-guards on slug rs-app + bundle
+    com.rowlystudios.rsapp and refuses to build anything else.
+  - Because Part 1 failed, Part 2 never ran: the exposed Stripe test key
+    is STILL NOT ROTATED and checkout.session.completed is STILL NOT
+    SUBSCRIBED. Must run before any client-facing invoice.
+  - Apple 2FA code vanished mid-prompt: use Settings → Sign-In & Security
+    → Get Verification Code, or choose sms at the validation prompt.
+  - Chrome extension permission for console.aws.amazon.com not yet granted,
+    so SES / WorkMail / GoDaddy DNS were not touched.
+
+EMAIL DECISION (11 Oct): all email moves to Amazon — SES for the app's
+  sending (own verified domain rowlystudios.com + own configuration set
+  "rs-app", separate from Yummy's; free tier is per AWS account, not per
+  app) and WorkMail for the hello@rowlystudios.com inbox (1 user, ~$4/mo,
+  aliases free). Resend stays live until SES is verified + the sender lib
+  is switched (small commit: src/lib/email.ts → SES).
+
+APP STORE READINESS (beyond TestFlight — add before public release):
+  - Guideline 5.1.1(v): in-app "Delete account" for self-serve accounts —
+    not built yet. Required.
+  - Guideline 4.2 (minimum functionality): a pure WebView wrapper risks
+    rejection. Mitigate with native touches that Phase B wants anyway —
+    push notifications (APNs), native share sheet for the promo kit,
+    biometric unlock, deep links.
+  - Privacy policy URL + support URL + App Privacy answers — part of the
+    legal pack (FROST).
+  - Payments for physical crew services via Stripe are allowed outside
+    IAP (3.1.3); no third-party social login, so Sign in with Apple is
+    not required.
+  - TestFlight: internal testers immediate; external testers (clients)
+    need Beta App Review on the first build (typically 1–2 days).
+  - Clients and talent do NOT need TestFlight at all — the PWA at
+    app.rowlystudios.com works on their phones today. TestFlight is for
+    Rowly's own iOS view.
+
+REMAINING — Rowly's secure terminal blocks (keys never in chat):
+  TestFlight: bash /tmp/rs-testflight.sh (guarded; say YES to creating
+     project @rowlyinla/rs-app).
+  #1 Stripe: roll the exposed test secret key; subscribe the
+     checkout.session.completed webhook (Part 2 of the Phase A block);
+     live-mode flip when ready (flipping live resets Connect onboarding +
+     saved payment methods — redo those before a live client invoice).
+  #3 Email: SES domain + config set, WorkMail hello@, GoDaddy DNS — Claude
+     drives in Chrome once console.aws.amazon.com is allowed.
+  Legal pack (booking terms, cancellation tiers, talent agreement,
+     privacy policy) with FROST — before real client money.
