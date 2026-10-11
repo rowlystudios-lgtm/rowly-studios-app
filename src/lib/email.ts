@@ -1,12 +1,33 @@
 /**
- * Resend-backed transactional email sender. If RESEND_API_KEY is not set
- * we log a warning and return false — the caller treats email as optional.
+ * Transactional email sender — Amazon SES first, Resend as the fallback.
+ *
+ * Provider selection (no code change needed to switch):
+ *   EMAIL_PROVIDER=ses     → Amazon SES v2 (needs AWS_SES_REGION +
+ *                            AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY,
+ *                            EMAIL_FROM on a verified SES identity,
+ *                            optional SES_CONFIGURATION_SET e.g. "rs-app")
+ *   EMAIL_PROVIDER=resend  → Resend HTTP API (RESEND_API_KEY)
+ *   unset                  → SES if AWS_SES_REGION is set, else Resend
+ *
+ * If neither provider is configured we log a warning and return an error —
+ * the caller treats email as optional.
  */
 
 import { renderBrandedEmail } from '@/lib/emails/template'
 
+type Provider = 'ses' | 'resend' | 'none'
+
+function provider(): Provider {
+  const forced = (process.env.EMAIL_PROVIDER ?? '').toLowerCase()
+  if (forced === 'ses') return process.env.AWS_SES_REGION ? 'ses' : 'none'
+  if (forced === 'resend') return process.env.RESEND_API_KEY ? 'resend' : 'none'
+  if (process.env.AWS_SES_REGION) return 'ses'
+  if (process.env.RESEND_API_KEY) return 'resend'
+  return 'none'
+}
+
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY)
+  return provider() !== 'none'
 }
 
 type EmailAttachment = {
@@ -25,28 +46,107 @@ type SendEmail = {
   attachments?: EmailAttachment[]
 }
 
-// Default to Resend's on-domain sender so emails ship immediately on any
-// Resend account. Once rowlystudios.com is DNS-verified in Resend, set
-// RESEND_FROM="Rowly Studios <noreply@rowlystudios.com>" in Vercel and
-// traffic switches over automatically.
+// EMAIL_FROM is provider-agnostic. RESEND_FROM / RESEND_REPLY_TO remain as
+// legacy fallbacks so an existing Vercel config keeps working untouched.
 const DEFAULT_FROM =
-  process.env.RESEND_FROM ?? 'Rowly Studios <onboarding@resend.dev>'
-const RESEND_REPLY_TO =
-  process.env.RESEND_REPLY_TO || 'rowlystudios@gmail.com'
+  process.env.EMAIL_FROM ??
+  process.env.RESEND_FROM ??
+  'Rowly Studios <onboarding@resend.dev>'
+const DEFAULT_REPLY_TO =
+  process.env.EMAIL_REPLY_TO ||
+  process.env.RESEND_REPLY_TO ||
+  'rowlystudios@gmail.com'
 
-export async function sendTransactionalEmail({
+export async function sendTransactionalEmail(
+  msg: SendEmail
+): Promise<{ id?: string; error?: string }> {
+  const which = provider()
+  if (which === 'none') {
+    // eslint-disable-next-line no-console
+    console.warn('[email] no provider configured (set AWS_SES_REGION or RESEND_API_KEY) — skipping')
+    return { error: 'not_configured' }
+  }
+  return which === 'ses' ? sendViaSes(msg) : sendViaResend(msg)
+}
+
+/* ─────────── Amazon SES v2 ─────────── */
+
+function encodeHeaderWord(s: string): string {
+  // RFC 2047 encode non-ASCII subjects / names.
+  return /^[\x20-\x7e]*$/.test(s)
+    ? s
+    : `=?UTF-8?B?${Buffer.from(s, 'utf8').toString('base64')}?=`
+}
+
+function buildRawMime(msg: SendEmail): string {
+  const boundary = `rs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  const headers = [
+    `From: ${DEFAULT_FROM}`,
+    `To: ${msg.to}`,
+    `Reply-To: ${msg.replyTo ?? DEFAULT_REPLY_TO}`,
+    `Subject: ${encodeHeaderWord(msg.subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+  ].join('\r\n')
+
+  const htmlPart =
+    `--${boundary}\r\n` +
+    'Content-Type: text/html; charset=UTF-8\r\n' +
+    'Content-Transfer-Encoding: base64\r\n\r\n' +
+    Buffer.from(msg.html, 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n') +
+    '\r\n'
+
+  const attachmentParts = (msg.attachments ?? [])
+    .map(
+      (a) =>
+        `--${boundary}\r\n` +
+        `Content-Type: ${a.contentType ?? 'application/octet-stream'}; name="${a.filename}"\r\n` +
+        `Content-Disposition: attachment; filename="${a.filename}"\r\n` +
+        'Content-Transfer-Encoding: base64\r\n\r\n' +
+        a.content.replace(/(.{76})/g, '$1\r\n') +
+        '\r\n'
+    )
+    .join('')
+
+  return `${headers}\r\n\r\n${htmlPart}${attachmentParts}--${boundary}--\r\n`
+}
+
+async function sendViaSes(
+  msg: SendEmail
+): Promise<{ id?: string; error?: string }> {
+  try {
+    const { SESv2Client, SendEmailCommand } = await import('@aws-sdk/client-sesv2')
+    const client = new SESv2Client({ region: process.env.AWS_SES_REGION })
+    const configurationSet = process.env.SES_CONFIGURATION_SET || undefined
+    const out = await client.send(
+      new SendEmailCommand({
+        FromEmailAddress: DEFAULT_FROM,
+        Destination: { ToAddresses: [msg.to] },
+        ReplyToAddresses: [msg.replyTo ?? DEFAULT_REPLY_TO],
+        ...(configurationSet ? { ConfigurationSetName: configurationSet } : {}),
+        Content: {
+          Raw: { Data: Buffer.from(buildRawMime(msg), 'utf8') },
+        },
+      })
+    )
+    return { id: out.MessageId }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[email] ses threw', err)
+    return { error: err instanceof Error ? err.message : 'ses_failed' }
+  }
+}
+
+/* ─────────── Resend (legacy fallback) ─────────── */
+
+async function sendViaResend({
   to,
   subject,
   html,
   replyTo,
   attachments,
 }: SendEmail): Promise<{ id?: string; error?: string }> {
-  const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey) {
-    // eslint-disable-next-line no-console
-    console.warn('[email] RESEND_API_KEY not configured — skipping')
-    return { error: 'not_configured' }
-  }
+  const apiKey = process.env.RESEND_API_KEY as string
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -59,7 +159,7 @@ export async function sendTransactionalEmail({
         to: [to],
         subject,
         html,
-        reply_to: replyTo ?? RESEND_REPLY_TO,
+        reply_to: replyTo ?? DEFAULT_REPLY_TO,
         attachments: attachments?.map((a) => ({
           filename: a.filename,
           content: a.content,

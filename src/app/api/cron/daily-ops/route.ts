@@ -144,9 +144,10 @@ export async function GET(req: NextRequest) {
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
     problems.push('stripe: STRIPE_WEBHOOK_SECRET is not set');
   }
-  if (!process.env.RESEND_API_KEY) {
-    problems.push('email: RESEND_API_KEY is not set');
+  if (!process.env.AWS_SES_REGION && !process.env.RESEND_API_KEY) {
+    problems.push('email: no provider configured (AWS_SES_REGION or RESEND_API_KEY)');
   }
+  report.emailProvider = process.env.AWS_SES_REGION ? 'ses' : 'resend';
 
   try {
     const twoDaysAgo = new Date(Date.now() - 2 * 86400_000).toISOString();

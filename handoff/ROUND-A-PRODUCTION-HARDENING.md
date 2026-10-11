@@ -113,14 +113,53 @@ APP STORE READINESS (beyond TestFlight — add before public release):
     app.rowlystudios.com works on their phones today. TestFlight is for
     Rowly's own iOS view.
 
-REMAINING — Rowly's secure terminal blocks (keys never in chat):
-  TestFlight: bash /tmp/rs-testflight.sh (guarded; say YES to creating
-     project @rowlyinla/rs-app).
-  #1 Stripe: roll the exposed test secret key; subscribe the
-     checkout.session.completed webhook (Part 2 of the Phase A block);
-     live-mode flip when ready (flipping live resets Connect onboarding +
-     saved payment methods — redo those before a live client invoice).
-  #3 Email: SES domain + config set, WorkMail hello@, GoDaddy DNS — Claude
-     drives in Chrome once console.aws.amazon.com is allowed.
-  Legal pack (booking terms, cancellation tiers, talent agreement,
-     privacy policy) with FROST — before real client money.
+TESTFLIGHT STATUS (verified on expo.dev, 11 Oct 11:20 PT): EAS project
+  @rowlyinla/rs-app EXISTS (created by the guarded block) but has ZERO
+  builds. @rowlyinla/BABY-LIGHT has "iOS App Store build 1.0.0 (1),
+  succeeded ~12h ago" — that is LUMADOODLE. Any TestFlight email received
+  so far is Lumadoodle's, not RS App's. RS App has not been built yet.
+
+REMAINING — Rowly's secure terminal block (keys never in chat). This is
+the complete block; it is idempotent and safe to re-run:
+
+```bash
+cat > /tmp/rs-round-a.sh <<'RSEOF'
+#!/bin/bash
+set -e
+WRAP="$(find ~/Desktop ~/Documents ~/Developer ~/Downloads -maxdepth 5 -type d -path '*rowly-studios-app/ios-wrapper' 2>/dev/null | head -1)"
+if [ -z "$WRAP" ]; then
+  git clone https://github.com/rowlystudios-lgtm/rowly-studios-app ~/Desktop/rowly-studios-app
+  WRAP=~/Desktop/rowly-studios-app/ios-wrapper
+fi
+REPO="$WRAP/.."; git -C "$REPO" pull --ff-only || true
+cd "$WRAP"
+node -e 'const a=require("./app.json").expo; if(a.slug!=="rs-app"||a.ios.bundleIdentifier!=="com.rowlystudios.rsapp"){console.error("✗ not the RS App wrapper");process.exit(1)}; console.log("✓ RS App wrapper:",a.slug,a.ios.bundleIdentifier)'
+echo "── PART 1 · RS App TestFlight (project @rowlyinla/rs-app — say YES if asked to create it) ──"
+npm ci --no-audit --no-fund
+npx -y eas-cli@latest whoami || npx -y eas-cli@latest login
+npx -y eas-cli@latest build --platform ios --profile production --auto-submit
+cd "$REPO"
+echo "── PART 2 · Stripe TEST-mode: rotate the exposed key + subscribe the webhook ──"
+echo "Stripe Dashboard (TEST mode): Developers → API keys → Secret key → Roll key → copy sk_test_…"
+echo "Developers → Webhooks → endpoint https://app.rowlystudios.com/api/stripe/webhook with events:"
+echo "checkout.session.completed, invoice.payment_succeeded, invoice.payment_failed, invoice.voided,"
+echo "invoice.marked_uncollectible, account.updated, transfer.created → copy Signing secret whsec_…"
+read -p "Press Enter when both are copied… "
+read -rs -p "NEW Stripe TEST secret key (hidden): " SK; echo
+case "$SK" in sk_test_*) echo "✓ test-mode key";; sk_live_*) echo "✗ LIVE key — this part is test-mode only"; exit 1;; *) echo "✗ not a Stripe secret key"; exit 1;; esac
+read -rs -p "Webhook signing secret (hidden): " WH; echo
+case "$WH" in whsec_*) echo "✓ signing secret";; *) echo "✗ not whsec_"; exit 1;; esac
+npx -y vercel@latest whoami || npx -y vercel@latest login
+npx -y vercel@latest link --yes --scope rowlyinla-8449s-projects --project rowly-studios-app
+for N in STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET; do npx -y vercel@latest env rm "$N" production --yes >/dev/null 2>&1 || true; done
+printf '%s' "$SK" | npx -y vercel@latest env add STRIPE_SECRET_KEY production
+printf '%s' "$WH" | npx -y vercel@latest env add STRIPE_WEBHOOK_SECRET production
+unset SK WH
+git commit --allow-empty -m "chore: redeploy with rotated Stripe keys" && git push || echo "⚠ push needs GitHub auth — ask Claude to trigger the redeploy"
+echo "✓ Done. TestFlight processes in App Store Connect (~10 min after upload); open the TestFlight app → RS App."
+RSEOF
+bash /tmp/rs-round-a.sh
+```
+
+  Then: Round A2 (email on Amazon) → Round A3 (Stripe live flip) → legal pack
+  with FROST (LEGAL-PACK-BRIEF.md) — before real client money.

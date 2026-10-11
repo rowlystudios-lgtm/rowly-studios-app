@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1149.0",
     "@googleapis/drive": "^20.1.0",
     "@googleapis/sheets": "^13.0.1",
     "@sparticuz/chromium": "^147.0.1",
