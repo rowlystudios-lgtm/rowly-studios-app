@@ -1,14 +1,17 @@
 'use server'
 
 import { createServiceClient } from '@/lib/supabase-service'
+import { lookupWelcomeInvite } from '@/lib/welcome-tokens'
 
 type CreateAccountArgs = {
   email: string
   password: string
   firstName: string
   lastName: string
-  role: 'talent' | 'client' | 'admin'
+  role: 'talent' | 'client'
   companyName?: string
+  /** Welcome-invite token from the invite email (?invite=…). Required for talent. */
+  inviteToken?: string
 }
 
 type CreateAccountResult =
@@ -19,18 +22,19 @@ export type { CreateAccountResult }
 
 /**
  * Server-side account creation. Used by:
- *   - /login Create-account form (self-serve signup)
  *   - /login Create-account form when a welcome invite is in the URL
+ *   - /login Create-account form for client self-serve signup
  *
- * If the user already exists (pre-existing partial account from earlier
- * broken flows, or a re-application), we OVERWRITE the password +
- * metadata via auth.admin.updateUserById rather than failing — this
- * makes the welcome-invite flow recoverable.
- *
- * Profile/client_profiles/invite-acknowledgement work no longer happens
- * here. The handle_new_user trigger seeds full_name from metadata; any
- * additional row setup is the caller's responsibility (or relies on a
- * richer DB trigger that reads role/first_name/etc from metadata).
+ * Security model (Phase A hardening):
+ *   - 'admin' can never be created or assigned through this action.
+ *   - Talent accounts REQUIRE a valid, unconsumed welcome invite whose
+ *     email matches — the website application + invite email is the gate.
+ *   - When an invite is present, the role comes from the invite, never
+ *     from the caller.
+ *   - An existing account is only ever updated (password + metadata) when
+ *     a valid invite for that exact email is presented AND the existing
+ *     account is not an admin. This keeps the invite flow recoverable
+ *     after a half-created signup without allowing account takeover.
  */
 export async function createAccount(
   args: CreateAccountArgs
@@ -53,16 +57,56 @@ export async function createAccount(
     }
   }
 
+  // Hard guard: this action can never mint or touch an admin, even if the
+  // type signature is bypassed by a hand-crafted request.
+  if ((args.role as string) === 'admin') {
+    return { ok: false, error: 'This account type cannot be created here.', code: 'other' }
+  }
+
+  // Resolve the welcome invite, if one was presented.
+  let invite: Awaited<ReturnType<typeof lookupWelcomeInvite>> | null = null
+  if (args.inviteToken) {
+    invite = await lookupWelcomeInvite(args.inviteToken)
+    if (invite.state !== 'valid') {
+      const why =
+        invite.state === 'consumed'
+          ? 'This invite has already been used. Sign in instead.'
+          : invite.state === 'expired'
+            ? 'This invite has expired. Contact Rowly Studios for a new one.'
+            : 'This invite link is not valid.'
+      return { ok: false, error: why, code: 'other' }
+    }
+    if (invite.email.trim().toLowerCase() !== email) {
+      return {
+        ok: false,
+        error: 'This invite was issued for a different email address.',
+        code: 'other',
+      }
+    }
+  }
+
+  // The role is the invite's role when an invite is present. Talent can
+  // only ever arrive through an invite.
+  const role: 'talent' | 'client' =
+    invite && invite.state === 'valid' ? invite.type : args.role
+
+  if (role === 'talent' && !(invite && invite.state === 'valid')) {
+    return {
+      ok: false,
+      error:
+        'Talent accounts are created from your invite email. Apply on the Rowly Studios website to get one.',
+      code: 'other',
+    }
+  }
+
   const metadata = {
     first_name: first,
     last_name: last,
     full_name: `${first} ${last}`,
-    role: args.role,
+    role,
     company_name: args.companyName ?? null,
   }
 
-  // Try to create the user. If they already exist, update their
-  // password instead so welcome invites are robust to retries.
   const { data: createData, error: createErr } =
     await service.auth.admin.createUser({
       email,
@@ -89,10 +133,21 @@ export async function createAccount(
       return { ok: false, error: createErr.message, code: 'other' }
     }
 
-    // User exists — look them up and overwrite password + metadata.
+    // User exists. Recovery (password + metadata overwrite) is allowed
+    // ONLY with a valid invite for this exact email, and never against an
+    // admin account. Without an invite this is a plain duplicate signup.
+    if (!(invite && invite.state === 'valid')) {
+      return {
+        ok: false,
+        error:
+          'An account with this email already exists. Sign in instead, or use "Forgot password".',
+        code: 'other',
+      }
+    }
+
     const { data: prof } = await service
       .from('profiles')
-      .select('id')
+      .select('id, role')
       .eq('email', email)
       .maybeSingle()
 
@@ -101,6 +156,13 @@ export async function createAccount(
       return {
         ok: false,
         error: 'Account exists but could not be located. Contact support.',
+        code: 'other',
+      }
+    }
+    if (prof?.role === 'admin') {
+      return {
+        ok: false,
+        error: 'An account with this email already exists. Sign in instead.',
         code: 'other',
       }
     }

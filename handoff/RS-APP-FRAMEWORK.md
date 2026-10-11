@@ -20,7 +20,7 @@ Phases 1–9 shipped (Apr–Jul 2026). Full booking → invoice → payment path
 
 ## 3 · Open decisions (Rowly)
 
-1. **Rate floor:** app enforces $300/day; business rule says $450/day. Pick one; align slider, DB constraint and copy.
+1. **Rate floor — resolved 11 Oct:** $300/day. Locked at DB level (`talent_rate_floor_min` on `rate_floor_cents`, matching the existing `talent_day_rate_min`) and sliders unified to $300–$1,500 / $25 steps.
 2. **Gmail drafts:** app unverified, `gmail.compose` is Restricted (test-user workaround, tokens can lapse). Pursue Google verification, or send invoices via Resend with a copy to rowlystudios@gmail.com.
 3. **Safeguard runtime — resolved 11 Oct:** the referenced guide maps to Claude Managed Agents; adopted as the runtime for the §5 pipelines.
 

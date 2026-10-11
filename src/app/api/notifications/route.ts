@@ -97,20 +97,16 @@ function badRequest(msg: string) {
 }
 
 async function isAuthorized(req: NextRequest): Promise<boolean> {
-  // Header-secret path (cron, server-to-server).
+  // Header-secret only (cron + trusted server-to-server callers). This
+  // dispatcher can fan out emails to arbitrary clients, so browser
+  // sessions must not be able to call it — all in-app callers are server
+  // actions that already send x-cron-secret.
   const secret = process.env.CRON_SECRET
   const headerSecret =
     req.headers.get('x-cron-secret') ||
     req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
     ''
-  if (secret && headerSecret === secret) return true
-
-  // Authenticated-user path (server actions using cookies).
-  const supabase = createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  return Boolean(user)
+  return Boolean(secret && headerSecret === secret)
 }
 
 /* ─── job-wrapped-to-client ─── */

@@ -39,3 +39,43 @@ DECIDED — DON'T REOPEN: 15% fee hidden from client UI · email-only notificati
 NEXT ROUND AFTER A — "PHASE B: SEED SUPPLY" (preview, do not build yet):
   Talent promo kit (reel link → branded 4×5/9×16 share card with Book now short
   link from share_code, UTM-tagged) · brief-intake pipeline · Monday scorecard.
+
+────────────────────────────────────────────────────────────────────────
+EXECUTION LOG — 11 Oct 2026 (run by Claude from chat; approved by Rowly)
+
+DONE #2 — Auto-invoice on wrap: wrapping a job now completes its confirmed
+  bookings and generates the Stripe invoice draft (idempotent; admin is
+  emailed the blocker if generation fails). Backstopped by a unique
+  active-invoice-per-job index.
+DONE #4 — /api/cron/daily-ops (daily, 0 15 * * * UTC): releases expired
+  booking grace windows (RPC existed, was never scheduled), EXECUTES talent
+  payout transfers after the 5-day hold (this money-moving step did not
+  exist before this round; webhook handleTransferCreated completes it),
+  runs money-path smoke checks, and emails the admin on any problem plus
+  an all-green summary every Monday.
+DONE #5 — Rate floor locked at $300: DB constraint talent_rate_floor_min,
+  profile-edit slider unified to 300–1500/$25 (migration
+  supabase/migrations/20261011_phase_a_hardening.sql, applied live).
+SECURITY (found in this round's audit, fixed):
+  - createAccount hardened: 'admin' can never be created or assigned; talent
+    signup requires a valid welcome invite matching the email; existing
+    accounts are only recoverable with a valid invite and never when the
+    target is the admin (closes an unauthenticated admin-mint / password-
+    takeover hole).
+  - /api/notifications restricted to CRON_SECRET (was: any logged-in user).
+  - RLS: clients can no longer move a job's status past submitted.
+  - /admin is blocked inside the iOS wrapper (RSAppiOS user agent) — the
+    admin overview is website-only, per the operating rule.
+ADDED — ios-wrapper/: Expo WebView app over app.rowlystudios.com
+  (bundle com.rowlystudios.rsapp, Expo owner rowlyinla, Apple team
+  QQ2URK7777, ITSAppUsesNonExemptEncryption=false). Built + submitted to
+  TestFlight via the secure terminal block.
+
+REMAINING — Rowly's secure terminal block (keys never in chat):
+  #1 Stripe: roll the exposed test secret key now; subscribe the
+     checkout.session.completed webhook; live-mode flip when ready
+     (note: flipping live resets Connect onboarding + saved payment
+     methods to live mode — redo those before a live test booking).
+  #3 Resend: verify rowlystudios.com sending domain; finish hello@
+     forwarding in GoDaddy.
+  EAS: eas build --platform ios --auto-submit from ios-wrapper/.

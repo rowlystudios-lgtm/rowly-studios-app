@@ -60,6 +60,13 @@ export async function middleware(request: NextRequest) {
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/')
   const isAppRoute = pathname === '/app' || pathname.startsWith('/app/')
 
+  // Admin is a desktop-web surface only. The iOS wrapper's WebView appends
+  // "RSAppiOS" to its User-Agent, so /admin is never served inside the app —
+  // the overview stays on the website (laptop), per the operating rule.
+  if (isAdminRoute && (request.headers.get('user-agent') ?? '').includes('RSAppiOS')) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
   if (isAdminRoute && !user) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

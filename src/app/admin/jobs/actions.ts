@@ -11,6 +11,8 @@ import {
   notifyFullyCrewed,
   notifyCounterOffer,
 } from '@/lib/notifications'
+import { generateInvoiceDraft } from '@/lib/stripe/invoice-generator'
+import { sendTransactionalEmail } from '@/lib/email'
 
 type JobStatus = 'crewing' | 'submitted' | 'confirmed' | 'wrapped' | 'cancelled'
 
@@ -24,7 +26,7 @@ const ALLOWED_JOB_STATUS: JobStatus[] = [
 
 /** Update a job's status. Stamps cancelled_at / wrapped_at when appropriate. */
 export async function updateJobStatus(formData: FormData) {
-  const { supabase } = await requireAdmin()
+  const { supabase, profile } = await requireAdmin()
   const jobId = (formData.get('jobId') as string) ?? ''
   const next = ((formData.get('status') as string) ?? '') as JobStatus
   if (!jobId || !ALLOWED_JOB_STATUS.includes(next)) return
@@ -45,10 +47,76 @@ export async function updateJobStatus(formData: FormData) {
     } catch {
       // non-fatal
     }
+
+    // Phase A: wrapping a job completes its confirmed bookings and
+    // auto-generates the Stripe invoice draft (previously manual-only).
+    // A generation failure never blocks the wrap — the admin is emailed
+    // the reason instead.
+    try {
+      await autoGenerateInvoiceOnWrap(supabase, jobId, {
+        id: profile.id,
+        email: profile.email ?? null,
+      })
+    } catch (e) {
+      console.error('[updateJobStatus] auto-invoice on wrap failed:', e)
+    }
   }
 
   revalidatePath(`/admin/jobs/${jobId}`)
   revalidatePath('/admin/jobs')
+}
+
+/**
+ * Phase A auto-invoice: fired when a job is wrapped.
+ *  1. Cascades the job's confirmed bookings to 'completed' (the invoice
+ *     generator only bills completed bookings).
+ *  2. Generates the Stripe invoice draft idempotently — the generator
+ *     refuses if a Stripe-linked invoice already exists for the job, and
+ *     the invoices_one_active_per_job index backstops races.
+ *  3. On any other failure, emails the admin the blocker so it never
+ *     dies silently (pre-mortem #7).
+ */
+async function autoGenerateInvoiceOnWrap(
+  supabase: Awaited<ReturnType<typeof requireAdmin>>['supabase'],
+  jobId: string,
+  admin: { id: string; email: string | null }
+) {
+  const { error: cascadeErr } = await supabase
+    .from('job_bookings')
+    .update({ status: 'completed' })
+    .eq('job_id', jobId)
+    .eq('status', 'confirmed')
+
+  if (cascadeErr) {
+    console.error('[autoGenerateInvoiceOnWrap] booking cascade failed:', cascadeErr.message)
+  }
+
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.rowlystudios.com'
+
+  const result = await generateInvoiceDraft(supabase, {
+    jobId,
+    createdByUserId: admin.id,
+    baseUrl,
+  })
+
+  if (!result.ok && result.reason !== 'invoice_already_exists') {
+    const to = admin.email ?? 'rowlystudios@gmail.com'
+    try {
+      await sendTransactionalEmail({
+        to,
+        subject: 'RS App — invoice did not auto-generate on wrap',
+        html:
+          `<p>The job was wrapped, but its invoice draft could not be created.</p>` +
+          `<p><strong>Job:</strong> ${jobId}</p>` +
+          `<p><strong>Reason:</strong> ${result.reason}</p>` +
+          `<p>${result.message}</p>` +
+          `<p>Fix the blocker, then wrap again or generate the invoice from the job card.</p>`,
+      })
+    } catch (e) {
+      console.error('[autoGenerateInvoiceOnWrap] admin alert email failed:', e)
+    }
+  }
 }
 
 /**

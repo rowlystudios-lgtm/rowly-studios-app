@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "RS App",
+    "slug": "rs-app",
+    "owner": "rowlyinla",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "rsapp",
+    "backgroundColor": "#496275",
+    "ios": {
+      "bundleIdentifier": "com.rowlystudios.rsapp",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.rowlystudios.rsapp",
+      "adaptiveIcon": {
+        "backgroundColor": "#496275",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

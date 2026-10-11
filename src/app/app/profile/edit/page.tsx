@@ -261,7 +261,7 @@ export default function EditProfilePage() {
   const rateFloorDollars = Math.round(form.rate_floor_cents / 100)
   // $300 is the platform-wide floor: any talent rate below this is invalid.
   const sliderMin = 300
-  const sliderMax = 1000
+  const sliderMax = 1500
   const sliderPct = ((rateFloorDollars - sliderMin) / (sliderMax - sliderMin)) * 100
 
   return (
@@ -520,7 +520,7 @@ export default function EditProfilePage() {
               type="range"
               min={sliderMin}
               max={sliderMax}
-              step={50}
+              step={25}
               value={rateFloorDollars}
               onChange={(e) =>
                 update('rate_floor_cents', Math.round(parseInt(e.target.value, 10) * 100))

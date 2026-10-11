@@ -297,8 +297,9 @@ function LoginInner() {
       password,
       firstName: first,
       lastName: last,
-      role: selectedRole as 'talent' | 'client' | 'admin',
+      role: selectedRole as 'talent' | 'client',
       companyName: company || undefined,
+      inviteToken: urlInvite ?? undefined,
     })
 
     if (!res.ok) {
