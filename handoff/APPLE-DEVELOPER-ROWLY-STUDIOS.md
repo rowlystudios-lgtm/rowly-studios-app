@@ -20,13 +20,15 @@ support pages.
 - A public, functional website on the organization's domain (rowlystudios.com — yes).
 - **US$99 per membership year.** This is a second membership alongside Yummy's.
 
-## Which login to use — the answer
-Use a **new Apple Account on the Rowly Studios domain**: `rowly@rowlystudios.com`
-(a free alias on the hello@ WorkMail mailbox from Round A2), name Rowly Dennis,
-2FA on. Not rowlyinla@googlemail.com (that account holds the Yummy membership — Apple
-enrolls one membership per Apple Account, and it is the wrong entity), and not
-rowlystudios@gmail.com (not on the organization's domain, which Apple checks).
-The same Apple Account is used for the D-U-N-S lookup/request and the enrollment.
+## Which login to use — decided 12 Oct 2026
+Rowly enrolls with the Apple Account **rowlystudios@gmail.com** (name Rowly Dennis,
+2FA on). Not rowlyinla@googlemail.com — that account holds the Yummy membership,
+Apple enrolls one membership per Apple Account, and it is the wrong entity.
+One requirement to prepare for: the enrollment form's **work email must be on the
+organization's domain** — so have `hello@rowlystudios.com` (Round A2) live before
+enrolling and enter it there; the Apple Account itself can stay the gmail address.
+Use the same Apple Account for the D-U-N-S lookup/request and the enrollment.
+`ios-wrapper/eas.json` already targets this account (`submit.production.ios.appleId`).
 rowlyinla@googlemail.com can be invited to the new team later as Admin if useful —
 one Apple Account can belong to several teams; it just can't *hold* two memberships.
 

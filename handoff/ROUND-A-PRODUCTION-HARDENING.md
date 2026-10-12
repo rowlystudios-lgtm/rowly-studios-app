@@ -163,3 +163,45 @@ bash /tmp/rs-round-a.sh
 
   Then: Round A2 (email on Amazon) → Round A3 (Stripe live flip) → legal pack
   with FROST (LEGAL-PACK-BRIEF.md) — before real client money.
+
+────────────────────────────────────────────────────────────────────────
+12 Oct 2026 — TESTFLIGHT TARGET DECISION + PATH
+
+DECISION (Rowly): the RS App TestFlight goes to a NEW Apple Developer account
+  for Rowly Studios Inc., enrolled with Apple Account rowlystudios@gmail.com —
+  not Yummy's team QQ2URK7777. ios-wrapper/eas.json now sets
+  submit.production.ios.appleId = rowlystudios@gmail.com and no appleTeamId
+  (EAS uses the account's only team). Expo project stays @rowlyinla/rs-app
+  (the Expo account and the Apple team are independent).
+
+PATH TO THE FIRST RS APP TESTFLIGHT (in order):
+  1. Enroll Rowly Studios Inc. (APPLE-DEVELOPER-ROWLY-STUDIOS.md): D-U-N-S
+     lookup/request → enrollment → $99. Apple requires a work email on the
+     organization's domain on the form, so have hello@rowlystudios.com (or an
+     alias) live first → Round A2 step 2. Realistic: 1½–2 weeks.
+  2. When Apple approves: run /tmp/rs-round-a.sh above. At the Apple login
+     prompt use rowlystudios@gmail.com. EAS registers com.rowlystudios.rsapp
+     under the NEW team, creates the App Store Connect record and uploads.
+     If EAS reports the bundle ID is already registered to another team:
+     Yummy's developer portal → Identifiers → delete com.rowlystudios.rsapp
+     (nothing uses it) → re-run.
+  3. App Store Connect (rowlystudios@gmail.com) → TestFlight → RS App → the
+     build appears after ~10 min processing. Add yourself as an internal
+     tester (App Store Connect user, no review needed) → TestFlight app on
+     the iPhone → install. External testers (clients) need Beta App Review
+     on the first build (1–2 days) — but clients don't need TestFlight.
+  MEANWHILE (the shoot): Safari → app.rowlystudios.com → Share → Add to
+     Home Screen. The PWA runs standalone with the app icon — same product,
+     no App Store involved. Clients and talent use it the same way.
+  FAST PATH if the decision changes: run the block today, log in as
+     rowlyinla@googlemail.com, TestFlight lands under Yummy's team; move
+     later (APPLE-DEVELOPER-ROWLY-STUDIOS.md "Moving what already exists").
+
+INCIDENT — stale clone: a Claude Code (Opus 5.5) session committed
+  1f547e3 "remove redundant Request-for-a-job button" on top of b2c6b3d,
+  four commits BEHIND origin/main (0253f36). The change itself is fine and
+  touches only src/app/app/roster/[id]/page.tsx (no overlap with Phase A).
+  Rule, now standing: every session runs `git fetch origin && git rebase
+  origin/main` before committing or pushing, and never force-pushes main.
+  Instruction given for that session:
+    git fetch origin && git rebase origin/main && npx tsc --noEmit && git push origin main
